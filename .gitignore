@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+backend/.venv/
+.cotrace_work/
+backend/.cotrace_work/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Env
+.env
+
+# Local editor settings
+.vscode/
+
+# Raw manufacturing logs / uploaded datasets
+Log_Files_Folder/

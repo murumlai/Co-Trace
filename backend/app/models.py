@@ -1,0 +1,65 @@
+"""Pydantic schemas shared across the API."""
+from __future__ import annotations
+
+from typing import Literal, Optional
+
+from pydantic import BaseModel
+
+Result = Literal["PASS", "FAIL", "UNKNOWN"]
+
+
+class StepRecord(BaseModel):
+    name: str
+    result: Result = "UNKNOWN"
+    duration_s: float = 0.0
+
+
+class UnitRecord(BaseModel):
+    """Normalized per-unit record emitted by the preprocessor."""
+
+    unit_id: str                       # stable id for a single test run
+    serial_number: Optional[str] = None
+    product_code: Optional[str] = None
+    lot_id: Optional[str] = None
+    op_id: Optional[str] = None
+    station_id: Optional[str] = None
+    host: Optional[str] = None
+    start_time: Optional[str] = None   # ISO-8601
+    end_time: Optional[str] = None     # ISO-8601
+    duration_s: float = 0.0
+    result: Result = "UNKNOWN"
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    steps: list[StepRecord] = []
+    source_files: list[str] = []
+    run_folder: str = ""
+
+    # Engineer analysis (populated lazily for failed units only)
+    signature: Optional[str] = None
+    root_cause: Optional[str] = None
+    suggested_solution: Optional[str] = None
+    redacted_snippet: Optional[str] = None
+    analysis_source: Optional[str] = None  # "llm" | "stub" | "cached"
+
+
+class JobProgress(BaseModel):
+    processed: int = 0
+    total: int = 0
+
+
+class JobStatus(BaseModel):
+    job_id: str
+    status: Literal["pending", "running", "done", "error"] = "pending"
+    progress: JobProgress = JobProgress()
+    message: str = ""
+    unit_count: int = 0
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    token: str
+    username: str

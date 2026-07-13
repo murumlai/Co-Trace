@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background-color: #e0e5ec;
+  color: #3d4852;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display {
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+}
+
+/* Accessible focus ring on the cool base surface */
+.focus-ring:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #e0e5ec, 0 0 0 4px #6c63ff;
+}
