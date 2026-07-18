@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { api } from '../api'
-import { Button, Card, IconWell } from '../components/ui'
+import { Badge, Button, Card, IconWell, SectionLabel } from '../components/ui'
 
 // Reads a browser file's relative path (folder uploads set webkitRelativePath).
 function relPath(file) {
@@ -83,18 +83,33 @@ export default function Home({ onJobReady }) {
   const pct = progress && progress.total ? Math.round((progress.processed / progress.total) * 100) : 0
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-12">
-      <div className="text-center mb-10">
-        <h1 className="font-display text-4xl md:text-5xl font-extrabold tracking-tight text-ink">
-          Upload test logs
-        </h1>
-        <p className="mt-3 text-muted max-w-xl mx-auto">
-          Drop a folder of manufacturing logs, or pick individual files. The same
-          batch powers both the Engineer and Manager views.
-        </p>
+    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:py-16">
+      <div className="grid items-end gap-8 lg:grid-cols-[1.1fr_0.9fr]">
+        <div>
+          <SectionLabel>Batch Intake</SectionLabel>
+          <h1 className="mt-5 max-w-3xl font-display text-4xl leading-tight text-foreground md:text-6xl">
+            Turn raw tester logs into <span className="gradient-text">actionable yield signals</span>
+          </h1>
+          <p className="mt-5 max-w-2xl text-lg leading-8 text-muted">
+            Drop a folder or select files. The same batch powers engineer diagnostics and manager analytics.
+          </p>
+        </div>
+        <div className="rounded-card bg-foreground p-6 text-white shadow-lift dot-texture">
+          <div className="font-mono text-xs uppercase tracking-[0.15em] text-white/60">Current workflow</div>
+          <div className="mt-5 grid grid-cols-3 gap-3 text-center">
+            {['Upload', 'Analyze', 'Review'].map((step, index) => (
+              <div key={step} className="rounded-xl border border-white/10 bg-white/5 p-4">
+                <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-secondary text-sm font-bold shadow-accent">
+                  {index + 1}
+                </div>
+                <div className="mt-3 text-sm font-semibold">{step}</div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
-      <Card className="p-8 md:p-12">
+      <Card className="mt-10 p-5 shadow-lift md:p-8">
         <div
           onDragOver={(e) => {
             e.preventDefault()
@@ -103,24 +118,24 @@ export default function Home({ onJobReady }) {
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
           className={[
-            'rounded-card p-10 md:p-16 text-center transition-all duration-300',
-            dragging ? 'bg-base shadow-inset-deep' : 'bg-base shadow-inset',
+            'rounded-card border-2 border-dashed p-8 text-center transition-all duration-300 md:p-14',
+            dragging ? 'border-accent bg-accent/5 shadow-accent' : 'border-border bg-surface/60',
           ].join(' ')}
         >
-          <IconWell className="h-20 w-20 mx-auto mb-6">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#6C63FF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <IconWell className="mx-auto mb-6 h-16 w-16">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="17 8 12 3 7 8" />
               <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
           </IconWell>
-          <p className="font-display text-lg font-semibold text-ink">
+          <p className="font-display text-2xl text-foreground">
             {dragging ? 'Drop to add files' : 'Drag & drop logs here'}
           </p>
-          <p className="mt-1 text-sm text-muted">or choose below</p>
+          <p className="mt-2 text-sm text-muted">Choose a folder for best path preservation, or upload individual files.</p>
 
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-            <Button onClick={() => folderInput.current?.click()}>Select folder</Button>
+            <Button variant="primary" onClick={() => folderInput.current?.click()}>Select folder</Button>
             <Button onClick={() => fileInput.current?.click()}>Select files</Button>
           </div>
 
@@ -143,12 +158,12 @@ export default function Home({ onJobReady }) {
         </div>
 
         {files.length > 0 && (
-          <div className="mt-6 flex items-center justify-between rounded-2xl bg-base shadow-inset-sm px-5 py-4">
-            <span className="text-sm text-ink font-medium">
+          <div className="mt-6 flex items-center justify-between rounded-xl border border-border bg-surface px-5 py-4">
+            <span className="text-sm font-semibold text-foreground">
               {files.length} file{files.length === 1 ? '' : 's'} ready
             </span>
             <button
-              className="text-sm text-muted hover:text-ink focus-ring rounded-lg px-2 py-1"
+              className="rounded-lg px-2 py-1 text-sm text-muted hover:text-foreground focus-ring"
               onClick={() => setFiles([])}
             >
               Clear
@@ -162,9 +177,9 @@ export default function Home({ onJobReady }) {
               <span>{progress.message || progress.status}</span>
               <span>{pct}%</span>
             </div>
-            <div className="h-4 rounded-full bg-base shadow-inset-sm overflow-hidden">
+            <div className="h-3 overflow-hidden rounded-full bg-surface">
               <div
-                className="h-full rounded-full bg-accent transition-all duration-500"
+                className="h-full rounded-full bg-gradient-to-r from-accent to-accent-secondary transition-all duration-500"
                 style={{ width: `${pct}%` }}
               />
             </div>
@@ -172,12 +187,13 @@ export default function Home({ onJobReady }) {
         )}
 
         {error && (
-          <div className="mt-6 rounded-2xl bg-base shadow-inset-sm px-4 py-3 text-sm text-danger">
+          <div className="mt-6 rounded-xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
             {error}
           </div>
         )}
 
-        <div className="mt-8 flex justify-center">
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+          <Badge tone="accent">Offline stub ready</Badge>
           <Button variant="primary" onClick={start} disabled={!files.length || uploading}>
             {uploading ? 'Processing…' : 'Process batch'}
           </Button>

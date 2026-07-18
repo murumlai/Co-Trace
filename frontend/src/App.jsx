@@ -31,10 +31,10 @@ function Shell() {
         setMenuOpen(false)
       }}
       className={[
-        'rounded-2xl px-5 py-2.5 text-sm font-medium transition-all duration-300 focus-ring',
+        'rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-200 focus-ring',
         tab === id
-          ? 'bg-base text-accent shadow-inset'
-          : 'bg-base text-muted shadow-extruded-sm hover:-translate-y-px',
+          ? 'bg-accent text-white shadow-accent'
+          : 'text-muted hover:bg-surface hover:text-foreground',
       ].join(' ')}
     >
       {label}
@@ -42,35 +42,38 @@ function Shell() {
   )
 
   return (
-    <div className="min-h-screen">
-      <header className="sticky top-0 z-20 backdrop-blur-sm">
-        <div className="mx-auto max-w-7xl px-6 py-4">
-          <div className="flex items-center justify-between rounded-card bg-base shadow-extruded px-5 py-3">
+    <div className="min-h-screen overflow-hidden bg-background text-foreground">
+      <header className="sticky top-0 z-20 border-b border-border/70 bg-background/85 backdrop-blur-xl">
+        <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-base shadow-inset-deep">
-                <span className="font-display text-sm font-extrabold text-accent">CT</span>
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-accent to-accent-secondary text-white shadow-accent">
+                <span className="font-display text-sm">CT</span>
               </div>
-              <span className="font-display font-bold text-ink hidden sm:block">Co_Trace</span>
+              <div className="hidden sm:block">
+                <div className="font-display text-xl text-foreground">Co_Trace</div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted">Manufacturing intelligence</div>
+              </div>
             </div>
 
-            <nav className="hidden md:flex items-center gap-3">
+            <nav className="hidden items-center gap-2 rounded-2xl border border-border bg-card p-1 shadow-soft md:flex">
               {TABS.map(([id, label]) => (
                 <NavButton key={id} id={id} label={label} />
               ))}
             </nav>
 
             <div className="hidden md:flex items-center gap-4">
-              <span className="text-sm text-muted">{username || 'user'}</span>
+              <span className="font-mono text-xs uppercase tracking-[0.15em] text-muted">{username || 'user'}</span>
               <button
                 onClick={logout}
-                className="rounded-2xl bg-base px-4 py-2 text-sm text-muted shadow-extruded-sm hover:-translate-y-px hover:text-ink transition-all duration-300 focus-ring"
+                className="rounded-xl border border-border bg-card px-4 py-2 text-sm font-semibold text-muted shadow-soft transition-all duration-200 hover:-translate-y-0.5 hover:text-foreground focus-ring"
               >
                 Sign out
               </button>
             </div>
 
             <button
-              className="md:hidden flex h-11 w-11 items-center justify-center rounded-2xl bg-base shadow-extruded-sm focus-ring"
+              className="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-card text-foreground shadow-soft focus-ring md:hidden"
               onClick={() => setMenuOpen((o) => !o)}
               aria-label="Toggle menu"
             >
@@ -79,13 +82,13 @@ function Shell() {
           </div>
 
           {menuOpen && (
-            <div className="md:hidden mt-3 rounded-card bg-base shadow-extruded p-4 flex flex-col gap-3">
+            <div className="mt-3 flex flex-col gap-3 rounded-card border border-border bg-card p-4 shadow-lift md:hidden">
               {TABS.map(([id, label]) => (
                 <NavButton key={id} id={id} label={label} />
               ))}
               <button
                 onClick={logout}
-                className="rounded-2xl bg-base px-4 py-2.5 text-sm text-muted shadow-inset-sm focus-ring"
+                className="rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-muted focus-ring"
               >
                 Sign out ({username || 'user'})
               </button>
