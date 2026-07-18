@@ -2,8 +2,8 @@ export function Card({ className = '', hover = false, children, ...rest }) {
   return (
     <div
       className={[
-        'rounded-card border border-border bg-card shadow-soft transition-all duration-300 ease-out',
-        hover ? 'hover:-translate-y-0.5 hover:shadow-lift' : '',
+        'rounded-card border border-border bg-card transition-all duration-200 ease-out',
+        hover ? 'hover:-translate-y-px hover:border-accent/30 hover:shadow-soft' : '',
         className,
       ].join(' ')}
       {...rest}
@@ -19,13 +19,13 @@ export function Button({ variant = 'secondary', className = '', children, ...res
     'disabled:opacity-50 disabled:cursor-not-allowed'
   const styles =
     variant === 'primary'
-      ? 'bg-gradient-to-r from-accent to-accent-secondary text-white shadow-accent hover:-translate-y-0.5 hover:brightness-110 active:scale-[0.98]'
+      ? 'bg-gradient-to-r from-accent to-accent-secondary text-white hover:-translate-y-0.5 hover:shadow-accent hover:brightness-110 active:scale-[0.98]'
       : variant === 'ghost'
         ? 'text-muted hover:bg-surface hover:text-foreground active:scale-[0.98]'
         : ''
   const secondary =
     variant === 'secondary'
-      ? 'border border-border bg-card text-foreground shadow-soft hover:-translate-y-0.5 hover:border-accent/30 hover:shadow-lift active:scale-[0.98]'
+      ? 'border border-border bg-card text-foreground hover:-translate-y-0.5 hover:border-accent/30 hover:shadow-soft active:scale-[0.98]'
       : ''
   return (
     <button className={[base, styles, secondary, className].join(' ')} {...rest}>
@@ -51,7 +51,7 @@ export function IconWell({ children, className = '' }) {
   return (
     <div
       className={[
-        'flex items-center justify-center rounded-xl bg-gradient-to-br from-accent to-accent-secondary text-white shadow-accent',
+        'flex items-center justify-center rounded-lg bg-gradient-to-br from-accent to-accent-secondary text-white',
         className,
       ].join(' ')}
     >
@@ -83,11 +83,11 @@ export function Badge({ tone = 'muted', children }) {
 
 export function Stat({ label, value, accent = false }) {
   return (
-    <Card className="p-5 md:p-6" hover>
+    <Card className="p-4 md:p-5" hover>
       <div className="font-mono text-xs uppercase tracking-[0.15em] text-muted">{label}</div>
       <div
         className={[
-          'mt-3 font-display text-3xl md:text-4xl',
+          'mt-3 text-3xl font-semibold tracking-tight md:text-4xl',
           accent ? 'gradient-text' : 'text-foreground',
         ].join(' ')}
       >

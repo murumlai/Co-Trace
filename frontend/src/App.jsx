@@ -31,10 +31,10 @@ function Shell() {
         setMenuOpen(false)
       }}
       className={[
-        'rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-200 focus-ring',
+        'w-full rounded-lg px-3 py-2.5 text-left text-sm font-semibold transition-all duration-200 focus-ring',
         tab === id
           ? 'bg-accent text-white shadow-accent'
-          : 'text-muted hover:bg-surface hover:text-foreground',
+          : 'text-slate-300 hover:bg-white/10 hover:text-white',
       ].join(' ')}
     >
       {label}
@@ -42,38 +42,52 @@ function Shell() {
   )
 
   return (
-    <div className="min-h-screen overflow-hidden bg-background text-foreground">
-      <header className="sticky top-0 z-20 border-b border-border/70 bg-background/85 backdrop-blur-xl">
-        <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6">
-          <div className="flex items-center justify-between">
+    <div className="min-h-screen bg-background text-foreground lg:flex">
+      <aside className="hidden min-h-screen w-72 shrink-0 border-r border-slate-800 bg-foreground p-5 text-white lg:sticky lg:top-0 lg:flex lg:flex-col">
+        <div className="flex items-center gap-3 border-b border-white/10 pb-5">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-accent to-accent-secondary text-white">
+            <span className="text-sm font-bold">CT</span>
+          </div>
+          <div>
+                <div className="text-base font-semibold">Co_Trace</div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.15em] text-slate-400">Manufacturing intelligence</div>
+          </div>
+        </div>
+
+        <nav className="mt-6 space-y-2">
+          {TABS.map(([id, label]) => (
+            <NavButton key={id} id={id} label={label} />
+          ))}
+        </nav>
+
+        <div className="mt-auto rounded-card border border-white/10 bg-white/5 p-4">
+          <div className="font-mono text-[10px] uppercase tracking-[0.15em] text-slate-400">Signed in</div>
+          <div className="mt-1 text-sm font-semibold text-white">{username || 'user'}</div>
+          <button
+            onClick={logout}
+            className="mt-4 w-full rounded-lg border border-white/10 px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white focus-ring"
+          >
+            Sign out
+          </button>
+        </div>
+      </aside>
+
+      <div className="min-w-0 flex-1">
+        <header className="sticky top-0 z-20 border-b border-border/70 bg-background/90 backdrop-blur-xl lg:hidden">
+          <div className="px-4 py-3 sm:px-6">
+            <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-accent to-accent-secondary text-white shadow-accent">
-                <span className="font-display text-sm">CT</span>
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-accent to-accent-secondary text-white">
+                <span className="text-sm font-bold">CT</span>
               </div>
               <div className="hidden sm:block">
-                <div className="font-display text-xl text-foreground">Co_Trace</div>
+                <div className="text-base font-semibold text-foreground">Co_Trace</div>
                 <div className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted">Manufacturing intelligence</div>
               </div>
             </div>
 
-            <nav className="hidden items-center gap-2 rounded-2xl border border-border bg-card p-1 shadow-soft md:flex">
-              {TABS.map(([id, label]) => (
-                <NavButton key={id} id={id} label={label} />
-              ))}
-            </nav>
-
-            <div className="hidden md:flex items-center gap-4">
-              <span className="font-mono text-xs uppercase tracking-[0.15em] text-muted">{username || 'user'}</span>
-              <button
-                onClick={logout}
-                className="rounded-xl border border-border bg-card px-4 py-2 text-sm font-semibold text-muted shadow-soft transition-all duration-200 hover:-translate-y-0.5 hover:text-foreground focus-ring"
-              >
-                Sign out
-              </button>
-            </div>
-
             <button
-              className="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-card text-foreground shadow-soft focus-ring md:hidden"
+              className="flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-card text-foreground shadow-soft focus-ring"
               onClick={() => setMenuOpen((o) => !o)}
               aria-label="Toggle menu"
             >
@@ -82,26 +96,27 @@ function Shell() {
           </div>
 
           {menuOpen && (
-            <div className="mt-3 flex flex-col gap-3 rounded-card border border-border bg-card p-4 shadow-lift md:hidden">
+            <div className="mt-3 flex flex-col gap-3 rounded-card border border-border bg-foreground p-4 shadow-lift">
               {TABS.map(([id, label]) => (
                 <NavButton key={id} id={id} label={label} />
               ))}
               <button
                 onClick={logout}
-                className="rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-muted focus-ring"
+                className="rounded-lg border border-white/10 px-4 py-2.5 text-sm font-semibold text-slate-300 focus-ring"
               >
                 Sign out ({username || 'user'})
               </button>
             </div>
           )}
         </div>
-      </header>
+        </header>
 
-      <main>
-        {tab === 'home' && <Home onJobReady={onJobReady} />}
-        {tab === 'engineer' && <Engineer jobId={jobId} />}
-        {tab === 'manager' && <Manager jobId={jobId} />}
-      </main>
+        <main>
+          {tab === 'home' && <Home onJobReady={onJobReady} />}
+          {tab === 'engineer' && <Engineer jobId={jobId} />}
+          {tab === 'manager' && <Manager jobId={jobId} />}
+        </main>
+      </div>
     </div>
   )
 }

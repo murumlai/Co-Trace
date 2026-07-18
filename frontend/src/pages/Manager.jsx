@@ -58,10 +58,10 @@ export default function Manager({ jobId }) {
   const s = data.summary
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:py-14">
-      <div className="mb-8 rounded-card bg-foreground p-6 text-white shadow-lift dot-texture md:p-8">
+    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
+      <div className="mb-8 rounded-card border border-slate-800 bg-foreground p-6 text-white dot-texture md:p-8">
         <SectionLabel>Manager Analytics</SectionLabel>
-        <h1 className="mt-5 font-display text-4xl leading-tight md:text-5xl">
+        <h1 className="mt-5 text-3xl font-semibold leading-tight tracking-tight md:text-4xl">
           Yield performance with <span className="gradient-text">executive clarity</span>
         </h1>
         <p className="mt-4 max-w-2xl text-white/70">Track first-pass yield, repeated failures, station breakdown, and lot-to-lot movement from the active batch.</p>

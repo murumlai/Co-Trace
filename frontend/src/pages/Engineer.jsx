@@ -41,11 +41,11 @@ export default function Engineer({ jobId }) {
   if (!jobId) return <EmptyState />
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:py-14">
+    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
       <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <SectionLabel>Engineer Diagnostics</SectionLabel>
-          <h1 className="mt-4 font-display text-4xl leading-tight text-foreground md:text-5xl">
+          <h1 className="mt-4 text-3xl font-semibold leading-tight tracking-tight text-foreground md:text-4xl">
             Unit-level <span className="gradient-text">failure intelligence</span>
           </h1>
           <p className="mt-3 max-w-2xl text-muted">Filter failed units, inspect redacted context, and force a fresh diagnosis when a signature needs another look.</p>
@@ -79,7 +79,7 @@ export default function Engineer({ jobId }) {
       ) : (
         <div className="space-y-4">
           {shown.map((u) => (
-            <Card key={u.unit_id} className="p-5 md:p-6" hover>
+            <Card key={u.unit_id} className="p-4 md:p-5" hover>
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="flex items-center gap-3 flex-wrap">
@@ -106,7 +106,7 @@ export default function Engineer({ jobId }) {
               </div>
 
               {u.result === 'FAIL' && (
-                <div className="mt-5 rounded-card border border-border bg-surface/70 p-5">
+                <div className="mt-5 rounded-card border border-border bg-surface/70 p-4">
                   <div className="mb-1 font-mono text-xs uppercase tracking-[0.15em] text-muted">
                     Root cause
                     {u.analysis_source && (

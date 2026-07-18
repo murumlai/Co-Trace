@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { api } from '../api'
-import { Badge, Button, Card, IconWell, SectionLabel } from '../components/ui'
+import { Badge, Button, Card, IconWell } from '../components/ui'
 
 // Reads a browser file's relative path (folder uploads set webkitRelativePath).
 function relPath(file) {
@@ -83,33 +83,32 @@ export default function Home({ onJobReady }) {
   const pct = progress && progress.total ? Math.round((progress.processed / progress.total) * 100) : 0
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:py-16">
-      <div className="grid items-end gap-8 lg:grid-cols-[1.1fr_0.9fr]">
-        <div>
-          <SectionLabel>Batch Intake</SectionLabel>
-          <h1 className="mt-5 max-w-3xl font-display text-4xl leading-tight text-foreground md:text-6xl">
-            Turn raw tester logs into <span className="gradient-text">actionable yield signals</span>
-          </h1>
-          <p className="mt-5 max-w-2xl text-lg leading-8 text-muted">
-            Drop a folder or select files. The same batch powers engineer diagnostics and manager analytics.
-          </p>
-        </div>
-        <div className="rounded-card bg-foreground p-6 text-white shadow-lift dot-texture">
-          <div className="font-mono text-xs uppercase tracking-[0.15em] text-white/60">Current workflow</div>
-          <div className="mt-5 grid grid-cols-3 gap-3 text-center">
+    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
+      <div className="rounded-card border border-border bg-card p-5 md:p-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="font-mono text-xs uppercase tracking-[0.15em] text-accent">Batch intake</div>
+            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
+              Upload manufacturing logs
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
+              Create one processing job from a folder or file set. Results populate Engineer and Manager views automatically.
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-sm">
             {['Upload', 'Analyze', 'Review'].map((step, index) => (
-              <div key={step} className="rounded-xl border border-white/10 bg-white/5 p-4">
-                <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-secondary text-sm font-bold shadow-accent">
+              <div key={step} className="rounded-lg border border-border bg-surface px-4 py-3 text-center">
+                <div className="mx-auto mb-1 flex h-6 w-6 items-center justify-center rounded-md bg-accent text-xs font-bold text-white">
                   {index + 1}
                 </div>
-                <div className="mt-3 text-sm font-semibold">{step}</div>
+                <div className="font-semibold text-foreground">{step}</div>
               </div>
             ))}
           </div>
         </div>
       </div>
 
-      <Card className="mt-10 p-5 shadow-lift md:p-8">
+      <Card className="mt-6 p-4 md:p-6">
         <div
           onDragOver={(e) => {
             e.preventDefault()
@@ -118,7 +117,7 @@ export default function Home({ onJobReady }) {
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
           className={[
-            'rounded-card border-2 border-dashed p-8 text-center transition-all duration-300 md:p-14',
+            'rounded-card border-2 border-dashed p-8 text-center transition-all duration-300 md:p-12',
             dragging ? 'border-accent bg-accent/5 shadow-accent' : 'border-border bg-surface/60',
           ].join(' ')}
         >
@@ -129,7 +128,7 @@ export default function Home({ onJobReady }) {
               <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
           </IconWell>
-          <p className="font-display text-2xl text-foreground">
+          <p className="text-xl font-semibold text-foreground">
             {dragging ? 'Drop to add files' : 'Drag & drop logs here'}
           </p>
           <p className="mt-2 text-sm text-muted">Choose a folder for best path preservation, or upload individual files.</p>

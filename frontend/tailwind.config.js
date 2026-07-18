@@ -19,18 +19,18 @@ export default {
         placeholder: '#94A3B8',
       },
       fontFamily: {
-        display: ['Calistoga', 'Georgia', 'serif'],
+        display: ['Inter', 'system-ui', 'sans-serif'],
         body: ['Inter', 'system-ui', 'sans-serif'],
         mono: ['"JetBrains Mono"', 'monospace'],
       },
       borderRadius: {
-        card: '16px',
+        card: '10px',
       },
       boxShadow: {
-        soft: '0 1px 3px rgb(15 23 42 / 0.06)',
-        lift: '0 10px 24px rgb(15 23 42 / 0.08)',
-        'lift-lg': '0 24px 48px rgb(15 23 42 / 0.12)',
-        accent: '0 8px 24px rgb(0 82 255 / 0.25)',
+        soft: '0 1px 2px rgb(15 23 42 / 0.04)',
+        lift: '0 8px 18px rgb(15 23 42 / 0.08)',
+        'lift-lg': '0 16px 34px rgb(15 23 42 / 0.10)',
+        accent: '0 6px 16px rgb(0 82 255 / 0.20)',
       },
       keyframes: {
         float: {

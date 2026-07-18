@@ -15,16 +15,18 @@ html {
 body {
   margin: 0;
   background:
-    radial-gradient(circle at 8% 10%, rgb(0 82 255 / 0.08), transparent 28rem),
-    radial-gradient(circle at 92% 4%, rgb(77 124 255 / 0.08), transparent 24rem),
+    linear-gradient(90deg, rgb(241 245 249 / 0.72) 1px, transparent 1px),
+    linear-gradient(180deg, rgb(241 245 249 / 0.72) 1px, transparent 1px),
+    radial-gradient(circle at 12% 8%, rgb(0 82 255 / 0.055), transparent 24rem),
     #fafafa;
+  background-size: 48px 48px, 48px 48px, auto;
   color: #0f172a;
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
 .font-display {
-  font-family: 'Calistoga', Georgia, serif;
+  font-family: 'Inter', system-ui, sans-serif;
 }
 
 .gradient-text {
@@ -37,6 +39,11 @@ body {
 .dot-texture {
   background-image: radial-gradient(circle, rgb(255 255 255 / 0.18) 1px, transparent 1px);
   background-size: 28px 28px;
+}
+
+.saas-panel {
+  border: 1px solid #e2e8f0;
+  background: rgb(255 255 255 / 0.92);
 }
 
 .focus-ring:focus-visible {

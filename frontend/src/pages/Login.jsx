@@ -23,24 +23,22 @@ export default function Login() {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-6 py-16">
-      <div className="pointer-events-none absolute right-[-8rem] top-[-8rem] h-80 w-80 rounded-full bg-accent/10 blur-3xl" />
-      <div className="pointer-events-none absolute bottom-[-10rem] left-[-8rem] h-96 w-96 rounded-full bg-accent-secondary/10 blur-3xl" />
-
-      <div className="grid w-full max-w-5xl items-center gap-10 lg:grid-cols-[1.05fr_0.95fr]">
-        <div className="hidden animate-fade-up lg:block">
-          <Badge tone="accent">Live QA Console</Badge>
-          <h1 className="mt-6 max-w-xl font-display text-5xl leading-tight text-foreground">
-            Manufacturing logs, clarified with <span className="gradient-text">precision</span>
-          </h1>
-          <p className="mt-5 max-w-lg text-lg leading-8 text-muted">
-            Upload FTRunner batches, isolate failed units, and compare yield signals without leaving the browser.
-          </p>
-          <div className="relative mt-10 h-72 max-w-md">
+    <div className="min-h-screen bg-background px-4 py-6 sm:px-6 md:flex md:items-center md:justify-center">
+      <div className="grid w-full max-w-6xl overflow-hidden border border-border bg-card md:min-h-[680px] md:grid-cols-[0.95fr_1.05fr]">
+        <div className="animate-fade-up bg-foreground p-6 text-white dot-texture sm:p-8 md:p-10">
+          <div className="h-full bg-foreground p-10 text-white dot-texture">
+            <Badge tone="accent">Live QA Console</Badge>
+            <h1 className="mt-6 max-w-xl text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
+              Manufacturing logs, clarified with <span className="gradient-text">precision</span>
+            </h1>
+            <p className="mt-5 max-w-lg text-base leading-7 text-white/70 sm:text-lg sm:leading-8">
+              Upload FTRunner batches, isolate failed units, and compare yield signals without leaving the browser.
+            </p>
+            <div className="relative mt-10 hidden h-72 max-w-md sm:block">
             <div className="absolute inset-6 rounded-full border border-dashed border-accent/30 animate-rotate-slow" />
             <Card className="absolute left-0 top-6 w-56 p-5 animate-float">
               <div className="font-mono text-xs uppercase tracking-[0.15em] text-muted">First-pass yield</div>
-              <div className="mt-2 font-display text-4xl gradient-text">78.65%</div>
+                <div className="mt-2 text-4xl font-semibold gradient-text">78.65%</div>
             </Card>
             <Card className="absolute bottom-4 right-0 w-60 p-5 animate-float [animation-delay:600ms]">
               <div className="font-mono text-xs uppercase tracking-[0.15em] text-muted">Failure signatures</div>
@@ -51,16 +49,20 @@ export default function Login() {
                 <span className="h-12 w-5 rounded-t bg-accent/40" />
               </div>
             </Card>
+            </div>
           </div>
         </div>
 
-        <Card className="relative z-10 w-full p-8 shadow-lift-lg md:p-10">
-          <div className="flex flex-col items-center text-center">
-            <IconWell className="mb-6 h-16 w-16">
-              <span className="font-display text-2xl">CT</span>
+        <div className="relative z-10 flex w-full items-center p-6 sm:p-8 md:p-10">
+          <div className="w-full max-w-md md:mx-auto">
+          <div className="flex items-start gap-4 border-b border-border pb-6">
+            <IconWell className="h-12 w-12 shrink-0">
+              <span className="text-sm font-bold">CT</span>
             </IconWell>
-            <h2 className="font-display text-3xl text-foreground">Co_Trace</h2>
-            <p className="mt-2 text-muted">Sign in to the manufacturing intelligence workspace.</p>
+            <div>
+              <h2 className="text-2xl font-semibold tracking-tight text-foreground">Co_Trace</h2>
+              <p className="mt-1 text-sm text-muted">Sign in to the manufacturing intelligence workspace.</p>
+            </div>
           </div>
 
           <form onSubmit={submit} className="mt-10 space-y-5">
@@ -104,7 +106,8 @@ export default function Login() {
           <p className="mt-6 text-center text-xs text-muted">
             Placeholder auth — default <span className="font-semibold">admin / admin</span>
           </p>
-        </Card>
+          </div>
+        </div>
       </div>
     </div>
   )
