@@ -44,6 +44,14 @@ _FTRUNNER_NAMES = ("ftrunnerlog", "ftrunner")
 
 
 class Preprocessor(Protocol):
+    def iter_run_folders(self, root: str) -> Iterable[str]:
+        """Yield folders that contain one unit run."""
+        ...
+
+    def process_run_folder(self, folder: str, root: str) -> UnitRecord | None:
+        """Process one unit run folder using the batch root for relative metadata."""
+        ...
+
     def process_folder(self, root: str) -> list[UnitRecord]:
         """Walk a batch root and return one normalized record per unit run."""
         ...
@@ -87,14 +95,14 @@ class FtrunnerPreprocessor:
 
     def process_folder(self, root: str) -> list[UnitRecord]:
         records: list[UnitRecord] = []
-        for run_folder in self._iter_run_folders(root):
-            rec = self._process_run(run_folder, root)
+        for run_folder in self.iter_run_folders(root):
+            rec = self.process_run_folder(run_folder, root)
             if rec is not None:
                 records.append(rec)
         return records
 
     # -- discovery ----------------------------------------------------------
-    def _iter_run_folders(self, root: str) -> Iterable[str]:
+    def iter_run_folders(self, root: str) -> Iterable[str]:
         for dirpath, _dirnames, filenames in os.walk(root):
             if any(self._is_ftrunner(f) for f in filenames):
                 yield dirpath
@@ -109,7 +117,7 @@ class FtrunnerPreprocessor:
         return name.lower().endswith(".itf")
 
     # -- per-run ------------------------------------------------------------
-    def _process_run(self, folder: str, root: str) -> UnitRecord | None:
+    def process_run_folder(self, folder: str, root: str) -> UnitRecord | None:
         _extract_nested_zips(folder)
         files = os.listdir(folder)
         ft_files = [f for f in files if self._is_ftrunner(f)]

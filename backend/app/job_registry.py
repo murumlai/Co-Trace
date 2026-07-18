@@ -6,13 +6,13 @@ import time
 from dataclasses import dataclass, field
 
 from .config import settings
-from .models import JobProgress, JobStatus, UnitRecord
+from .models import JobProgress, JobState, JobStatus, UnitRecord
 
 
 @dataclass
 class Job:
     job_id: str
-    status: str = "pending"
+    status: JobState = "pending"
     message: str = ""
     processed: int = 0
     total: int = 0
@@ -25,7 +25,7 @@ class Job:
     def to_status(self) -> JobStatus:
         return JobStatus(
             job_id=self.job_id,
-            status=self.status,  # type: ignore[arg-type]
+            status=self.status,
             progress=JobProgress(processed=self.processed, total=self.total),
             message=self.message,
             unit_count=len(self.records),

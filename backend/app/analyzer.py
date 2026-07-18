@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Callable
 
 from . import llm_client, redaction
 from .job_registry import Job
@@ -15,6 +16,8 @@ from .models import UnitRecord
 
 _WS = re.compile(r"\s+")
 _NUM = re.compile(r"\d+")
+
+AnalyzeFailure = Callable[[str | None, str | None, str], tuple[str, str, str]]
 
 
 def _normalize_msg(msg: str | None) -> str:
@@ -35,15 +38,20 @@ def _redacted_context(record: UnitRecord) -> tuple[str, str]:
     return err_msg, snippet
 
 
-def analyze_job(job: Job) -> None:
+def analyze_job(job: Job, analyze_failure: AnalyzeFailure = llm_client.analyze) -> None:
     """Populate root cause / solution for all failed units, using the cache."""
     for rec in job.records:
         if rec.result != "FAIL":
             continue
-        _analyze_unit(job, rec, force=False)
+        _analyze_unit(job, rec, force=False, analyze_failure=analyze_failure)
 
 
-def _analyze_unit(job: Job, rec: UnitRecord, force: bool) -> None:
+def _analyze_unit(
+    job: Job,
+    rec: UnitRecord,
+    force: bool,
+    analyze_failure: AnalyzeFailure,
+) -> None:
     sig = signature_for(rec)
     rec.signature = sig
     err_msg, snippet = _redacted_context(rec)
@@ -56,19 +64,23 @@ def _analyze_unit(job: Job, rec: UnitRecord, force: bool) -> None:
         rec.analysis_source = "cached"
         return
 
-    root, solution, source = llm_client.analyze(rec.error_code, err_msg, snippet)
+    root, solution, source = analyze_failure(rec.error_code, err_msg, snippet)
     job.signature_cache[sig] = (root, solution, source)
     rec.root_cause = root
     rec.suggested_solution = solution
     rec.analysis_source = source
 
 
-def reanalyze_unit(job: Job, unit_id: str) -> UnitRecord | None:
+def reanalyze_unit(
+    job: Job,
+    unit_id: str,
+    analyze_failure: AnalyzeFailure = llm_client.analyze,
+) -> UnitRecord | None:
     """Force a fresh per-unit LLM call, bypassing the signature cache."""
     for rec in job.records:
         if rec.unit_id == unit_id:
             if rec.result != "FAIL":
                 return rec
-            _analyze_unit(job, rec, force=True)
+            _analyze_unit(job, rec, force=True, analyze_failure=analyze_failure)
             return rec
     return None

@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 Result = Literal["PASS", "FAIL", "UNKNOWN"]
+JobState = Literal["pending", "running", "done", "error"]
 
 
 class StepRecord(BaseModel):
@@ -30,8 +31,8 @@ class UnitRecord(BaseModel):
     result: Result = "UNKNOWN"
     error_code: Optional[str] = None
     error_message: Optional[str] = None
-    steps: list[StepRecord] = []
-    source_files: list[str] = []
+    steps: list[StepRecord] = Field(default_factory=list)
+    source_files: list[str] = Field(default_factory=list)
     run_folder: str = ""
 
     # Engineer analysis (populated lazily for failed units only)
@@ -49,8 +50,8 @@ class JobProgress(BaseModel):
 
 class JobStatus(BaseModel):
     job_id: str
-    status: Literal["pending", "running", "done", "error"] = "pending"
-    progress: JobProgress = JobProgress()
+    status: JobState = "pending"
+    progress: JobProgress = Field(default_factory=JobProgress)
     message: str = ""
     unit_count: int = 0
 
