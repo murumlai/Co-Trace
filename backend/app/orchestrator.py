@@ -1,9 +1,11 @@
 """Job Orchestrator — runs the preprocessing pipeline as a background task."""
 from __future__ import annotations
 
+import os
+
 from . import analyzer
 from .job_registry import registry
-from .preprocessor import get_preprocessor
+from .preprocessor import find_incomplete_folders, get_preprocessor, write_product_jsons
 
 
 def run_job(job_id: str) -> None:
@@ -31,6 +33,17 @@ def run_job(job_id: str) -> None:
             job.message = f"Processed {i}/{job.total} runs"
 
         job.records = records
+
+        incomplete = find_incomplete_folders(job.workdir)
+        job.warnings = [
+            f"No ftrunnerlog01.txt or debuglog.txt found in: {rel}" for rel in incomplete
+        ]
+
+        # One redacted <product_code>.json per product, serving both tabs.
+        job.message = "Writing per-product JSON"
+        write_product_jsons(
+            records, os.path.join(job.workdir, "preprocessed"), warnings=job.warnings
+        )
 
         # Engineer analysis only for failed units (grouped by signature).
         job.message = "Analyzing failed units"
