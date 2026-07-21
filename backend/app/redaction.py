@@ -12,9 +12,6 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(?i)\b(password|passwd|pwd|secret|token|apikey|api_key)\s*[=:]\s*\S+"),
      r"\1=[REDACTED]"),
     (re.compile(r"(?i)\b(user|username|userid|uid)\s*[=:]\s*\S+"), r"\1=[REDACTED_USER]"),
-    # serial numbers (scan block + common inline forms)
-    (re.compile(r"(?i)\b(serialnumber|child_sn|serial)\s*[=:]\s*\S+"), r"\1=[REDACTED_SN]"),
-    (re.compile(r"\bRM[A-Z]{1,2}\d{6,}\b"), "[REDACTED_SN]"),
     # hostnames
     (re.compile(r"(?i)\b(host|hostname|testserver)\s*[=:]\s*\S+"), r"\1=[REDACTED_HOST]"),
     (re.compile(r"\\\\[A-Za-z0-9._-]+"), r"\\\\[REDACTED_HOST]"),
@@ -24,13 +21,30 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), "[REDACTED_IP]"),
 ]
 
+# Serial numbers (scan block + common inline forms). Kept separate from
+# _PATTERNS so callers can opt to retain the serial (needed for yield/FPY
+# math in the at-rest JSON) while still scrubbing every other secret.
+_SERIAL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"(?i)\b(serialnumber|child_sn|serial)\s*[=:]\s*\S+"), r"\1=[REDACTED_SN]"),
+    (re.compile(r"\bRM[A-Z]{1,2}\d{6,}\b"), "[REDACTED_SN]"),
+]
 
-def redact(text: str | None) -> str:
+
+def redact(text: str | None, keep_serial: bool = False) -> str:
+    """Scrub creds/IPs/hosts/MACs from `text`.
+
+    By default also scrubs serial numbers (existing behavior for LLM-bound
+    text in analyzer.py). Pass keep_serial=True for at-rest JSON artifacts
+    that need the serial retained for yield/FPY aggregation.
+    """
     if not text:
         return ""
     out = text
     for pattern, repl in _PATTERNS:
         out = pattern.sub(repl, out)
+    if not keep_serial:
+        for pattern, repl in _SERIAL_PATTERNS:
+            out = pattern.sub(repl, out)
     return out
 
 
