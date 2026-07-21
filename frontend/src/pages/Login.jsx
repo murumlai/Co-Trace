@@ -3,7 +3,7 @@ import { useAuth } from '../auth'
 import { Button, Card, IconWell, Input } from '../components/ui'
 
 export default function Login() {
-  const { login } = useAuth()
+  const { login, sessionExpired } = useAuth()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -70,6 +70,12 @@ export default function Login() {
           {error && (
             <div className="rounded-2xl bg-base shadow-inset-sm px-4 py-3 text-sm text-danger">
               {error}
+            </div>
+          )}
+
+          {!error && sessionExpired && (
+            <div className="rounded-2xl bg-base shadow-inset-sm px-4 py-3 text-sm text-amber-700">
+              Your session expired. Please sign in again.
             </div>
           )}
 
