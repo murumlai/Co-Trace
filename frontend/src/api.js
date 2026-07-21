@@ -21,6 +21,13 @@ async function request(path, { method = 'GET', body, headers = {} } = {}) {
     },
     body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
   })
+  if (res.status === 401 && path !== '/api/login') {
+    // Stale/expired bearer token (e.g. backend restarted, or the session
+    // TTL lapsed). Clear it and let the app fall back to the login screen
+    // instead of surfacing a raw 401 error mid-action.
+    setToken(null)
+    window.dispatchEvent(new Event('cotrace:unauthorized'))
+  }
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}))
     throw new Error(detail.detail || `Request failed (${res.status})`)
