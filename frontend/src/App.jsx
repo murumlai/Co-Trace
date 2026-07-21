@@ -16,11 +16,13 @@ function Shell() {
   const [tab, setTab] = useState('home')
   const [jobId, setJobId] = useState(null)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [warnings, setWarnings] = useState([])
 
   if (!isAuthed) return <Login />
 
-  const onJobReady = (id) => {
+  const onJobReady = (id, jobWarnings = []) => {
     setJobId(id)
+    setWarnings(jobWarnings)
     setTab('engineer')
   }
 
@@ -92,6 +94,28 @@ function Shell() {
             </div>
           )}
         </div>
+
+        {warnings.length > 0 && (
+          <div className="mx-auto max-w-7xl px-6 pt-4">
+            <div className="rounded-card bg-base shadow-inset-sm px-5 py-3 flex items-start justify-between gap-4">
+              <div className="text-sm text-amber-700">
+                <span className="font-semibold">{warnings.length} folder{warnings.length === 1 ? '' : 's'} skipped:</span>{' '}
+                no ftrunnerlog01.txt or debuglog.txt found. These runs were excluded from the results.
+                <ul className="mt-1 list-disc list-inside text-xs text-amber-600 max-h-24 overflow-auto">
+                  {warnings.map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+              <button
+                className="text-xs text-muted hover:text-ink focus-ring rounded-lg px-2 py-1 shrink-0"
+                onClick={() => setWarnings([])}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
       </header>
 
       <main>
