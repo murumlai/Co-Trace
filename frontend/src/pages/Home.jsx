@@ -68,7 +68,7 @@ export default function Home({ onJobReady }) {
       })
       if (s.status === 'done') {
         setUploading(false)
-        onJobReady(jobId)
+        onJobReady(jobId, s.warnings || [])
         return
       }
       if (s.status === 'error') {
