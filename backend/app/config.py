@@ -23,6 +23,12 @@ class Settings:
     WORK_DIR: str = os.getenv("WORK_DIR", os.path.join(os.getcwd(), ".cotrace_work"))
     JOB_TTL_S: int = int(os.getenv("JOB_TTL_S", str(60 * 60 * 2)))
 
+    # --- Preprocessing (FTRunner-primary) ---
+    DEBUG_EXCERPT_CHAR_BUDGET: int = int(os.getenv("DEBUG_EXCERPT_CHAR_BUDGET", "6000"))
+    ZIP_MAX_TOTAL_BYTES: int = int(os.getenv("ZIP_MAX_TOTAL_BYTES", str(200 * 1024 * 1024)))
+    ZIP_MAX_FILE_BYTES: int = int(os.getenv("ZIP_MAX_FILE_BYTES", str(100 * 1024 * 1024)))
+    ZIP_MAX_DEPTH: int = int(os.getenv("ZIP_MAX_DEPTH", "3"))
+
     # --- CORS (dev) ---
     CORS_ORIGINS: list[str] = os.getenv(
         "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
