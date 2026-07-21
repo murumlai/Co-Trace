@@ -14,10 +14,16 @@ defined in [designUI.md](designUI.md).
 
 ## Current Status
 
-- FastAPI backend and React frontend are implemented.
+- FastAPI backend and React frontend are implemented as a login-gated upload, Engineer,
+  and Manager dashboard.
 - Frontend production build has been verified with `npm run build`.
+- The current backend parser extracts FTRunner scan metadata and still uses SIMS `.itf`
+  files as the authoritative PASS/FAIL and per-step source.
 - Backend parsing has been smoke-tested against the sample `N32828-201` dataset:
   `141` unit runs, `95 PASS`, `36 FAIL`, `10 UNKNOWN`, FPY `78.65%`.
+- [pre-process_plan.md](pre-process_plan.md) tracks the next FTRunner-primary,
+  DebugLog-aware preprocessing rewrite. That work is planned and not yet wired into the
+  API/UI path.
 - GitHub Models integration is wired, but if `GITHUB_TOKEN` is not set, analysis uses a
   deterministic offline stub and makes no external LLM calls.
 
@@ -51,16 +57,19 @@ Log_Files_Folder/
       optional logs / zip files
 ```
 
-The parser currently uses:
+The implemented parser currently uses:
 
 - `ftrunnerlog*.txt` for scan-block metadata such as serial number, product code, OP ID,
   station ID, host, and timestamps.
 - `SIMS!...itf` as the authoritative source for PASS/FAIL, per-step results, test time,
   lot ID, and failing bin/error reason.
-- `.zip` extraction inside discovered run folders so nested files can be reached.
+- Best-effort `.zip` extraction for archives directly inside discovered run folders so
+  nested files can be reached by later parsing work.
 
-`DebugLog.txt` parsing rules are not finalized yet. The architecture keeps preprocessing
-behind an interface so those extraction rules can be added without changing the API or UI.
+`DebugLog.txt` parsing rules are not implemented yet. The architecture keeps
+preprocessing behind an interface so the FTRunner-primary, DebugLog-aware rewrite in
+[pre-process_plan.md](pre-process_plan.md) can be added without changing the API or UI
+contract.
 
 ## Security and Privacy
 
