@@ -37,6 +37,9 @@ tabs. **No LLM call** in this task — prompt design comes later.
 - **Assembly number = PRODUCTCODE**.
 - **PASS units** = compact metadata sufficient for Manager metrics; **FAIL units** = full
   detail.
+- `ftrunnerlog01.txt` is always processed first. When it detects a failure, and a
+  `debuglog.txt` is available, preprocessing must search the DebugLog for details related
+  to that detected failure and attach those details to the failed unit's JSON detail.
 - **Redact at rest** in the saved JSON, but **keep serial number** (needed for yield).
 - Folder with **neither** `ftrunnerlog01.txt` nor `debuglog.txt` → surface as a **UI
   warning**.
@@ -64,9 +67,13 @@ tabs. **No LLM call** in this task — prompt design comes later.
    guards and size caps.
 
 ### Phase 3 — DebugLog filtering (depends on Phase 2)
-5. Strip ANSI; extract a bounded failure window around markers (`ERROR`, `FAIL`,
-   `Exception`, `Traceback`, `Result : Failed`, bin codes) plus a tail; cap to a
-   configurable char/token budget → `debug_excerpt`.
+5. For units where `ftrunnerlog01.txt` detected a failure, use the FTRunner failure signal
+    (`failing_step`, `ErrorMsg`, `Errorcode`, and nearby ftrunner failure text) to search any
+    available `debuglog.txt` for more specific matching details. Strip ANSI; extract a
+    bounded failure window around matched failure details first, falling back to generic
+    markers (`ERROR`, `FAIL`, `Exception`, `Traceback`, `Result : Failed`, bin codes) plus a
+    tail when no specific match is found; cap to a configurable char/token budget →
+    `debug_excerpt`.
 
 ### Phase 4 — Models + redaction (parallel with Phases 1–3)
 6. Extend `UnitRecord` (`backend/app/models.py`) with `tp_name`, `tp_version`,
@@ -85,8 +92,9 @@ tabs. **No LLM call** in this task — prompt design comes later.
        `host`, `lot_id`, `start_time`, `end_time`, `duration_s` (so Manager FPY / trend /
        station-tester / lot-to-lot aggregations work).
      - **FAIL** = full detail: the above plus `steps[]`, `error_code`, `error_message`,
-       `failing_step`, `ftrunner_snippet`, `debug_excerpt`, and empty
-       `root_cause` / `suggested_solution` placeholders for the future LLM step.
+       `failing_step`, `ftrunner_snippet`, `debug_excerpt` containing DebugLog details
+       relevant to the FTRunner-detected failure when available, and empty `root_cause` /
+       `suggested_solution` placeholders for the future LLM step.
 
 ### Phase 6 — Orchestrator + UI warning wiring (depends on Phase 5)
 8. In `run_job` (`backend/app/orchestrator.py`), collect neither-file folders into
@@ -111,11 +119,14 @@ tabs. **No LLM call** in this task — prompt design comes later.
 2. Assert `debuglog.txt` is found + extracted for
    `M95113-001/NoLotId_RMPT51700047_SI2_.../NoLotId_20250504034917.zip` and
    `debug_excerpt` is populated.
-3. Assert one `<product_code>.json` is written per product; PASS units carry the Manager
+3. For a failed unit with both `ftrunnerlog01.txt` and `debuglog.txt`, assert the DebugLog
+    excerpt is selected from details relevant to the FTRunner-detected failure
+    (`failing_step` / `ErrorMsg` / `Errorcode`) before falling back to generic markers.
+4. Assert one `<product_code>.json` is written per product; PASS units carry the Manager
    fields; FAIL units carry the deep detail.
-4. Security check: grep the emitted JSON for `tr@nsf3r` and `10.250.0.1` → must be absent;
+5. Security check: grep the emitted JSON for `tr@nsf3r` and `10.250.0.1` → must be absent;
    serial numbers must remain.
-5. Assert an empty / irrelevant folder produces a `job.warnings` entry visible via
+6. Assert an empty / irrelevant folder produces a `job.warnings` entry visible via
    `JobStatus`.
 
 ## Open tuning items
