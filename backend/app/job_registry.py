@@ -19,6 +19,7 @@ class Job:
     created_at: float = field(default_factory=time.time)
     records: list[UnitRecord] = field(default_factory=list)
     workdir: str = ""
+    warnings: list[str] = field(default_factory=list)
     # signature -> (root_cause, suggested_solution, analysis_source)
     signature_cache: dict[str, tuple[str, str, str]] = field(default_factory=dict)
 
@@ -29,6 +30,7 @@ class Job:
             progress=JobProgress(processed=self.processed, total=self.total),
             message=self.message,
             unit_count=len(self.records),
+            warnings=self.warnings,
         )
 
 
