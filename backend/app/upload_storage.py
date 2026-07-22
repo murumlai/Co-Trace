@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import zipfile
 from dataclasses import dataclass
 from typing import Sequence
@@ -36,6 +37,31 @@ def get_job_input_root(workdir: str) -> str:
     """
     input_root = os.path.join(workdir, _INPUT_DIR)
     return input_root if os.path.isdir(input_root) else workdir
+
+
+def cleanup_job_workdir(workdir: str) -> list[str]:
+    """Remove all per-job payload/artifact files except ``job_state.json``.
+
+    The UI/API read completed results from the disk-backed job state, and the
+    cross-upload LLM cache lives outside each job directory. Removing the rest
+    keeps large uploaded folders, extracted zip contents, temporary archives,
+    and preprocessed JSON artifacts from accumulating on disk.
+    """
+    if not settings.CLEANUP_JOB_WORKDIR_AFTER_RUN or not os.path.isdir(workdir):
+        return []
+    removed: list[str] = []
+    for entry in os.scandir(workdir):
+        if entry.name == "job_state.json":
+            continue
+        try:
+            if entry.is_dir(follow_symlinks=False):
+                shutil.rmtree(entry.path, ignore_errors=True)
+            else:
+                os.remove(entry.path)
+            removed.append(entry.name)
+        except OSError:
+            continue
+    return removed
 
 
 async def save_uploads(

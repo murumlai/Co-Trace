@@ -8,7 +8,7 @@ from . import analyzer
 from .config import settings
 from .job_registry import registry
 from .preprocessor import find_incomplete_folders, get_preprocessor, write_product_jsons
-from .upload_storage import get_job_input_root
+from .upload_storage import cleanup_job_workdir, get_job_input_root
 
 log = logging.getLogger("cotrace.orchestrator")
 
@@ -69,11 +69,13 @@ def run_job(job_id: str) -> None:
         job.processed = job.total
         job.message = f"Completed: {len(records)} unit runs"
         job.save()
+        _cleanup_job_workdir(job)
         log.info("Job %s finished: %s unit runs.", job_id[:8], len(records))
     except Exception as exc:  # noqa: BLE001 - surface failure to the UI
         job.status = "error"
         job.message = f"Processing failed: {type(exc).__name__}: {exc}"
         job.save()
+        _cleanup_job_workdir(job)
         log.exception("Job %s failed.", job_id[:8])
 
 
@@ -89,3 +91,9 @@ def _analysis_progress_updater(job):
         job.save()
 
     return update
+
+
+def _cleanup_job_workdir(job) -> None:
+    removed = cleanup_job_workdir(job.workdir)
+    if removed:
+        log.info("Job %s cleaned local payloads: %s item%s removed.", job.job_id[:8], len(removed), "" if len(removed) == 1 else "s")

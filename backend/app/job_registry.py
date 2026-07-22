@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 from .config import settings
 from .models import JobProgress, JobState, JobStatus, UnitRecord
+from .upload_storage import cleanup_job_workdir
 
 log = logging.getLogger(__name__)
 
@@ -126,6 +127,10 @@ class JobRegistry:
                     job.status = "error"
                     job.message = "Server restarted during processing — please re-upload"
                     job.save()
+                if job.status in {"done", "error"}:
+                    removed = cleanup_job_workdir(job.workdir)
+                    if removed:
+                        log.info("Cleaned restored job %s (%s items removed)", job.job_id, len(removed))
                 with self._lock:
                     self._jobs[job.job_id] = job
                 log.info("Restored job %s (status=%s)", job.job_id, job.status)

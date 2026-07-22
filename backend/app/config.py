@@ -59,6 +59,7 @@ class Settings:
     UPLOAD_ZIP_MAX_FILES: int = int(os.getenv("UPLOAD_ZIP_MAX_FILES", "20000"))
     UPLOAD_ZIP_MAX_TOTAL_BYTES: int = int(os.getenv("UPLOAD_ZIP_MAX_TOTAL_BYTES", str(2 * 1024 * 1024 * 1024)))
     UPLOAD_ZIP_MAX_FILE_BYTES: int = int(os.getenv("UPLOAD_ZIP_MAX_FILE_BYTES", str(512 * 1024 * 1024)))
+    CLEANUP_JOB_WORKDIR_AFTER_RUN: bool = _env_flag("CLEANUP_JOB_WORKDIR_AFTER_RUN", True)
 
     # --- Preprocessing (FTRunner-primary) ---
     DEBUG_EXCERPT_CHAR_BUDGET: int = int(os.getenv("DEBUG_EXCERPT_CHAR_BUDGET", "6000"))

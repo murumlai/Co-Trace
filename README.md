@@ -40,9 +40,10 @@ defined in [designUI.md](designUI.md). The preprocessing design is tracked in
 - **Folder, file, or `.zip` upload** from the browser. Large batches can be uploaded as
   one root-level zip archive to avoid browser/API multipart file-count limits.
 - **Async processing** with job progress polling.
-- **Disk-backed job storage**: uploaded files, parsed records, warnings, progress, and
-  signature-analysis cache are job-scoped and persisted under `.cotrace_work`; no database
-  is used.
+- **Disk-backed result storage**: completed jobs keep parsed records, warnings, progress,
+  and analysis results in `job_state.json`. Uploaded folders, extracted zip contents, and
+  preprocessed artifacts are removed after processing by default; the cross-upload LLM
+  cache is persisted separately under `.cotrace_work`.
 - **Incomplete-folder warnings**: run folders that contain neither `ftrunnerlog01.txt` nor
   a reachable `debuglog.txt` are surfaced as a dismissible UI banner rather than silently
   dropped.
@@ -201,6 +202,7 @@ To stop the server, press `Ctrl+C` in the terminal running Uvicorn.
 | `UPLOAD_ZIP_MAX_FILES` | `20000` | Max files allowed inside a root-level uploaded `.zip` archive. |
 | `UPLOAD_ZIP_MAX_TOTAL_BYTES` | `2147483648` | Max total uncompressed bytes allowed from an uploaded `.zip`. |
 | `UPLOAD_ZIP_MAX_FILE_BYTES` | `536870912` | Max uncompressed size for one file inside an uploaded `.zip`. |
+| `CLEANUP_JOB_WORKDIR_AFTER_RUN` | `1` | Remove per-job uploaded files/extracted zip contents/preprocessed JSON after terminal job state. |
 | `ANALYSIS_CACHE_ENABLED` | `1` | Reuse successful LLM diagnoses across uploads with the same redacted failure context/model settings. |
 | `ANALYSIS_CACHE_FILE` | `<WORK_DIR>/analysis_cache.json` | Local disk cache for successful analysis results. |
 | `DEBUG_EXCERPT_CHAR_BUDGET` | `6000` | Max characters for a failed unit's DebugLog excerpt. |
