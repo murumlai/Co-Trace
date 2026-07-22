@@ -6,6 +6,7 @@ const toneOf = (r) => (r === 'PASS' ? 'pass' : r === 'FAIL' ? 'fail' : 'unknown'
 
 export default function Engineer({ jobId }) {
   const [units, setUnits] = useState([])
+  const [runCount, setRunCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
   const [quickFilter, setQuickFilter] = useState('all')
@@ -21,6 +22,7 @@ export default function Engineer({ jobId }) {
     setLoading(true)
     api.units(jobId).then((d) => {
       setUnits(d.units)
+      setRunCount(d.run_count ?? d.units.length)
       setLoading(false)
     })
   }, [jobId])
@@ -108,6 +110,11 @@ export default function Engineer({ jobId }) {
       <h1 className="font-display text-4xl font-extrabold tracking-tight text-ink mb-8">
         Engineer view
       </h1>
+      {!loading && runCount > units.length && (
+        <p className="mb-5 text-sm text-muted">
+          Showing latest result for {units.length} serial numbers from {runCount} test runs.
+        </p>
+      )}
 
       <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
         <div className="flex flex-wrap gap-3">

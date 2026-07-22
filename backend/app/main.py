@@ -19,6 +19,7 @@ from .config import settings
 from .job_registry import registry
 from .logging_config import setup_backend_logging, write_frontend_log
 from .models import FrontendLogRequest, LoginRequest, LoginResponse
+from .record_views import latest_records_by_serial
 from .upload_storage import UploadStorageError, save_uploads
 
 setup_backend_logging(settings.APP_DEBUG)
@@ -161,7 +162,12 @@ def units(job_id: str, user: str = Depends(require_user)) -> dict:
     job = registry.get(job_id)
     if job is None:
         raise HTTPException(404, "Job not found")
-    return {"units": [r.model_dump() for r in job.records]}
+    latest_units = latest_records_by_serial(job.records)
+    return {
+        "units": [r.model_dump() for r in latest_units],
+        "run_count": len(job.records),
+        "unique_serial_count": len(latest_units),
+    }
 
 
 @app.post("/api/jobs/{job_id}/units/{unit_id}/reanalyze")

@@ -25,6 +25,7 @@ import gzip
 
 from .config import settings
 from .models import StepRecord, UnitRecord
+from .record_views import latest_records_by_serial
 from .redaction import redact
 
 # ---- ANSI + generic line helpers ------------------------------------------
@@ -568,14 +569,15 @@ def _pass_unit_dict(r: UnitRecord, compact: bool) -> dict:
 
 def build_product_json(product_code: str, records: list[UnitRecord]) -> dict:
     compact = settings.PREPROCESSED_JSON_FORMAT != "legacy"
-    total = len(records)
-    passed = sum(1 for r in records if r.result == "PASS")
-    failed = sum(1 for r in records if r.result == "FAIL")
+    latest_records = latest_records_by_serial(records)
+    total = len(latest_records)
+    passed = sum(1 for r in latest_records if r.result == "PASS")
+    failed = sum(1 for r in latest_records if r.result == "FAIL")
     unknown = total - passed - failed
     fpy = round(passed / total * 100.0, 2) if total else 0.0
 
     units: list[dict] = []
-    for r in records:
+    for r in latest_records:
         if r.result == "FAIL":
             units.append(_fail_unit_dict(r, compact))
         else:
@@ -585,7 +587,15 @@ def build_product_json(product_code: str, records: list[UnitRecord]) -> dict:
         "schema_version": settings.PREPROCESSED_SCHEMA_VERSION,
         "product_code": product_code,
         "generated_at": datetime.utcnow().isoformat() + "Z",
-        "summary": {"total": total, "pass": passed, "fail": failed, "unknown": unknown, "fpy": fpy},
+        "summary": {
+            "total": total,
+            "pass": passed,
+            "fail": failed,
+            "unknown": unknown,
+            "fpy": fpy,
+            "run_count": len(records),
+            "retests": len(records) - total,
+        },
         "warnings": [],
         "units": units,
     }

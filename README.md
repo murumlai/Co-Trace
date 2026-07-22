@@ -4,9 +4,9 @@ Co_Trace is a browser-based dashboard for manufacturing test logs. It accepts up
 FTRunner-style log folders or files, parses per-unit test results, and presents two
 audience-specific views:
 
-- **Engineer view**: Pass/Fail by unit, shown as a sortable table (default) or expandable
-  cards. Failed units show a most-probable root cause, suggested solution, and an
-  expandable redacted snippet used for diagnosis.
+- **Engineer view**: latest Pass/Fail result per serial number, shown as a sortable table
+  (default) or expandable cards. Failed units show a most-probable root cause, suggested
+  solution, and an expandable redacted snippet used for diagnosis.
 - **Manager view**: First-pass yield (FPY), yield trend, Pareto of failure reasons,
   station/tester breakdown, and lot-to-lot comparison.
 
@@ -25,9 +25,9 @@ defined in [designUI.md](designUI.md). The preprocessing design is tracked in
 - Failed units that have a nested `DebugLog.txt` (motherboard-PAN / HST_ET / Aguila flows)
   get a bounded, redacted `debug_excerpt` selected around the FTRunner-detected failure.
 - Each processed batch emits one redacted `<product_code>.json` per product into the
-  per-job working directory; this artifact serves both the Engineer and Manager tabs. The
-  artifact is minified by default (`schema_version: 2`), omits empty/default fields, and
-  can optionally be gzipped — see `PREPROCESSED_JSON_*` below.
+  per-job working directory before cleanup. Its `units` array keeps only the latest test
+  run per serial number, includes `run_count`/`retests` in the summary, and can optionally
+  be gzipped — see `PREPROCESSED_JSON_*` below.
 - Job state is persisted to disk as `job_state.json` under each per-job working directory,
   restored on backend startup, and automatically deleted after the job TTL expires.
 - Failed-unit diagnosis routes through a configurable provider (`LLM_PROVIDER`): GitHub
