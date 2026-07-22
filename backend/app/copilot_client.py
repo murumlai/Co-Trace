@@ -1,0 +1,235 @@
+"""GitHub Copilot SDK provider for failed-unit diagnosis.
+
+Adapts the async ``github-copilot-sdk`` streaming pattern (proven in the
+AI_WG devops-log-analyzer app) into a small synchronous provider that mirrors
+``llm_client.analyze``'s contract:
+
+    analyze(error_code, error_message, snippet) -> (root_cause, solution, source)
+
+Design notes
+------------
+* Two-tier model policy (see ``llm_plan.md``): a cheap *mini* model first
+  summarizes/classifies the bounded, already-redacted excerpt; the larger
+  *reasoning* model then produces the final root cause and suggested solution.
+  Both default to the same model, so a single-model setup still works.
+* This module never sends raw multi-MB logs anywhere — it only ever receives
+  the deterministic, redacted excerpt selected upstream by the preprocessor /
+  analyzer.
+* Every failure path degrades gracefully to the deterministic offline stub so
+  the pipeline never crashes because Copilot is unavailable or unauthenticated.
+
+Requires ``github-copilot-sdk==0.2.0`` and a completed ``copilot auth login``
+on the host. When the SDK is not importable this module is inert and callers
+fall back to the stub.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+from typing import Any
+
+from .config import settings
+
+# ---- Optional SDK import (inert when unavailable) --------------------------
+try:  # pragma: no cover - import guard depends on host environment
+    from copilot import CopilotClient, PermissionHandler  # type: ignore
+
+    try:
+        from copilot import SubprocessConfig  # type: ignore
+    except ImportError:  # older/newer SDK layout
+        SubprocessConfig = None  # type: ignore
+        try:
+            from copilot.types import CopilotClientOptions  # type: ignore
+        except ImportError:
+            CopilotClientOptions = None  # type: ignore
+    else:
+        CopilotClientOptions = None  # type: ignore
+
+    _SDK_AVAILABLE = True
+except ImportError:
+    CopilotClient = None  # type: ignore
+    PermissionHandler = None  # type: ignore
+    SubprocessConfig = None  # type: ignore
+    CopilotClientOptions = None  # type: ignore
+    _SDK_AVAILABLE = False
+
+
+_DIAGNOSE_SYSTEM_PROMPT = (
+    "You are a manufacturing test-failure diagnostician. Given a redacted log "
+    "excerpt and structured error context from a failed hardware test run, "
+    "identify the single most probable root cause and a concrete suggested "
+    "solution. Be concise and specific. Respond ONLY as compact JSON with keys "
+    '"root_cause" and "suggested_solution".'
+)
+
+_SUMMARIZE_SYSTEM_PROMPT = (
+    "You are a manufacturing test-log triage assistant. Summarize the redacted "
+    "failure excerpt into at most 4 short bullet lines capturing the failing "
+    "step, error signal, and any obvious anomaly. Do not speculate on the root "
+    "cause. Return plain text only."
+)
+
+
+def is_available() -> bool:
+    """True when the Copilot SDK is importable in this environment."""
+    return _SDK_AVAILABLE
+
+
+# ---------------------------------------------------------------------------
+# SDK plumbing
+# ---------------------------------------------------------------------------
+def _create_client() -> Any:
+    env = dict(os.environ)
+    if settings.COPILOT_PROXY:
+        env.setdefault("HTTP_PROXY", settings.COPILOT_PROXY)
+        env.setdefault("HTTPS_PROXY", settings.COPILOT_PROXY)
+    if SubprocessConfig is not None:
+        return CopilotClient(SubprocessConfig(env=env))
+    if CopilotClientOptions is None:
+        raise ImportError(
+            "Neither SubprocessConfig nor CopilotClientOptions is importable "
+            "from the copilot SDK."
+        )
+    return CopilotClient(CopilotClientOptions(env=env))
+
+
+async def _stream_once(prompt: str, model: str, system_prompt: str) -> str:
+    """Run a single non-infinite streaming session and return the full text."""
+    client = _create_client()
+    session = None
+    chunks: list[str] = []
+    try:
+        await client.start()
+        session = await client.create_session(
+            on_permission_request=PermissionHandler.approve_all,
+            model=model,
+            available_tools=[],
+            system_message={"mode": "replace", "content": system_prompt},
+            infinite_sessions={"enabled": False},
+            streaming=True,
+        )
+        done = asyncio.Event()
+
+        def on_event(event: Any) -> None:
+            event_type = event.type.value if hasattr(event.type, "value") else str(event.type)
+            if event_type == "assistant.message_delta":
+                delta = getattr(event.data, "delta_content", None) or ""
+                if delta:
+                    chunks.append(delta)
+            elif event_type == "assistant.message":
+                if not chunks:
+                    content = getattr(event.data, "content", None) or ""
+                    if content:
+                        chunks.append(content)
+            elif event_type == "session.idle":
+                done.set()
+
+        session.on(on_event)
+        await session.send(prompt)
+        await asyncio.wait_for(done.wait(), timeout=settings.COPILOT_TIMEOUT_S)
+        return "".join(chunks)
+    finally:
+        if session is not None:
+            try:
+                await session.disconnect()
+            except Exception:  # noqa: BLE001 - best-effort cleanup
+                pass
+        try:
+            await client.stop()
+        except Exception:  # noqa: BLE001 - best-effort cleanup
+            pass
+
+
+def _run(coro: Any) -> Any:
+    """Run an async coroutine from the synchronous analyzer thread."""
+    return asyncio.run(coro)
+
+
+# ---------------------------------------------------------------------------
+# Prompt building + parsing
+# ---------------------------------------------------------------------------
+def _build_diagnose_prompt(
+    error_code: str | None, error_message: str | None, context: str
+) -> str:
+    return (
+        f"error_code: {error_code or 'UNKNOWN'}\n"
+        f"error_message: {error_message or 'N/A'}\n"
+        f"redacted_failure_context:\n{context}\n"
+    )
+
+
+def _parse_json_content(content: str) -> tuple[str, str]:
+    text = content.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        brace = text.find("{")
+        if brace != -1:
+            text = text[brace:]
+    try:
+        data = json.loads(text)
+        return (
+            str(data.get("root_cause", "")).strip() or "No root cause returned.",
+            str(data.get("suggested_solution", "")).strip() or "No solution returned.",
+        )
+    except (json.JSONDecodeError, ValueError):
+        # Fall back to a brace-bounded slice before giving up.
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end > start:
+            try:
+                data = json.loads(text[start : end + 1])
+                return (
+                    str(data.get("root_cause", "")).strip() or "No root cause returned.",
+                    str(data.get("suggested_solution", "")).strip() or "No solution returned.",
+                )
+            except (json.JSONDecodeError, ValueError):
+                pass
+        return content.strip() or "No root cause returned.", "See root cause above."
+
+
+# ---------------------------------------------------------------------------
+# Public provider entry point
+# ---------------------------------------------------------------------------
+def analyze(
+    error_code: str | None, error_message: str | None, snippet: str
+) -> tuple[str, str, str]:
+    """Diagnose a failure via the Copilot SDK. Returns (root, solution, source).
+
+    Runs at most one mini-enrichment pass plus one reasoning pass. Callers
+    (``analyzer._analyze_unit``) already dedupe by failure signature, so this
+    executes at most once per unique signature.
+    """
+    if not _SDK_AVAILABLE:
+        from . import llm_client
+
+        root, solution, _ = llm_client._offline_stub(error_code, error_message)
+        return root, f"{solution} (Copilot SDK not installed.)", "stub"
+
+    context = snippet or error_message or ""
+
+    try:
+        if settings.COPILOT_ENABLE_MINI_ENRICH and context.strip():
+            summary = _run(
+                _stream_once(
+                    f"Summarize this failure excerpt:\n{context}",
+                    settings.COPILOT_MINI_MODEL,
+                    _SUMMARIZE_SYSTEM_PROMPT,
+                )
+            ).strip()
+            if summary:
+                context = f"{summary}\n\n--- raw excerpt ---\n{context}"
+
+        content = _run(
+            _stream_once(
+                _build_diagnose_prompt(error_code, error_message, context),
+                settings.COPILOT_REASONING_MODEL,
+                _DIAGNOSE_SYSTEM_PROMPT,
+            )
+        )
+        root, solution = _parse_json_content(content)
+        return root, solution, "llm"
+    except Exception as exc:  # noqa: BLE001 - degrade gracefully to stub
+        from . import llm_client
+
+        root, solution, _ = llm_client._offline_stub(error_code, error_message)
+        return root, f"{solution} (Copilot error: {type(exc).__name__})", "stub"

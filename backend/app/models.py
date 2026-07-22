@@ -52,6 +52,7 @@ class UnitRecord(BaseModel):
     suggested_solution: Optional[str] = None
     redacted_snippet: Optional[str] = None
     analysis_source: Optional[str] = None  # "llm" | "stub" | "cached"
+    analysis_context_source: Optional[str] = None  # "debug_excerpt" | "ftrunner_snippet" | "error_message"
 
 
 class JobProgress(BaseModel):

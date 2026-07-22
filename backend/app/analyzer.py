@@ -32,10 +32,31 @@ def signature_for(record: UnitRecord) -> str:
     return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
 
 
-def _redacted_context(record: UnitRecord) -> tuple[str, str]:
+def build_llm_context(record: UnitRecord) -> tuple[str, str]:
+    """Select the best available failure context for the LLM and report its
+    source. Prefers the deterministic, bounded DebugLog excerpt, then the
+    FTRunner snippet, then the raw error message.
+
+    The DebugLog excerpt is the highest-signal source because it is anchored
+    on the actual failure (see ``extract_debug_excerpt``), so routing it into
+    the model — rather than the thin FTRunner snippet — is the whole point of
+    the deterministic extraction step.
+    """
+    if record.debug_excerpt:
+        return record.debug_excerpt, "debug_excerpt"
+    if record.ftrunner_snippet:
+        return record.ftrunner_snippet, "ftrunner_snippet"
+    return record.error_message or "", "error_message"
+
+
+def _redacted_context(record: UnitRecord) -> tuple[str, str, str]:
+    """Return (redacted_error_message, redacted_context, context_source)."""
     err_msg = redaction.redact(record.error_message)
-    snippet = redaction.redact(record.redacted_snippet or record.error_message or "")
-    return err_msg, snippet
+    raw_context, source = build_llm_context(record)
+    # debug_excerpt is stored redacted with keep_serial=True; re-redacting with
+    # the default scrubs the serial before anything leaves the process.
+    snippet = redaction.redact(raw_context or record.error_message or "")
+    return err_msg, snippet, source
 
 
 def analyze_job(job: Job, analyze_failure: AnalyzeFailure = llm_client.analyze) -> None:
@@ -54,8 +75,9 @@ def _analyze_unit(
 ) -> None:
     sig = signature_for(rec)
     rec.signature = sig
-    err_msg, snippet = _redacted_context(rec)
+    err_msg, snippet, context_source = _redacted_context(rec)
     rec.redacted_snippet = snippet
+    rec.analysis_context_source = context_source
 
     if not force and sig in job.signature_cache:
         root, solution, _src = job.signature_cache[sig]

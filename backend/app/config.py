@@ -4,7 +4,20 @@ from __future__ import annotations
 import os
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 class Settings:
+    # --- LLM provider selection ---
+    # Routes failed-unit diagnosis. One of: "github_models" | "copilot_sdk" |
+    # "offline_stub". Default preserves the original GitHub Models behavior
+    # (which itself degrades to the offline stub when GITHUB_TOKEN is unset).
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "github_models")
+
     # --- LLM (GitHub Models) ---
     # If no token is present the analyzer falls back to a deterministic offline stub,
     # so the app is fully runnable without any external calls.
@@ -13,6 +26,18 @@ class Settings:
     LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-4o-mini")  # cost-efficient default
     LLM_TIMEOUT_S: float = float(os.getenv("LLM_TIMEOUT_S", "30"))
     LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "2"))
+
+    # --- LLM (GitHub Copilot SDK provider) ---
+    # Two-tier model policy: a cheap "mini" model summarizes/classifies the
+    # bounded redacted excerpt; a larger "reasoning" model produces the final
+    # root cause and suggested solution. Both default to the mini model so a
+    # single-model setup works out of the box.
+    COPILOT_MINI_MODEL: str = os.getenv("COPILOT_MINI_MODEL", "gpt-5.4-mini")
+    COPILOT_REASONING_MODEL: str = os.getenv("COPILOT_REASONING_MODEL", "gpt-5.4-mini")
+    COPILOT_PROXY: str = os.getenv("COPILOT_PROXY", "")
+    COPILOT_TIMEOUT_S: float = float(os.getenv("COPILOT_TIMEOUT_S", "60"))
+    # Run the mini enrichment/summarization pass before the reasoning call.
+    COPILOT_ENABLE_MINI_ENRICH: bool = _env_flag("COPILOT_ENABLE_MINI_ENRICH", True)
 
     # --- Auth (placeholder) ---
     APP_USERNAME: str = os.getenv("APP_USERNAME", "admin")
@@ -25,9 +50,22 @@ class Settings:
 
     # --- Preprocessing (FTRunner-primary) ---
     DEBUG_EXCERPT_CHAR_BUDGET: int = int(os.getenv("DEBUG_EXCERPT_CHAR_BUDGET", "6000"))
+    FTRUNNER_SNIPPET_CHAR_BUDGET: int = int(os.getenv("FTRUNNER_SNIPPET_CHAR_BUDGET", "2000"))
     ZIP_MAX_TOTAL_BYTES: int = int(os.getenv("ZIP_MAX_TOTAL_BYTES", str(200 * 1024 * 1024)))
     ZIP_MAX_FILE_BYTES: int = int(os.getenv("ZIP_MAX_FILE_BYTES", str(100 * 1024 * 1024)))
     ZIP_MAX_DEPTH: int = int(os.getenv("ZIP_MAX_DEPTH", "3"))
+
+    # --- Preprocessed JSON artifact ---
+    # schema_version is stamped into every emitted <product_code>.json so
+    # consumers can detect the compact contract. "compact" mode omits empty/
+    # default fields, drops always-empty diagnosis placeholders, caps snippets
+    # and writes minified JSON. "legacy" mode preserves the original pretty,
+    # fully-populated shape. PRETTY forces indentation for debugging; GZIP
+    # writes an additional <product_code>.json.gz alongside the raw file.
+    PREPROCESSED_SCHEMA_VERSION: int = 2
+    PREPROCESSED_JSON_FORMAT: str = os.getenv("PREPROCESSED_JSON_FORMAT", "compact")  # compact | legacy
+    PREPROCESSED_JSON_PRETTY: bool = _env_flag("PREPROCESSED_JSON_PRETTY", False)
+    PREPROCESSED_JSON_GZIP: bool = _env_flag("PREPROCESSED_JSON_GZIP", False)
 
     # --- CORS (dev) ---
     CORS_ORIGINS: list[str] = os.getenv(

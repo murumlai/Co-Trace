@@ -43,7 +43,27 @@ def _offline_stub(error_code: str | None, error_message: str | None) -> tuple[st
 
 
 def analyze(error_code: str | None, error_message: str | None, snippet: str) -> tuple[str, str, str]:
-    """Return (root_cause, suggested_solution, source)."""
+    """Return (root_cause, suggested_solution, source).
+
+    Dispatches to the configured provider (``settings.LLM_PROVIDER``):
+    ``copilot_sdk`` uses the GitHub Copilot SDK, ``offline_stub`` forces the
+    deterministic heuristic, and ``github_models`` (default) uses the GitHub
+    Models chat API — itself falling back to the stub when no token is set.
+    """
+    provider = (settings.LLM_PROVIDER or "github_models").lower()
+    if provider == "offline_stub":
+        return _offline_stub(error_code, error_message)
+    if provider == "copilot_sdk":
+        from . import copilot_client
+
+        return copilot_client.analyze(error_code, error_message, snippet)
+    return _analyze_github_models(error_code, error_message, snippet)
+
+
+def _analyze_github_models(
+    error_code: str | None, error_message: str | None, snippet: str
+) -> tuple[str, str, str]:
+    """GitHub Models chat-completions path."""
     if not settings.GITHUB_TOKEN:
         return _offline_stub(error_code, error_message)
 

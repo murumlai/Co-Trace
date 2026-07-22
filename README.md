@@ -25,11 +25,15 @@ defined in [designUI.md](designUI.md). The preprocessing design is tracked in
 - Failed units that have a nested `DebugLog.txt` (motherboard-PAN / HST_ET / Aguila flows)
   get a bounded, redacted `debug_excerpt` selected around the FTRunner-detected failure.
 - Each processed batch emits one redacted `<product_code>.json` per product into the
-  per-job working directory; this artifact serves both the Engineer and Manager tabs.
+  per-job working directory; this artifact serves both the Engineer and Manager tabs. The
+  artifact is minified by default (`schema_version: 2`), omits empty/default fields, and
+  can optionally be gzipped — see `PREPROCESSED_JSON_*` below.
 - Job state is persisted to disk as `job_state.json` under each per-job working directory,
   restored on backend startup, and automatically deleted after the job TTL expires.
-- GitHub Models integration is wired, but if `GITHUB_TOKEN` is not set, analysis uses a
-  deterministic offline stub and makes no external LLM calls.
+- Failed-unit diagnosis routes through a configurable provider (`LLM_PROVIDER`): GitHub
+  Models (default), the GitHub Copilot SDK, or a deterministic offline stub. If the chosen
+  provider is unavailable (e.g. no `GITHUB_TOKEN`, or the Copilot SDK is not installed),
+  analysis degrades to the offline stub and makes no external calls.
 
 ## Key Features
 
@@ -164,20 +168,30 @@ To stop the server, press `Ctrl+C` in the terminal running Uvicorn.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `LLM_PROVIDER` | `github_models` | Diagnosis provider: `github_models`, `copilot_sdk`, or `offline_stub`. |
 | `GITHUB_TOKEN` | empty | GitHub Models token. If unset, failed-unit diagnosis uses the offline stub. |
 | `LLM_ENDPOINT` | `https://models.inference.ai.azure.com/chat/completions` | Chat completions endpoint. |
 | `LLM_MODEL` | `gpt-4o-mini` | Configurable cost-conscious model default. |
 | `LLM_TIMEOUT_S` | `30` | LLM request timeout in seconds. |
 | `LLM_MAX_RETRIES` | `2` | Number of retry attempts after an LLM call failure. |
+| `COPILOT_MINI_MODEL` | `gpt-5.4-mini` | Copilot SDK model for excerpt summarization/classification. |
+| `COPILOT_REASONING_MODEL` | `gpt-5.4-mini` | Copilot SDK model for final root-cause/solution. |
+| `COPILOT_PROXY` | empty | Optional `HTTP(S)_PROXY` used by the Copilot SDK subprocess. |
+| `COPILOT_TIMEOUT_S` | `60` | Per-call timeout for a Copilot SDK streaming session. |
+| `COPILOT_ENABLE_MINI_ENRICH` | `1` | Run the mini summarization pass before the reasoning call. |
 | `APP_USERNAME` | `admin` | Placeholder login username. |
 | `APP_PASSWORD` | `admin` | Placeholder login password. |
 | `SESSION_TTL_S` | `28800` | Placeholder auth session lifetime in seconds. |
 | `WORK_DIR` | `.cotrace_work` under the process working directory | Temporary per-job upload storage. |
 | `JOB_TTL_S` | `2592000` | Job persistence and auto-delete window in seconds (30 days). |
 | `DEBUG_EXCERPT_CHAR_BUDGET` | `6000` | Max characters for a failed unit's DebugLog excerpt. |
+| `FTRUNNER_SNIPPET_CHAR_BUDGET` | `2000` | Max characters for a failed unit's FTRunner snippet (compact mode). |
 | `ZIP_MAX_TOTAL_BYTES` | `209715200` | Total extraction budget per run folder (zip-bomb guard). |
 | `ZIP_MAX_FILE_BYTES` | `104857600` | Max size of a single extracted zip member. |
 | `ZIP_MAX_DEPTH` | `3` | Max nested-zip recursion depth for DebugLog discovery. |
+| `PREPROCESSED_JSON_FORMAT` | `compact` | `compact` (minified, omits empty fields) or `legacy` (pretty, full shape). |
+| `PREPROCESSED_JSON_PRETTY` | `0` | Force indented output for debugging (overrides compact minification). |
+| `PREPROCESSED_JSON_GZIP` | `0` | Also write a sibling `<product_code>.json.gz`. |
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Allowed dev frontend origins. |
 
 Example PowerShell configuration:
@@ -203,7 +217,8 @@ backend/app/
   aggregator.py    Manager metrics: FPY, trend, Pareto, stations, lots
   analyzer.py      Engineer signature deduplication and diagnosis flow
   redaction.py     Sensitive-data scrubbing (keep_serial mode for at-rest JSON)
-  llm_client.py    GitHub Models client with offline stub fallback
+  llm_client.py    Provider router (GitHub Models) with offline stub fallback
+  copilot_client.py GitHub Copilot SDK provider (two-tier mini + reasoning models)
 
 frontend/src/
   App.jsx                  Login-gated shell, Home/Engineer/Manager tabs, warning banner
@@ -221,6 +236,9 @@ frontend/src/
 # Backend smoke test against a sample product folder (FTRunner-primary)
 .\backend\.venv\Scripts\python.exe -c "import sys, collections; sys.path.insert(0,'backend'); from app.preprocessor import get_preprocessor; from app import aggregator; recs=get_preprocessor().process_folder(r'Log_Files_Folder/All_LogFiles_M95113-001'); mv=aggregator.build_manager_view(recs); print(len(recs)); print(collections.Counter(r.result for r in recs)); print(mv['summary'])"
 
+# Measure preprocessed JSON size (legacy vs compact vs gzip, per-field breakdown)
+.\.venv\Scripts\python.exe backend\scripts\measure_preprocessed.py "Log_Files_Folder\All_LogFiles_M95113-001"
+
 # Frontend production build
 $env:Path = 'C:\Program Files\nodejs;' + $env:Path
 cd frontend
@@ -234,9 +252,10 @@ git status --short --ignored
 
 - **DebugLog excerpt tuning**: extraction anchors on the FTRunner failure signal with a
   generic-marker fallback; the exact markers and char budget remain a tuning item.
-- **Per-product JSON backfill**: the preprocessing JSON still carries empty `root_cause` /
-  `suggested_solution` placeholders. Engineer diagnosis is populated later in persisted
-  job state after the analyzer runs.
+- **Per-product JSON backfill**: in compact mode the preprocessing JSON omits the empty
+  `root_cause` / `suggested_solution` placeholders (they are always empty at write time);
+  Engineer diagnosis is populated later in persisted job state after the analyzer runs.
+  Set `PREPROCESSED_JSON_FORMAT=legacy` to restore the fully-populated shape.
 - **Docker packaging**: the app is structured to be containerized, but no Dockerfile or
   compose file is included yet.
 - **Placeholder auth**: SimpleAuth is intentionally temporary (in-memory tokens do not

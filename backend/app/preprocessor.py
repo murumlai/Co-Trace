@@ -21,6 +21,8 @@ import zipfile
 from datetime import datetime
 from typing import Iterable, Protocol
 
+import gzip
+
 from .config import settings
 from .models import StepRecord, UnitRecord
 from .redaction import redact
@@ -501,7 +503,71 @@ class FtrunnerPreprocessor:
 # ---------------------------------------------------------------------------
 # Phase 5 — per-PRODUCTCODE JSON emission
 # ---------------------------------------------------------------------------
+def _cap(text: str | None, budget: int) -> str | None:
+    """Cap a snippet to `budget` chars, marking any truncation so downstream
+    readers know the excerpt is bounded."""
+    if text is None:
+        return None
+    if budget > 0 and len(text) > budget:
+        return text[:budget].rstrip() + "\n…[truncated]"
+    return text
+
+
+def _prune(d: dict) -> dict:
+    """Drop keys whose value is None (compact mode). Empty strings and empty
+    lists are dropped too since consumers use ``.get`` with defaults."""
+    return {k: v for k, v in d.items() if v is not None and v != "" and v != []}
+
+
+def _fail_unit_dict(r: UnitRecord, compact: bool) -> dict:
+    snippet = redact(r.ftrunner_snippet, keep_serial=True) or None
+    if compact:
+        snippet = _cap(snippet, settings.FTRUNNER_SNIPPET_CHAR_BUDGET)
+    data = {
+        "unit_id": r.unit_id,
+        "serial_number": r.serial_number,
+        "result": r.result,
+        "op_id": r.op_id,
+        "station_id": r.station_id,
+        "host": r.host,
+        "lot_id": r.lot_id,
+        "start_time": r.start_time,
+        "end_time": r.end_time,
+        "duration_s": r.duration_s,
+        "steps": [s.model_dump() for s in r.steps],
+        "error_code": r.error_code,
+        "error_message": redact(r.error_message, keep_serial=True) or None,
+        "failing_step": r.failing_step,
+        "ftrunner_snippet": snippet,
+        "debug_excerpt": r.debug_excerpt,  # already redacted at extraction time
+    }
+    if compact:
+        # root_cause / suggested_solution are always empty at write time (the
+        # orchestrator emits this artifact before the analyzer runs), so the
+        # legacy placeholders are pure overhead. Omit them in compact mode.
+        return _prune(data)
+    data["root_cause"] = ""
+    data["suggested_solution"] = ""
+    return data
+
+
+def _pass_unit_dict(r: UnitRecord, compact: bool) -> dict:
+    data = {
+        "serial_number": r.serial_number,
+        "result": r.result,
+        "op_id": r.op_id,
+        "station_id": r.station_id,
+        "host": r.host,
+        "lot_id": r.lot_id,
+        "start_time": r.start_time,
+        "end_time": r.end_time,
+        "duration_s": r.duration_s,
+    }
+    return _prune(data) if compact else data
+
+
 def build_product_json(product_code: str, records: list[UnitRecord]) -> dict:
+    compact = settings.PREPROCESSED_JSON_FORMAT != "legacy"
     total = len(records)
     passed = sum(1 for r in records if r.result == "PASS")
     failed = sum(1 for r in records if r.result == "FAIL")
@@ -511,40 +577,12 @@ def build_product_json(product_code: str, records: list[UnitRecord]) -> dict:
     units: list[dict] = []
     for r in records:
         if r.result == "FAIL":
-            units.append({
-                "unit_id": r.unit_id,
-                "serial_number": r.serial_number,
-                "result": r.result,
-                "op_id": r.op_id,
-                "station_id": r.station_id,
-                "host": r.host,
-                "lot_id": r.lot_id,
-                "start_time": r.start_time,
-                "end_time": r.end_time,
-                "duration_s": r.duration_s,
-                "steps": [s.model_dump() for s in r.steps],
-                "error_code": r.error_code,
-                "error_message": redact(r.error_message, keep_serial=True) or None,
-                "failing_step": r.failing_step,
-                "ftrunner_snippet": redact(r.ftrunner_snippet, keep_serial=True) or None,
-                "debug_excerpt": r.debug_excerpt,  # already redacted at extraction time
-                "root_cause": "",
-                "suggested_solution": "",
-            })
+            units.append(_fail_unit_dict(r, compact))
         else:
-            units.append({
-                "serial_number": r.serial_number,
-                "result": r.result,
-                "op_id": r.op_id,
-                "station_id": r.station_id,
-                "host": r.host,
-                "lot_id": r.lot_id,
-                "start_time": r.start_time,
-                "end_time": r.end_time,
-                "duration_s": r.duration_s,
-            })
+            units.append(_pass_unit_dict(r, compact))
 
     return {
+        "schema_version": settings.PREPROCESSED_SCHEMA_VERSION,
         "product_code": product_code,
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "summary": {"total": total, "pass": passed, "fail": failed, "unknown": unknown, "fpy": fpy},
@@ -558,11 +596,21 @@ def write_product_jsons(
 ) -> list[str]:
     """Group records by product_code and write one redacted
     `<product_code>.json` per group into `output_dir`. Returns the written
-    file paths."""
+    file paths.
+
+    Serialization respects the ``PREPROCESSED_JSON_*`` settings: compact
+    (minified) by default, ``PRETTY`` for indented debugging output, and an
+    optional sibling ``.json.gz`` when ``GZIP`` is enabled.
+    """
     os.makedirs(output_dir, exist_ok=True)
     by_product: dict[str, list[UnitRecord]] = {}
     for r in records:
         by_product.setdefault(r.product_code or "UNKNOWN", []).append(r)
+
+    if settings.PREPROCESSED_JSON_PRETTY or settings.PREPROCESSED_JSON_FORMAT == "legacy":
+        dump_kwargs: dict = {"indent": 2}
+    else:
+        dump_kwargs = {"separators": (",", ":")}
 
     written: list[str] = []
     for product_code, recs in by_product.items():
@@ -570,10 +618,16 @@ def write_product_jsons(
         if warnings:
             doc["warnings"] = list(warnings)
         safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", product_code)
+        payload = json.dumps(doc, **dump_kwargs)
         path = os.path.join(output_dir, f"{safe_name}.json")
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump(doc, fh, indent=2)
+            fh.write(payload)
         written.append(path)
+        if settings.PREPROCESSED_JSON_GZIP:
+            gz_path = path + ".gz"
+            with gzip.open(gz_path, "wt", encoding="utf-8") as gz:
+                gz.write(payload)
+            written.append(gz_path)
     return written
 
 
