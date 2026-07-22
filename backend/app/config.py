@@ -21,7 +21,6 @@ class Settings:
 
     # --- Jobs / storage ---
     WORK_DIR: str = os.getenv("WORK_DIR", os.path.join(os.getcwd(), ".cotrace_work"))
-    PREPROCESSED_DIR: str = os.getenv("PREPROCESSED_DIR", os.path.join(os.getcwd(), "preprocessed"))
     JOB_TTL_S: int = int(os.getenv("JOB_TTL_S", str(60 * 60 * 24 * 30)))  # 30 days
 
     # --- Preprocessing (FTRunner-primary) ---

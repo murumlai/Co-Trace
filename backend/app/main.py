@@ -34,7 +34,6 @@ app.add_middleware(
 )
 
 os.makedirs(settings.WORK_DIR, exist_ok=True)
-os.makedirs(settings.PREPROCESSED_DIR, exist_ok=True)
 
 
 # --------------------------------------------------------------------------

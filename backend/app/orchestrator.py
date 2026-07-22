@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 
 from . import analyzer
-from .config import settings
 from .job_registry import registry
 from .preprocessor import find_incomplete_folders, get_preprocessor, write_product_jsons
 
@@ -43,11 +42,9 @@ def run_job(job_id: str) -> None:
         job.save()
 
         # One redacted <product_code>.json per product, serving both tabs.
-        # Written to the stable app-root preprocessed/ folder so the files
-        # persist across backend restarts and job eviction.
         job.message = "Writing per-product JSON"
         write_product_jsons(
-            records, settings.PREPROCESSED_DIR, warnings=job.warnings
+            records, os.path.join(job.workdir, "preprocessed"), warnings=job.warnings
         )
 
         # Engineer analysis only for failed units (grouped by signature).
