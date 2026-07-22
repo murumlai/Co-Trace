@@ -8,6 +8,8 @@ export default function Engineer({ jobId }) {
   const [units, setUnits] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
+  const [quickFilter, setQuickFilter] = useState('all')
+  const [serialFilter, setSerialFilter] = useState('all')
   const [view, setView] = useState('table')
   const [expanded, setExpanded] = useState(null)
   const [reanalyzing, setReanalyzing] = useState(null)
@@ -29,7 +31,42 @@ export default function Engineer({ jobId }) {
     return c
   }, [units])
 
-  const shown = units.filter((u) => filter === 'all' || u.result === filter)
+  const serials = useMemo(
+    () =>
+      Array.from(new Set(units.map((u) => u.serial_number || u.unit_id).filter(Boolean))).sort(),
+    [units],
+  )
+
+  const setResultFilter = (result) => {
+    setFilter(result)
+    setSerialFilter('all')
+    setQuickFilter(result === 'all' ? 'all' : `result:${result}`)
+  }
+
+  const setDropdownFilter = (value) => {
+    setQuickFilter(value)
+    if (value === 'all') {
+      setFilter('all')
+      setSerialFilter('all')
+      return
+    }
+    if (value.startsWith('result:')) {
+      setFilter(value.slice('result:'.length))
+      setSerialFilter('all')
+      return
+    }
+    if (value.startsWith('serial:')) {
+      setFilter('all')
+      setSerialFilter(value.slice('serial:'.length))
+    }
+  }
+
+  const shown = units.filter((u) => {
+    const serial = u.serial_number || u.unit_id
+    const matchesResult = filter === 'all' || u.result === filter
+    const matchesSerial = serialFilter === 'all' || serial === serialFilter
+    return matchesResult && matchesSerial
+  })
 
   const reanalyze = async (unit) => {
     setReanalyzing(unit.unit_id)
@@ -82,7 +119,7 @@ export default function Engineer({ jobId }) {
           ].map(([key, label]) => (
             <button
               key={key}
-              onClick={() => setFilter(key)}
+              onClick={() => setResultFilter(key)}
               className={[
                 'rounded-2xl px-5 py-2.5 text-sm font-medium transition-all duration-300 focus-ring',
                 filter === key
@@ -93,6 +130,22 @@ export default function Engineer({ jobId }) {
               {label} <span className="opacity-60">({counts[key] ?? 0})</span>
             </button>
           ))}
+          <select
+            value={quickFilter}
+            onChange={(event) => setDropdownFilter(event.target.value)}
+            className="rounded-2xl bg-base px-5 py-2.5 text-sm font-medium text-muted shadow-extruded-sm focus-ring"
+          >
+            <option value="all">All units</option>
+            <option value="result:FAIL">Failed units</option>
+            <option value="result:PASS">Passed units</option>
+            <optgroup label="Serial number">
+              {serials.map((serial) => (
+                <option key={serial} value={`serial:${serial}`}>
+                  {serial}
+                </option>
+              ))}
+            </optgroup>
+          </select>
         </div>
 
         <div className="flex items-center gap-1 rounded-2xl bg-base shadow-inset-sm p-1 shrink-0">
@@ -156,7 +209,6 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
             <tr className="text-muted text-left">
               <th className="pb-3 font-medium">Result</th>
               <th className="pb-3 font-medium">Serial</th>
-              <th className="pb-3 font-medium">Product</th>
               <th className="pb-3 font-medium">Station</th>
               <th className="pb-3 font-medium">Lot</th>
               <th className="pb-3 font-medium text-right">Duration</th>
@@ -173,7 +225,6 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                   <td className="py-3 whitespace-nowrap font-medium">
                     {u.serial_number || u.unit_id}
                   </td>
-                  <td className="py-3 whitespace-nowrap">{u.product_code || '—'}</td>
                   <td className="py-3 whitespace-nowrap">{u.station_id || '—'}</td>
                   <td className="py-3 whitespace-nowrap">{u.lot_id || '—'}</td>
                   <td className="py-3 text-right whitespace-nowrap">
@@ -194,7 +245,7 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                 </tr>
                 {u.result === 'FAIL' && expanded === u.unit_id && (
                   <tr>
-                    <td colSpan={7} className="pb-5 pt-1">
+                    <td colSpan={6} className="pb-5 pt-1">
                       <FailDetails
                         u={u}
                         showSnippet
