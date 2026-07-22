@@ -20,6 +20,7 @@ _NUM = re.compile(r"\d+")
 log = logging.getLogger("cotrace.analyzer")
 
 AnalyzeFailure = Callable[[str | None, str | None, str], tuple[str, str, str]]
+AnalysisProgress = Callable[[int, int, str], None]
 
 
 def _normalize_msg(msg: str | None) -> str:
@@ -61,15 +62,54 @@ def _redacted_context(record: UnitRecord) -> tuple[str, str, str]:
     return err_msg, snippet, source
 
 
-def analyze_job(job: Job, analyze_failure: AnalyzeFailure = llm_client.analyze) -> None:
+def analyze_job(
+    job: Job,
+    analyze_failure: AnalyzeFailure = llm_client.analyze,
+    progress_callback: AnalysisProgress | None = None,
+) -> None:
     """Populate root cause / solution for all failed units, using the cache."""
-    fail_count = sum(1 for rec in job.records if rec.result == "FAIL")
-    log.info("Analysis started for job %s: %s failed units, %s cached signatures.", job.job_id[:8], fail_count, len(job.signature_cache))
-    for rec in job.records:
-        if rec.result != "FAIL":
-            continue
+    failed = [rec for rec in job.records if rec.result == "FAIL"]
+    total_signatures = len({signature_for(rec) for rec in failed})
+    log.info(
+        "Analysis started for job %s: %s failed units, %s unique signatures, %s cached signatures.",
+        job.job_id[:8],
+        len(failed),
+        total_signatures,
+        len(job.signature_cache),
+    )
+    if progress_callback:
+        progress_callback(0, total_signatures, _analysis_progress_message(0, total_signatures, "starting"))
+
+    completed_signatures: set[str] = set()
+    for rec in failed:
+        sig = signature_for(rec)
+        is_new_signature = sig not in completed_signatures
+        if is_new_signature and progress_callback:
+            progress_callback(
+                len(completed_signatures),
+                total_signatures,
+                _analysis_progress_message(len(completed_signatures) + 1, total_signatures, "running"),
+            )
         _analyze_unit(job, rec, force=False, analyze_failure=analyze_failure)
+        if is_new_signature:
+            completed_signatures.add(sig)
+            if progress_callback:
+                progress_callback(
+                    len(completed_signatures),
+                    total_signatures,
+                    _analysis_progress_message(len(completed_signatures), total_signatures, "done"),
+                )
     log.info("Analysis finished for job %s: %s cached signatures.", job.job_id[:8], len(job.signature_cache))
+
+
+def _analysis_progress_message(done: int, total: int, state: str) -> str:
+    if total == 0:
+        return "No failed units need analysis"
+    if state == "starting":
+        return f"Preparing failure analysis for {total} signature{'s' if total != 1 else ''}"
+    if state == "running":
+        return f"Analyzing failure signature {done}/{total}; LLM calls can take a minute"
+    return f"Analyzed failure signature {done}/{total}"
 
 
 def _analyze_unit(

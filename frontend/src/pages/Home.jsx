@@ -81,6 +81,7 @@ export default function Home({ onJobReady }) {
   }
 
   const pct = progress && progress.total ? Math.round((progress.processed / progress.total) * 100) : 0
+  const progressLabel = progress && progress.total ? `${progress.processed}/${progress.total} • ${pct}%` : `${pct}%`
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-12">
@@ -160,7 +161,7 @@ export default function Home({ onJobReady }) {
           <div className="mt-6">
             <div className="flex justify-between text-sm text-muted mb-2">
               <span>{progress.message || progress.status}</span>
-              <span>{pct}%</span>
+              <span>{progressLabel}</span>
             </div>
             <div className="h-4 rounded-full bg-base shadow-inset-sm overflow-hidden">
               <div
