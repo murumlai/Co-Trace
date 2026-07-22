@@ -74,7 +74,7 @@ export default function Login() {
           )}
 
           {!error && sessionExpired && (
-            <div className="rounded-2xl bg-base shadow-inset-sm px-4 py-3 text-sm text-amber-700">
+            <div className="rounded-2xl bg-base shadow-inset-sm px-4 py-3 text-sm text-warning">
               Your session expired. Please sign in again.
             </div>
           )}

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { AuthProvider, useAuth } from './auth'
 import Login from './pages/Login'
@@ -19,6 +19,7 @@ function relPath(file) {
 
 function Shell() {
   const { isAuthed, username, logout } = useAuth()
+  const [theme, setTheme] = useState(() => localStorage.getItem('cotrace-theme') || 'light')
   const [tab, setTab] = useState('home')
   const [jobId, setJobId] = useState(null)
   const [activeJobId, setActiveJobId] = useState(null)
@@ -30,7 +31,16 @@ function Shell() {
   const runToken = useRef(0)
   const uploadAbort = useRef(null)
 
+  useEffect(() => {
+    const root = document.documentElement
+    root.dataset.theme = theme
+    root.style.colorScheme = theme
+    localStorage.setItem('cotrace-theme', theme)
+  }, [theme])
+
   if (!isAuthed) return <Login />
+
+  const toggleTheme = () => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
 
   const onJobReady = (id, jobWarnings = []) => {
     setJobId(id)
@@ -137,6 +147,33 @@ function Shell() {
     </button>
   )
 
+  const ThemeSwitch = ({ className = '' }) => {
+    const dark = theme === 'dark'
+    return (
+      <button
+        type="button"
+        role="switch"
+        aria-checked={dark}
+        aria-label={`Switch to ${dark ? 'light' : 'dark'} mode`}
+        onClick={toggleTheme}
+        className={[
+          'flex items-center gap-2 rounded-2xl bg-base px-3 py-2 text-sm text-muted shadow-extruded-sm transition-all duration-300 hover:-translate-y-px hover:text-ink focus-ring',
+          className,
+        ].join(' ')}
+      >
+        <span className="relative h-6 w-11 rounded-full bg-base shadow-inset-sm">
+          <span
+            className={[
+              'absolute top-1 h-4 w-4 rounded-full bg-accent shadow-extruded-sm transition-transform duration-300',
+              dark ? 'translate-x-6' : 'translate-x-1',
+            ].join(' ')}
+          />
+        </span>
+        <span>{dark ? 'Dark' : 'Light'}</span>
+      </button>
+    )
+  }
+
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-20 backdrop-blur-sm">
@@ -156,6 +193,7 @@ function Shell() {
             </nav>
 
             <div className="hidden md:flex items-center gap-4">
+              <ThemeSwitch />
               {batchRunning && (
                 <button
                   onClick={stopBatch}
@@ -195,6 +233,7 @@ function Shell() {
                   Stop batch
                 </button>
               )}
+              <ThemeSwitch className="justify-center" />
               <button
                 onClick={logout}
                 className="rounded-2xl bg-base px-4 py-2.5 text-sm text-muted shadow-inset-sm focus-ring"
@@ -208,10 +247,10 @@ function Shell() {
         {warnings.length > 0 && (
           <div className="mx-auto max-w-7xl px-6 pt-4">
             <div className="rounded-card bg-base shadow-inset-sm px-5 py-3 flex items-start justify-between gap-4">
-              <div className="text-sm text-amber-700">
+              <div className="text-sm text-warning">
                 <span className="font-semibold">{warnings.length} folder{warnings.length === 1 ? '' : 's'} skipped:</span>{' '}
                 no ftrunnerlog01.txt or debuglog.txt found. These runs were excluded from the results.
-                <ul className="mt-1 list-disc list-inside text-xs text-amber-600 max-h-24 overflow-auto">
+                <ul className="mt-1 list-disc list-inside text-xs text-warning-muted max-h-24 overflow-auto">
                   {warnings.map((w) => (
                     <li key={w}>{w}</li>
                   ))}

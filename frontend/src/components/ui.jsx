@@ -1,5 +1,4 @@
 // Neumorphic UI primitives — the shared building blocks for every surface.
-// All depth comes from dual shadows on the single #E0E5EC base color.
 
 export function Card({ className = '', hover = false, children, ...rest }) {
   return (
@@ -77,7 +76,11 @@ export function Badge({ tone = 'muted', children }) {
         className="h-2 w-2 rounded-full"
         style={{
           backgroundColor:
-            tone === 'pass' ? '#38B2AC' : tone === 'fail' ? '#E05260' : '#6B7280',
+            tone === 'pass'
+              ? 'rgb(var(--color-teal))'
+              : tone === 'fail'
+                ? 'rgb(var(--color-danger))'
+                : 'rgb(var(--color-muted))',
         }}
       />
       {children}

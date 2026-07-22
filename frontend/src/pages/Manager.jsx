@@ -14,8 +14,11 @@ import {
 import { api } from '../api'
 import { Card, IconWell, Stat } from '../components/ui'
 
-const AXIS = { fill: '#6B7280', fontSize: 12, fontFamily: 'DM Sans' }
-const GRID = '#c9d0da'
+const AXIS = { fill: 'rgb(var(--color-muted))', fontSize: 12, fontFamily: 'DM Sans' }
+const GRID = 'rgb(var(--color-grid))'
+const ACCENT = 'rgb(var(--color-accent))'
+const TEAL = 'rgb(var(--color-teal))'
+const DANGER = 'rgb(var(--color-danger))'
 
 function ChartCard({ title, children }) {
   return (
@@ -27,11 +30,11 @@ function ChartCard({ title, children }) {
 }
 
 const tooltipStyle = {
-  background: '#E0E5EC',
+  background: 'rgb(var(--color-base))',
   border: 'none',
   borderRadius: 16,
-  boxShadow: '6px 6px 12px rgb(163 177 198 / 0.6), -6px -6px 12px rgb(255 255 255 / 0.5)',
-  color: '#3D4852',
+  boxShadow: 'var(--shadow-extruded-sm)',
+  color: 'rgb(var(--color-ink))',
 }
 
 export default function Manager({ jobId }) {
@@ -81,9 +84,9 @@ export default function Manager({ jobId }) {
               <Line
                 type="monotone"
                 dataKey="yield"
-                stroke="#6C63FF"
+                stroke={ACCENT}
                 strokeWidth={3}
-                dot={{ fill: '#6C63FF', r: 4 }}
+                dot={{ fill: ACCENT, r: 4 }}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -96,7 +99,7 @@ export default function Manager({ jobId }) {
               <XAxis dataKey="reason" tick={false} axisLine={false} />
               <YAxis tick={AXIS} tickLine={false} axisLine={false} />
               <Tooltip contentStyle={tooltipStyle} />
-              <Bar dataKey="count" fill="#6C63FF" radius={[8, 8, 0, 0]} />
+              <Bar dataKey="count" fill={ACCENT} radius={[8, 8, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
           <ul className="mt-4 space-y-1 text-sm text-muted">
@@ -118,8 +121,8 @@ export default function Manager({ jobId }) {
               <XAxis dataKey="station" tick={false} axisLine={false} />
               <YAxis tick={AXIS} tickLine={false} axisLine={false} />
               <Tooltip contentStyle={tooltipStyle} />
-              <Bar dataKey="pass" stackId="a" fill="#38B2AC" radius={[0, 0, 0, 0]} />
-              <Bar dataKey="fail" stackId="a" fill="#E05260" radius={[8, 8, 0, 0]} />
+              <Bar dataKey="pass" stackId="a" fill={TEAL} radius={[0, 0, 0, 0]} />
+              <Bar dataKey="fail" stackId="a" fill={DANGER} radius={[8, 8, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
