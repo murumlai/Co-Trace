@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -18,6 +19,7 @@ from .config import settings
 from .job_registry import registry
 from .logging_config import setup_backend_logging, write_frontend_log
 from .models import FrontendLogRequest, LoginRequest, LoginResponse
+from .upload_storage import UploadStorageError, save_uploads
 
 setup_backend_logging(settings.APP_DEBUG)
 log = logging.getLogger("cotrace.main")
@@ -117,14 +119,16 @@ async def upload(
     os.makedirs(workdir, exist_ok=True)
     log.info("Upload started: %s files from %s (job %s).", len(files), user, job_id[:8])
 
-    for i, uf in enumerate(files):
-        rel = paths[i] if i < len(paths) and paths[i] else (uf.filename or f"file_{i}")
-        dest = _safe_join(workdir, rel)
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        with open(dest, "wb") as out:
-            out.write(await uf.read())
-        if settings.APP_DEBUG:
-            log.debug("Saved upload file for job %s: %s.", job_id[:8], rel)
+    try:
+        saved = await save_uploads(files, paths, workdir, job_id[:8])
+    except UploadStorageError as exc:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - normalize upload storage failures
+        shutil.rmtree(workdir, ignore_errors=True)
+        log.exception("Upload failed while storing files for job %s.", job_id[:8])
+        raise HTTPException(400, f"Upload failed: {type(exc).__name__}: {exc}") from exc
+    log.info("Stored upload for job %s: %s files, %s zip archives.", job_id[:8], saved.file_count, saved.zip_count)
 
     registry.create(job_id, workdir)
     background.add_task(orchestrator.run_job, job_id)

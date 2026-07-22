@@ -56,6 +56,9 @@ class Settings:
     FRONTEND_LOG_MAX_CONTEXT_CHARS: int = int(os.getenv("FRONTEND_LOG_MAX_CONTEXT_CHARS", "4000"))
     ANALYSIS_CACHE_ENABLED: bool = _env_flag("ANALYSIS_CACHE_ENABLED", True)
     ANALYSIS_CACHE_FILE: str = os.getenv("ANALYSIS_CACHE_FILE", os.path.join(WORK_DIR, "analysis_cache.json"))
+    UPLOAD_ZIP_MAX_FILES: int = int(os.getenv("UPLOAD_ZIP_MAX_FILES", "20000"))
+    UPLOAD_ZIP_MAX_TOTAL_BYTES: int = int(os.getenv("UPLOAD_ZIP_MAX_TOTAL_BYTES", str(2 * 1024 * 1024 * 1024)))
+    UPLOAD_ZIP_MAX_FILE_BYTES: int = int(os.getenv("UPLOAD_ZIP_MAX_FILE_BYTES", str(512 * 1024 * 1024)))
 
     # --- Preprocessing (FTRunner-primary) ---
     DEBUG_EXCERPT_CHAR_BUDGET: int = int(os.getenv("DEBUG_EXCERPT_CHAR_BUDGET", "6000"))

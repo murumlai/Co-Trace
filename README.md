@@ -37,7 +37,8 @@ defined in [designUI.md](designUI.md). The preprocessing design is tracked in
 
 ## Key Features
 
-- **Folder or file upload** from the browser. No server-side path browsing is required.
+- **Folder, file, or `.zip` upload** from the browser. Large batches can be uploaded as
+  one root-level zip archive to avoid browser/API multipart file-count limits.
 - **Async processing** with job progress polling.
 - **Disk-backed job storage**: uploaded files, parsed records, warnings, progress, and
   signature-analysis cache are job-scoped and persisted under `.cotrace_work`; no database
@@ -197,6 +198,9 @@ To stop the server, press `Ctrl+C` in the terminal running Uvicorn.
 | `BACKEND_LOG_FILE` | `<LOG_DIR>/backendLog.txt` | Backend run log; rewritten on backend start. |
 | `FRONTEND_LOG_FILE` | `<LOG_DIR>/frontend_Log.txt` | Browser/Vite frontend run log; rewritten on backend/frontend start. |
 | `FRONTEND_LOG_MAX_CONTEXT_CHARS` | `4000` | Max context payload retained per frontend log line in debug mode. |
+| `UPLOAD_ZIP_MAX_FILES` | `20000` | Max files allowed inside a root-level uploaded `.zip` archive. |
+| `UPLOAD_ZIP_MAX_TOTAL_BYTES` | `2147483648` | Max total uncompressed bytes allowed from an uploaded `.zip`. |
+| `UPLOAD_ZIP_MAX_FILE_BYTES` | `536870912` | Max uncompressed size for one file inside an uploaded `.zip`. |
 | `ANALYSIS_CACHE_ENABLED` | `1` | Reuse successful LLM diagnoses across uploads with the same redacted failure context/model settings. |
 | `ANALYSIS_CACHE_FILE` | `<WORK_DIR>/analysis_cache.json` | Local disk cache for successful analysis results. |
 | `DEBUG_EXCERPT_CHAR_BUDGET` | `6000` | Max characters for a failed unit's DebugLog excerpt. |

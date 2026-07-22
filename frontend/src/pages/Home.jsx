@@ -7,6 +7,10 @@ function relPath(file) {
   return file.webkitRelativePath || file.name
 }
 
+function isSingleZip(files) {
+  return files.length === 1 && relPath(files[0]).toLowerCase().endsWith('.zip')
+}
+
 export default function Home({ onJobReady }) {
   const [files, setFiles] = useState([])
   const [dragging, setDragging] = useState(false)
@@ -38,6 +42,10 @@ export default function Home({ onJobReady }) {
 
   const start = async () => {
     if (!files.length) return
+    if (files.length > 1000 && !isSingleZip(files)) {
+      setError(`This upload has ${files.length} files. Upload a .zip archive to avoid the 1000-file browser/API limit.`)
+      return
+    }
     setUploading(true)
     setError('')
     setProgress({ status: 'uploading', processed: 0, total: files.length })
@@ -90,8 +98,8 @@ export default function Home({ onJobReady }) {
           Upload test logs
         </h1>
         <p className="mt-3 text-muted max-w-xl mx-auto">
-          Drop a folder of manufacturing logs, or pick individual files. The same
-          batch powers both the Engineer and Manager views.
+          Drop a folder of manufacturing logs, pick individual files, or upload a .zip
+          archive for large batches. The same batch powers both the Engineer and Manager views.
         </p>
       </div>
 
@@ -116,13 +124,13 @@ export default function Home({ onJobReady }) {
             </svg>
           </IconWell>
           <p className="font-display text-lg font-semibold text-ink">
-            {dragging ? 'Drop to add files' : 'Drag & drop logs here'}
+            {dragging ? 'Drop to add files' : 'Drag & drop logs or a .zip here'}
           </p>
           <p className="mt-1 text-sm text-muted">or choose below</p>
 
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
             <Button onClick={() => folderInput.current?.click()}>Select folder</Button>
-            <Button onClick={() => fileInput.current?.click()}>Select files</Button>
+            <Button onClick={() => fileInput.current?.click()}>Select files or .zip</Button>
           </div>
 
           <input

@@ -8,6 +8,7 @@ from . import analyzer
 from .config import settings
 from .job_registry import registry
 from .preprocessor import find_incomplete_folders, get_preprocessor, write_product_jsons
+from .upload_storage import get_job_input_root
 
 log = logging.getLogger("cotrace.orchestrator")
 
@@ -26,15 +27,16 @@ def run_job(job_id: str) -> None:
 
     try:
         pre = get_preprocessor()
+        input_root = get_job_input_root(job.workdir)
 
         # First pass to establish a total for progress reporting.
-        run_folders = list(pre.iter_run_folders(job.workdir))
+        run_folders = list(pre.iter_run_folders(input_root))
         job.total = max(len(run_folders), 1)
         log.info("Job %s found %s run folders.", job_id[:8], len(run_folders))
 
         records = []
         for i, folder in enumerate(run_folders, start=1):
-            rec = pre.process_run_folder(folder, job.workdir)
+            rec = pre.process_run_folder(folder, input_root)
             if rec is not None:
                 records.append(rec)
             log.debug("Job %s processed run %s/%s: %s.", job_id[:8], i, job.total, folder)
@@ -43,7 +45,7 @@ def run_job(job_id: str) -> None:
 
         job.records = records
 
-        incomplete = find_incomplete_folders(job.workdir)
+        incomplete = find_incomplete_folders(input_root)
         job.warnings = [
             f"No ftrunnerlog01.txt or debuglog.txt found in: {rel}" for rel in incomplete
         ]
@@ -64,6 +66,7 @@ def run_job(job_id: str) -> None:
         analyzer.analyze_job(job, progress_callback=_analysis_progress_updater(job))
 
         job.status = "done"
+        job.processed = job.total
         job.message = f"Completed: {len(records)} unit runs"
         job.save()
         log.info("Job %s finished: %s unit runs.", job_id[:8], len(records))
