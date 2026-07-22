@@ -26,11 +26,11 @@ async function request(path, { method = 'GET', body, headers = {} } = {}) {
       body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
     })
   } catch (error) {
-    log('error', 'api_network_error', { path, method, error: error.message })
+    log('error', 'API network error', { path, method, error: error.message })
     throw error
   }
   const durationMs = Math.round(performance.now() - started)
-  debugLog('api_response', { path, method, status: res.status, durationMs })
+  debugLog('API response', { path, method, status: res.status, durationMs })
   if (res.status === 401 && path !== '/api/login') {
     // Stale/expired bearer token (e.g. backend restarted, or the session
     // TTL lapsed). Clear it and let the app fall back to the login screen
@@ -40,11 +40,11 @@ async function request(path, { method = 'GET', body, headers = {} } = {}) {
   }
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}))
-    log('warning', 'api_error', { path, method, status: res.status, durationMs, detail: detail.detail })
+    log('warning', 'API request failed', { path, method, status: res.status, durationMs, detail: detail.detail })
     throw new Error(detail.detail || `Request failed (${res.status})`)
   }
   if (method !== 'GET') {
-    log('info', 'api_mutation', { path, method, status: res.status, durationMs })
+    log('info', 'API request completed', { path, method, status: res.status, durationMs })
   }
   return res.json()
 }

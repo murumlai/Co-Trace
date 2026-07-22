@@ -9,16 +9,12 @@ const repoRoot = path.resolve(frontendRoot, '..')
 const debug = process.argv.includes('--debug')
 const viteArgs = process.argv.slice(2).filter((arg) => arg !== '--debug')
 const logPath = process.env.FRONTEND_LOG_FILE || path.join(repoRoot, 'frontend_Log.txt')
+const now = () => new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')
+const debugLabel = debug ? 'debug on' : 'debug off'
 
 fs.writeFileSync(
   logPath,
-  `${JSON.stringify({
-    ts: new Date().toISOString(),
-    level: 'info',
-    source: 'frontend-dev-server',
-    message: 'frontend dev server starting',
-    debug,
-  })}\n`,
+  `${now()} | INFO    | Frontend dev server starting (${debugLabel}).\n`,
   'utf8',
 )
 
@@ -43,14 +39,7 @@ child.stderr.on('data', (chunk) => mirror(chunk, process.stderr))
 child.on('exit', (code, signal) => {
   fs.appendFileSync(
     logPath,
-    `\n${JSON.stringify({
-      ts: new Date().toISOString(),
-      level: code === 0 ? 'info' : 'error',
-      source: 'frontend-dev-server',
-      message: 'frontend dev server stopped',
-      code,
-      signal,
-    })}\n`,
+    `\n${now()} | ${code === 0 ? 'INFO   ' : 'ERROR  '} | Frontend dev server stopped (code=${code ?? 'unknown'}, signal=${signal ?? 'none'}).\n`,
   )
   process.exit(code ?? 1)
 })

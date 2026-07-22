@@ -25,13 +25,13 @@ function Shell() {
     setJobId(id)
     setWarnings(jobWarnings)
     setTab('engineer')
-    log('info', 'job_ready', { jobId: id, warningCount: jobWarnings.length })
+    log('info', 'Job ready', { jobId: id, warningCount: jobWarnings.length })
   }
 
   const NavButton = ({ id, label }) => (
     <button
       onClick={() => {
-        debugLog('tab_change', { tab: id })
+        debugLog('Tab changed', { tab: id })
         setTab(id)
         setMenuOpen(false)
       }}

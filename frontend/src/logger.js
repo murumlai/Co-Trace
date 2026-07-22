@@ -14,13 +14,13 @@ export function isDebugLogging() {
 export function initFrontendLogging() {
   if (initialized) return
   initialized = true
-  log('info', 'frontend_start', {
+  log('info', 'Frontend started', {
     debug: DEBUG_ENABLED,
     mode: import.meta.env.MODE,
     path: window.location.pathname,
   })
   window.addEventListener('error', (event) => {
-    log('error', 'window_error', {
+    log('error', 'Browser error', {
       message: event.message,
       filename: event.filename,
       lineno: event.lineno,
@@ -28,7 +28,7 @@ export function initFrontendLogging() {
     })
   })
   window.addEventListener('unhandledrejection', (event) => {
-    log('error', 'unhandled_rejection', {
+    log('error', 'Unhandled browser promise rejection', {
       reason: String(event.reason?.message || event.reason || 'unknown'),
     })
   })

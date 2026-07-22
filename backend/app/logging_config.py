@@ -36,7 +36,7 @@ def setup_backend_logging(debug: bool | None = None) -> None:
     setattr(handler, _BACKEND_HANDLER_TAG, True)
     handler.setLevel(level)
     handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
+        logging.Formatter("%(asctime)s | %(levelname)-7s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
     )
     root.addHandler(handler)
     root.setLevel(min(root.level, level) if root.level else level)
@@ -51,10 +51,10 @@ def setup_backend_logging(debug: bool | None = None) -> None:
 
     reset_frontend_log(debug_enabled)
     logging.getLogger(BACKEND_LOGGER_NAME).info(
-        "backend logging initialized debug=%s backend_log=%s frontend_log=%s",
-        debug_enabled,
-        settings.BACKEND_LOG_FILE,
-        settings.FRONTEND_LOG_FILE,
+        "Logging started (%s). Files: %s, %s.",
+        _debug_label(debug_enabled),
+        os.path.basename(settings.BACKEND_LOG_FILE),
+        os.path.basename(settings.FRONTEND_LOG_FILE),
     )
 
 
@@ -62,34 +62,25 @@ def reset_frontend_log(debug: bool | None = None) -> None:
     """Rewrite the frontend log for a new app run."""
     debug_enabled = settings.APP_DEBUG if debug is None else debug
     os.makedirs(os.path.dirname(settings.FRONTEND_LOG_FILE) or ".", exist_ok=True)
-    payload = {
-        "ts": _utc_now(),
-        "level": "info",
-        "source": "backend",
-        "message": "frontend log initialized",
-        "debug": debug_enabled,
-    }
     with open(settings.FRONTEND_LOG_FILE, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps(payload, separators=(",", ":")) + "\n")
+        fh.write(_format_frontend_line("info", f"Frontend log started ({_debug_label(debug_enabled)}).") + "\n")
 
 
 def write_frontend_log(level: str, message: str, context: dict[str, Any] | None = None) -> None:
-    """Append one browser/frontend log line as compact JSONL."""
+    """Append one browser/frontend log line as concise readable text."""
     normalized = _normalize_level(level)
     if normalized == "debug" and not settings.APP_DEBUG:
         return
-    payload = {
-        "ts": _utc_now(),
-        "level": normalized,
-        "source": "frontend",
-        "message": str(message)[:500],
-        "context": _trim_context(_scrub_context(context or {})),
-    }
+    line = _format_frontend_line(
+        normalized,
+        _human_message(message),
+        _trim_context(_scrub_context(context or {})),
+    )
     try:
         with open(settings.FRONTEND_LOG_FILE, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, ensure_ascii=True, separators=(",", ":")) + "\n")
+            fh.write(line + "\n")
     except OSError:
-        logging.getLogger(BACKEND_LOGGER_NAME).exception("failed to write frontend log")
+        logging.getLogger(BACKEND_LOGGER_NAME).exception("Could not write the frontend log.")
 
 
 def _normalize_level(level: str) -> str:
@@ -102,7 +93,7 @@ def _trim_context(context: dict[str, Any]) -> dict[str, Any]:
     text = json.dumps(context, default=str, ensure_ascii=True, separators=(",", ":"))
     if len(text) <= max_chars:
         return context
-    return {"truncated": True, "preview": text[:max_chars]}
+    return {"details": text[:max_chars] + "..."}
 
 
 def _scrub_context(value: Any, depth: int = 0) -> Any:
@@ -127,5 +118,45 @@ def _is_secret_key(key: str) -> bool:
     return any(token in lowered for token in ("token", "password", "passwd", "authorization", "secret", "apikey", "api_key"))
 
 
+def _format_frontend_line(level: str, message: str, context: dict[str, Any] | None = None) -> str:
+    details = _format_context(context or {})
+    suffix = f" ({details})" if details else ""
+    return f"{_utc_now()} | {level.upper():<7} | {message}{suffix}"
+
+
+def _format_context(context: dict[str, Any]) -> str:
+    flattened = list(_flatten_context(context))
+    limit = 12 if settings.APP_DEBUG else 6
+    parts = [f"{key}={_short_value(value)}" for key, value in flattened[:limit]]
+    if len(flattened) > limit:
+        parts.append(f"+{len(flattened) - limit} more")
+    return ", ".join(parts)
+
+
+def _flatten_context(value: Any, prefix: str = ""):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            next_key = f"{prefix}.{key}" if prefix else str(key)
+            yield from _flatten_context(item, next_key)
+    elif isinstance(value, list):
+        yield prefix or "items", f"[{len(value)} items]"
+    elif prefix:
+        yield prefix, value
+
+
+def _short_value(value: Any) -> str:
+    text = str(value).replace("\n", " ").replace("\r", " ")
+    return text[:117] + "..." if len(text) > 120 else text
+
+
+def _human_message(message: Any) -> str:
+    text = str(message or "Frontend event").replace("_", " ").strip()
+    return text[:1].upper() + text[1:500]
+
+
+def _debug_label(debug_enabled: bool) -> str:
+    return "debug on" if debug_enabled else "debug off"
+
+
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")

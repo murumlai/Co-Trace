@@ -64,12 +64,12 @@ def _redacted_context(record: UnitRecord) -> tuple[str, str, str]:
 def analyze_job(job: Job, analyze_failure: AnalyzeFailure = llm_client.analyze) -> None:
     """Populate root cause / solution for all failed units, using the cache."""
     fail_count = sum(1 for rec in job.records if rec.result == "FAIL")
-    log.info("analysis start job_id=%s fail_count=%s cache_size=%s", job.job_id, fail_count, len(job.signature_cache))
+    log.info("Analysis started for job %s: %s failed units, %s cached signatures.", job.job_id[:8], fail_count, len(job.signature_cache))
     for rec in job.records:
         if rec.result != "FAIL":
             continue
         _analyze_unit(job, rec, force=False, analyze_failure=analyze_failure)
-    log.info("analysis done job_id=%s cache_size=%s", job.job_id, len(job.signature_cache))
+    log.info("Analysis finished for job %s: %s cached signatures.", job.job_id[:8], len(job.signature_cache))
 
 
 def _analyze_unit(
@@ -89,15 +89,14 @@ def _analyze_unit(
         rec.root_cause = root
         rec.suggested_solution = solution
         rec.analysis_source = "cached"
-        log.debug("analysis cache hit job_id=%s unit_id=%s signature=%s", job.job_id, rec.unit_id, sig)
+        log.debug("Used cached analysis for unit %s (signature %s).", rec.unit_id, sig)
         return
 
     log.info(
-        "analysis call job_id=%s unit_id=%s signature=%s context_source=%s force=%s",
-        job.job_id,
+        "Analyzing unit %s with %s context (signature %s, force=%s).",
         rec.unit_id,
-        sig,
         context_source,
+        sig,
         force,
     )
     root, solution, source = analyze_failure(rec.error_code, err_msg, snippet)
@@ -105,7 +104,7 @@ def _analyze_unit(
     rec.root_cause = root
     rec.suggested_solution = solution
     rec.analysis_source = source
-    log.info("analysis result job_id=%s unit_id=%s signature=%s source=%s", job.job_id, rec.unit_id, sig, source)
+    log.info("Analysis result for unit %s came from %s.", rec.unit_id, source)
 
 
 def reanalyze_unit(

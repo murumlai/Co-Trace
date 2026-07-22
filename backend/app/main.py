@@ -25,10 +25,10 @@ log = logging.getLogger("cotrace.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
-    log.info("backend startup provider=%s debug=%s work_dir=%s", settings.LLM_PROVIDER, settings.APP_DEBUG, settings.WORK_DIR)
+    log.info("Backend started. Provider: %s. Debug: %s. Work dir: %s.", settings.LLM_PROVIDER, settings.APP_DEBUG, settings.WORK_DIR)
     registry.load_from_disk()
     yield
-    log.info("backend shutdown")
+    log.info("Backend stopped.")
 
 
 app = FastAPI(title="Co_Trace — Manufacturing Log Dashboard", lifespan=lifespan)
@@ -46,17 +46,17 @@ app.add_middleware(
 async def log_requests(request: Request, call_next):
     started = time.perf_counter()
     if settings.APP_DEBUG:
-        log.debug("request start method=%s path=%s", request.method, request.url.path)
+        log.debug("%s %s started.", request.method, request.url.path)
     try:
         response = await call_next(request)
     except Exception:
         elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
-        log.exception("request failed method=%s path=%s elapsed_ms=%s", request.method, request.url.path, elapsed_ms)
+        log.exception("%s %s failed after %s ms.", request.method, request.url.path, elapsed_ms)
         raise
     elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
     if settings.APP_DEBUG:
         log.debug(
-            "request done method=%s path=%s status=%s elapsed_ms=%s",
+            "%s %s -> %s in %s ms.",
             request.method,
             request.url.path,
             response.status_code,
@@ -64,7 +64,7 @@ async def log_requests(request: Request, call_next):
         )
     elif response.status_code >= 400:
         log.warning(
-            "request warning method=%s path=%s status=%s elapsed_ms=%s",
+            "%s %s returned %s in %s ms.",
             request.method,
             request.url.path,
             response.status_code,
@@ -81,7 +81,7 @@ os.makedirs(settings.WORK_DIR, exist_ok=True)
 @app.post("/api/login", response_model=LoginResponse)
 def login(body: LoginRequest) -> LoginResponse:
     token = get_auth().login(body.username, body.password)
-    log.info("login success username=%s", body.username)
+    log.info("User signed in: %s.", body.username)
     return LoginResponse(token=token, username=body.username)
 
 
@@ -115,7 +115,7 @@ async def upload(
     job_id = uuid.uuid4().hex
     workdir = os.path.join(settings.WORK_DIR, job_id)
     os.makedirs(workdir, exist_ok=True)
-    log.info("upload start job_id=%s user=%s file_count=%s", job_id, user, len(files))
+    log.info("Upload started: %s files from %s (job %s).", len(files), user, job_id[:8])
 
     for i, uf in enumerate(files):
         rel = paths[i] if i < len(paths) and paths[i] else (uf.filename or f"file_{i}")
@@ -124,11 +124,11 @@ async def upload(
         with open(dest, "wb") as out:
             out.write(await uf.read())
         if settings.APP_DEBUG:
-            log.debug("upload saved job_id=%s rel=%s", job_id, rel)
+            log.debug("Saved upload file for job %s: %s.", job_id[:8], rel)
 
     registry.create(job_id, workdir)
     background.add_task(orchestrator.run_job, job_id)
-    log.info("upload queued job_id=%s", job_id)
+    log.info("Upload queued for processing (job %s).", job_id[:8])
     return {"job_id": job_id}
 
 
