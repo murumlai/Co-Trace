@@ -88,27 +88,47 @@ def analyze_job(
             progress_callback(
                 len(completed_signatures),
                 total_signatures,
-                _analysis_progress_message(len(completed_signatures) + 1, total_signatures, "running"),
+                _analysis_progress_message(len(completed_signatures) + 1, total_signatures, "checking"),
             )
-        _analyze_unit(job, rec, force=False, analyze_failure=analyze_failure)
+        source = _analyze_unit(
+            job,
+            rec,
+            force=False,
+            analyze_failure=analyze_failure,
+            progress_callback=(
+                lambda message: progress_callback(
+                    len(completed_signatures),
+                    total_signatures,
+                    message,
+                )
+                if is_new_signature and progress_callback
+                else None
+            ),
+            progress_index=len(completed_signatures) + 1,
+            progress_total=total_signatures,
+        )
         if is_new_signature:
             completed_signatures.add(sig)
             if progress_callback:
                 progress_callback(
                     len(completed_signatures),
                     total_signatures,
-                    _analysis_progress_message(len(completed_signatures), total_signatures, "done"),
+                    _analysis_progress_message(len(completed_signatures), total_signatures, "done", source),
                 )
     log.info("Analysis finished for job %s: %s cached signatures.", job.job_id[:8], len(job.signature_cache))
 
 
-def _analysis_progress_message(done: int, total: int, state: str) -> str:
+def _analysis_progress_message(done: int, total: int, state: str, source: str | None = None) -> str:
     if total == 0:
         return "No failed units need analysis"
     if state == "starting":
         return f"Preparing failure analysis for {total} signature{'s' if total != 1 else ''}"
-    if state == "running":
-        return f"Analyzing failure signature {done}/{total}; LLM calls can take a minute"
+    if state == "checking":
+        return f"Checking saved analysis for failure signature {done}/{total}"
+    if state == "llm":
+        return f"Analyzing uncached failure signature {done}/{total}; LLM calls can take a minute"
+    if source in ("cached", "local-cache"):
+        return f"Loaded saved analysis for failure signature {done}/{total}"
     return f"Analyzed failure signature {done}/{total}"
 
 
@@ -117,7 +137,10 @@ def _analyze_unit(
     rec: UnitRecord,
     force: bool,
     analyze_failure: AnalyzeFailure,
-) -> None:
+    progress_callback: Callable[[str], None] | None = None,
+    progress_index: int = 1,
+    progress_total: int = 1,
+) -> str:
     sig = signature_for(rec)
     rec.signature = sig
     err_msg, snippet, context_source = _redacted_context(rec)
@@ -138,7 +161,7 @@ def _analyze_unit(
         rec.suggested_solution = solution
         rec.analysis_source = "local-cache" if _src == "local-cache" else "cached"
         log.debug("Used cached analysis for unit %s (signature %s).", rec.unit_id, sig)
-        return
+        return rec.analysis_source
 
     if not force:
         cached = analysis_cache.get_entry(cache_key)
@@ -150,7 +173,10 @@ def _analyze_unit(
             rec.suggested_solution = solution
             rec.analysis_source = "local-cache"
             log.info("Used saved analysis cache for unit %s (cache %s).", rec.unit_id, cache_key[:8])
-            return
+            return rec.analysis_source
+
+    if progress_callback:
+        progress_callback(_analysis_progress_message(progress_index, progress_total, "llm"))
 
     log.info(
         "Analyzing unit %s with %s context (signature %s, force=%s).",
@@ -180,6 +206,7 @@ def _analyze_unit(
         },
     )
     log.info("Analysis result for unit %s came from %s.", rec.unit_id, source)
+    return source
 
 
 def reanalyze_unit(
