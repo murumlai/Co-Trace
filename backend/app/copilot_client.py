@@ -293,7 +293,7 @@ def analyze(
             len(context),
         )
         if settings.COPILOT_ENABLE_MINI_ENRICH and context.strip():
-            log.debug("Copilot mini pass started (%s).", settings.COPILOT_MINI_MODEL)
+            log.info("Copilot mini model call started (%s).", settings.COPILOT_MINI_MODEL)
             summary = _run(
                 _stream_once(
                     _build_mini_prompt(context),
@@ -301,7 +301,7 @@ def analyze(
                     _SUMMARIZE_SYSTEM_PROMPT,
                 )
             ).strip()
-            log.debug("Copilot mini pass finished: %s summary chars.", len(summary))
+            log.info("Copilot mini model call finished: %s summary chars.", len(summary))
             if summary:
                 context = (
                     "triage_summary (model-derived hints, non-authoritative — "
