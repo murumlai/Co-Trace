@@ -29,6 +29,7 @@ const child = spawn(viteBin, viteArgs, {
     ...process.env,
     VITE_COTRACE_DEBUG: debug ? '1' : process.env.VITE_COTRACE_DEBUG || '0',
   },
+  shell: process.platform === 'win32',
   stdio: ['inherit', 'pipe', 'pipe'],
 })
 
