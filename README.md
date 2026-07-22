@@ -4,7 +4,7 @@ Co_Trace is a browser-based dashboard for manufacturing test logs. It accepts up
 FTRunner-style log folders or files, parses per-unit test results, and presents two
 audience-specific views:
 
-- **Engineer view**: latest Pass/Fail result per serial number, shown as a sortable table
+- **Engineer view**: latest Pass/Fail result per serial number, shown as a filterable table
   (default) or expandable cards. Failed units show a most-probable root cause, suggested
   solution, and an expandable redacted snippet used for diagnosis.
 - **Manager view**: First-pass yield (FPY), yield trend, Pareto of failure reasons,
@@ -17,7 +17,7 @@ defined in [designUI.md](designUI.md). The preprocessing design is tracked in
 ## Current Status
 
 - FastAPI backend and React frontend are implemented as a login-gated upload, Engineer,
-  and Manager dashboard.
+  and Manager dashboard with a persisted light/dark mode toggle.
 - Frontend production build has been verified with `npm run build`.
 - The preprocessor is **FTRunner-primary**: `ftrunnerlog01.txt` is the single source of
   truth for identity, per-step results, and authoritative PASS/FAIL. SIMS `.itf` reliance
@@ -64,6 +64,9 @@ defined in [designUI.md](designUI.md). The preprocessing design is tracked in
   every other secret; LLM-bound text scrubs the serial too.
 - **Session recovery**: if the bearer token becomes stale (e.g. the backend restarts), the
   frontend clears it and returns the user to the login screen with a clear message.
+- **Light/dark mode**: the authenticated app shell includes a persistent theme toggle;
+  semantic color and shadow tokens keep buttons, tables, charts, and upload controls
+  visible in both modes.
 - **Single-server deployment path**: the FastAPI app serves the built React SPA from
   `frontend/dist`.
 
@@ -127,8 +130,8 @@ python run_backend.py
 ```
 
 Use `python run_backend.py --debug` for verbose request, job, and Copilot-provider
-logging. Each backend start rewrites `backendLog.txt` and `frontend_Log.txt` in the
-repo root by default.
+logging. Each backend start rewrites `backendLog.txt` and `frontend_Log.txt` under the
+current `LOG_DIR`; when following the setup above, that is the `backend/` directory.
 
 Backend health check:
 
@@ -276,7 +279,7 @@ frontend/scripts/
 .\backend\.venv\Scripts\python.exe -c "import sys, collections; sys.path.insert(0,'backend'); from app.preprocessor import get_preprocessor; from app import aggregator; recs=get_preprocessor().process_folder(r'Log_Files_Folder/All_LogFiles_M95113-001'); mv=aggregator.build_manager_view(recs); print(len(recs)); print(collections.Counter(r.result for r in recs)); print(mv['summary'])"
 
 # Measure preprocessed JSON size (legacy vs compact vs gzip, per-field breakdown)
-.\.venv\Scripts\python.exe backend\scripts\measure_preprocessed.py "Log_Files_Folder\All_LogFiles_M95113-001"
+.\backend\.venv\Scripts\python.exe backend\scripts\measure_preprocessed.py "Log_Files_Folder\All_LogFiles_M95113-001"
 
 # Frontend production build
 $env:Path = 'C:\Program Files\nodejs;' + $env:Path
