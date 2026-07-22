@@ -59,4 +59,7 @@ export const api = {
   reanalyze: (jobId, unitId) =>
     request(`/api/jobs/${jobId}/units/${unitId}/reanalyze`, { method: 'POST' }),
   manager: (jobId) => request(`/api/jobs/${jobId}/manager`),
+  analysisCache: () => request('/api/cache/analysis'),
+  clearAnalysisCache: (cacheKey) =>
+    request(`/api/cache/analysis/${cacheKey}`, { method: 'DELETE' }),
 }

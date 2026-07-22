@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import aggregator, analyzer, orchestrator
+from . import aggregator, analysis_cache as analysis_cache_store, analyzer, orchestrator
 from .auth import get_auth, require_user
 from .config import settings
 from .job_registry import registry
@@ -177,6 +177,16 @@ def manager(job_id: str, user: str = Depends(require_user)) -> dict:
 async def frontend_log(body: FrontendLogRequest) -> dict:
     write_frontend_log(body.level, body.message, body.context)
     return {"ok": True}
+
+
+@app.get("/api/cache/analysis")
+def list_analysis_cache(user: str = Depends(require_user)) -> dict:  # noqa: ARG001
+    return {"entries": analysis_cache_store.list_entries()}
+
+
+@app.delete("/api/cache/analysis/{cache_key}")
+def clear_analysis_cache(cache_key: str, user: str = Depends(require_user)) -> dict:  # noqa: ARG001
+    return {"cache_key": cache_key, "deleted": analysis_cache_store.delete_entry(cache_key)}
 
 
 @app.get("/api/health")

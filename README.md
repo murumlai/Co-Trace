@@ -197,6 +197,8 @@ To stop the server, press `Ctrl+C` in the terminal running Uvicorn.
 | `BACKEND_LOG_FILE` | `<LOG_DIR>/backendLog.txt` | Backend run log; rewritten on backend start. |
 | `FRONTEND_LOG_FILE` | `<LOG_DIR>/frontend_Log.txt` | Browser/Vite frontend run log; rewritten on backend/frontend start. |
 | `FRONTEND_LOG_MAX_CONTEXT_CHARS` | `4000` | Max context payload retained per frontend log line in debug mode. |
+| `ANALYSIS_CACHE_ENABLED` | `1` | Reuse successful LLM diagnoses across uploads with the same redacted failure context/model settings. |
+| `ANALYSIS_CACHE_FILE` | `<WORK_DIR>/analysis_cache.json` | Local disk cache for successful analysis results. |
 | `DEBUG_EXCERPT_CHAR_BUDGET` | `6000` | Max characters for a failed unit's DebugLog excerpt. |
 | `FTRUNNER_SNIPPET_CHAR_BUDGET` | `2000` | Max characters for a failed unit's FTRunner snippet (compact mode). |
 | `ZIP_MAX_TOTAL_BYTES` | `209715200` | Total extraction budget per run folder (zip-bomb guard). |

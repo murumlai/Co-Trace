@@ -11,6 +11,8 @@ export default function Engineer({ jobId }) {
   const [view, setView] = useState('table')
   const [expanded, setExpanded] = useState(null)
   const [reanalyzing, setReanalyzing] = useState(null)
+  const [clearingCache, setClearingCache] = useState(null)
+  const [actionError, setActionError] = useState('')
 
   useEffect(() => {
     if (!jobId) return
@@ -31,11 +33,34 @@ export default function Engineer({ jobId }) {
 
   const reanalyze = async (unit) => {
     setReanalyzing(unit.unit_id)
+    setActionError('')
     try {
       const updated = await api.reanalyze(jobId, unit.unit_id)
       setUnits((prev) => prev.map((u) => (u.unit_id === unit.unit_id ? updated : u)))
+    } catch (err) {
+      setActionError(err.message)
     } finally {
       setReanalyzing(null)
+    }
+  }
+
+  const clearCache = async (unit) => {
+    if (!unit.analysis_cache_key) return
+    setClearingCache(unit.analysis_cache_key)
+    setActionError('')
+    try {
+      await api.clearAnalysisCache(unit.analysis_cache_key)
+      setUnits((prev) =>
+        prev.map((u) =>
+          u.analysis_cache_key === unit.analysis_cache_key
+            ? { ...u, analysis_cache_key: null, cache_cleared: true }
+            : u,
+        ),
+      )
+    } catch (err) {
+      setActionError(err.message)
+    } finally {
+      setClearingCache(null)
     }
   }
 
@@ -91,6 +116,8 @@ export default function Engineer({ jobId }) {
         </div>
       </div>
 
+      {actionError && <Card className="p-4 mb-4 text-sm text-danger">{actionError}</Card>}
+
       {loading ? (
         <Card className="p-10 text-center text-muted">Loading units…</Card>
       ) : shown.length === 0 ? (
@@ -102,6 +129,8 @@ export default function Engineer({ jobId }) {
           setExpanded={setExpanded}
           reanalyzing={reanalyzing}
           onReanalyze={reanalyze}
+          clearingCache={clearingCache}
+          onClearCache={clearCache}
         />
       ) : (
         <CardsView
@@ -110,13 +139,15 @@ export default function Engineer({ jobId }) {
           setExpanded={setExpanded}
           reanalyzing={reanalyzing}
           onReanalyze={reanalyze}
+          clearingCache={clearingCache}
+          onClearCache={clearCache}
         />
       )}
     </div>
   )
 }
 
-function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze }) {
+function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache }) {
   return (
     <Card className="p-6 md:p-8">
       <div className="overflow-x-auto">
@@ -169,6 +200,8 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze }) {
                         showSnippet
                         reanalyzing={reanalyzing}
                         onReanalyze={onReanalyze}
+                        clearingCache={clearingCache}
+                        onClearCache={onClearCache}
                       />
                     </td>
                   </tr>
@@ -182,7 +215,7 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze }) {
   )
 }
 
-function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze }) {
+function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache }) {
   return (
     <div className="space-y-4">
       {units.map((u) => (
@@ -219,6 +252,8 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze }) {
                 showSnippet={expanded === u.unit_id}
                 reanalyzing={reanalyzing}
                 onReanalyze={onReanalyze}
+                clearingCache={clearingCache}
+                onClearCache={onClearCache}
               />
             </div>
           )}
@@ -228,13 +263,16 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze }) {
   )
 }
 
-function FailDetails({ u, showSnippet, reanalyzing, onReanalyze }) {
+function FailDetails({ u, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache }) {
+  const canClearCache = u.analysis_cache_key && ['llm', 'local-cache'].includes(u.analysis_source)
+  const sourceLabel = u.cache_cleared ? 'cache cleared' : u.analysis_source
+
   return (
     <div className="rounded-2xl bg-base shadow-inset p-5">
       <div className="text-xs uppercase tracking-wide text-muted mb-1">
         Root cause
-        {u.analysis_source && (
-          <span className="ml-2 lowercase opacity-70">· {u.analysis_source}</span>
+        {sourceLabel && (
+          <span className="ml-2 lowercase opacity-70">· {sourceLabel}</span>
         )}
       </div>
       <p className="text-ink">{u.root_cause || 'Analyzing…'}</p>
@@ -255,10 +293,15 @@ function FailDetails({ u, showSnippet, reanalyzing, onReanalyze }) {
         </div>
       )}
 
-      <div className="mt-4">
+      <div className="mt-4 flex flex-wrap gap-3">
         <Button onClick={() => onReanalyze(u)} disabled={reanalyzing === u.unit_id}>
           {reanalyzing === u.unit_id ? 'Re-analyzing…' : 'Re-analyze this unit'}
         </Button>
+        {canClearCache && (
+          <Button onClick={() => onClearCache(u)} disabled={clearingCache === u.analysis_cache_key}>
+            {clearingCache === u.analysis_cache_key ? 'Clearing cache…' : 'Clear cached result'}
+          </Button>
+        )}
       </div>
     </div>
   )
