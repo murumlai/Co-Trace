@@ -11,7 +11,7 @@ export function setToken(t) {
   else localStorage.removeItem(TOKEN_KEY)
 }
 
-async function request(path, { method = 'GET', body, headers = {} } = {}) {
+async function request(path, { method = 'GET', body, headers = {}, signal } = {}) {
   const token = getToken()
   const started = performance.now()
   let res
@@ -24,9 +24,12 @@ async function request(path, { method = 'GET', body, headers = {} } = {}) {
         ...headers,
       },
       body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
+      signal,
     })
   } catch (error) {
-    log('error', 'API network error', { path, method, error: error.message })
+    if (error.name !== 'AbortError') {
+      log('error', 'API network error', { path, method, error: error.message })
+    }
     throw error
   }
   const durationMs = Math.round(performance.now() - started)
@@ -53,8 +56,9 @@ export const api = {
   login: (username, password) =>
     request('/api/login', { method: 'POST', body: { username, password } }),
   me: () => request('/api/me'),
-  upload: (formData) => request('/api/upload', { method: 'POST', body: formData }),
+  upload: (formData, options = {}) => request('/api/upload', { method: 'POST', body: formData, ...options }),
   status: (jobId) => request(`/api/jobs/${jobId}/status`),
+  stop: (jobId) => request(`/api/jobs/${jobId}/stop`, { method: 'POST' }),
   units: (jobId) => request(`/api/jobs/${jobId}/units`),
   reanalyze: (jobId, unitId) =>
     request(`/api/jobs/${jobId}/units/${unitId}/reanalyze`, { method: 'POST' }),

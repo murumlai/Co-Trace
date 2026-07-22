@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { api } from './api'
 import { AuthProvider, useAuth } from './auth'
 import Login from './pages/Login'
 import Home from './pages/Home'
@@ -12,12 +13,22 @@ const TABS = [
   ['manager', 'Manager'],
 ]
 
+function relPath(file) {
+  return file.webkitRelativePath || file.name
+}
+
 function Shell() {
   const { isAuthed, username, logout } = useAuth()
   const [tab, setTab] = useState('home')
   const [jobId, setJobId] = useState(null)
+  const [activeJobId, setActiveJobId] = useState(null)
+  const [batchRunning, setBatchRunning] = useState(false)
+  const [batchProgress, setBatchProgress] = useState(null)
+  const [batchError, setBatchError] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
   const [warnings, setWarnings] = useState([])
+  const runToken = useRef(0)
+  const uploadAbort = useRef(null)
 
   if (!isAuthed) return <Login />
 
@@ -26,6 +37,86 @@ function Shell() {
     setWarnings(jobWarnings)
     setTab('engineer')
     log('info', 'Job ready', { jobId: id, warningCount: jobWarnings.length })
+  }
+
+  const startBatch = async (files) => {
+    const token = runToken.current + 1
+    runToken.current = token
+    setBatchRunning(true)
+    setBatchError('')
+    setWarnings([])
+    setActiveJobId(null)
+    setBatchProgress({ status: 'uploading', processed: 0, total: files.length, message: 'Uploading files' })
+    const controller = new AbortController()
+    uploadAbort.current = controller
+    try {
+      const formData = new FormData()
+      for (const file of files) {
+        formData.append('files', file)
+        formData.append('paths', relPath(file))
+      }
+      const { job_id } = await api.upload(formData, { signal: controller.signal })
+      if (runToken.current !== token) return
+      uploadAbort.current = null
+      setActiveJobId(job_id)
+      await pollBatch(job_id, token)
+    } catch (err) {
+      if (runToken.current !== token) return
+      const stopped = err.name === 'AbortError'
+      setBatchError(stopped ? '' : err.message)
+      setBatchProgress((current) => ({
+        ...(current || {}),
+        status: stopped ? 'cancelled' : 'error',
+        message: stopped ? 'Batch stopped by user' : err.message,
+      }))
+      setBatchRunning(false)
+      uploadAbort.current = null
+    }
+  }
+
+  const pollBatch = async (id, token) => {
+    while (runToken.current === token) {
+      const status = await api.status(id)
+      if (runToken.current !== token) return
+      setBatchProgress({
+        status: status.status,
+        processed: status.progress.processed,
+        total: status.progress.total,
+        message: status.message,
+      })
+      if (status.status === 'done') {
+        setBatchRunning(false)
+        onJobReady(id, status.warnings || [])
+        return
+      }
+      if (status.status === 'error' || status.status === 'cancelled') {
+        setBatchRunning(false)
+        setBatchError(status.status === 'cancelled' ? '' : status.message)
+        return
+      }
+      await new Promise((resolve) => setTimeout(resolve, 700))
+    }
+  }
+
+  const stopBatch = async () => {
+    const id = activeJobId
+    setBatchProgress((current) => ({
+      ...(current || {}),
+      message: id ? 'Stopping batch after the current step' : 'Stopping upload',
+    }))
+    if (!id) {
+      runToken.current += 1
+      uploadAbort.current?.abort()
+      uploadAbort.current = null
+      setBatchRunning(false)
+      setBatchProgress({ status: 'cancelled', processed: 0, total: 1, message: 'Batch stopped by user' })
+      return
+    }
+    try {
+      await api.stop(id)
+    } catch (err) {
+      setBatchError(err.message)
+    }
   }
 
   const NavButton = ({ id, label }) => (
@@ -65,6 +156,14 @@ function Shell() {
             </nav>
 
             <div className="hidden md:flex items-center gap-4">
+              {batchRunning && (
+                <button
+                  onClick={stopBatch}
+                  className="rounded-2xl bg-base px-4 py-2 text-sm text-danger shadow-extruded-sm hover:-translate-y-px transition-all duration-300 focus-ring"
+                >
+                  Stop batch
+                </button>
+              )}
               <span className="text-sm text-muted">{username || 'user'}</span>
               <button
                 onClick={logout}
@@ -88,6 +187,14 @@ function Shell() {
               {TABS.map(([id, label]) => (
                 <NavButton key={id} id={id} label={label} />
               ))}
+              {batchRunning && (
+                <button
+                  onClick={stopBatch}
+                  className="rounded-2xl bg-base px-4 py-2.5 text-sm text-danger shadow-inset-sm focus-ring"
+                >
+                  Stop batch
+                </button>
+              )}
               <button
                 onClick={logout}
                 className="rounded-2xl bg-base px-4 py-2.5 text-sm text-muted shadow-inset-sm focus-ring"
@@ -122,7 +229,15 @@ function Shell() {
       </header>
 
       <main>
-        {tab === 'home' && <Home onJobReady={onJobReady} />}
+        {tab === 'home' && (
+          <Home
+            onStartBatch={startBatch}
+            onStopBatch={stopBatch}
+            processing={batchRunning}
+            progress={batchProgress}
+            batchError={batchError}
+          />
+        )}
         {tab === 'engineer' && <Engineer jobId={jobId} />}
         {tab === 'manager' && <Manager jobId={jobId} />}
       </main>

@@ -27,6 +27,7 @@ class Job:
     records: list[UnitRecord] = field(default_factory=list)
     workdir: str = ""
     warnings: list[str] = field(default_factory=list)
+    cancel_requested: bool = False
     # signature -> (root_cause, suggested_solution, analysis_source)
     signature_cache: dict[str, tuple[str, str, str]] = field(default_factory=dict)
 
@@ -53,6 +54,7 @@ class Job:
             "created_at": self.created_at,
             "workdir": self.workdir,
             "warnings": self.warnings,
+            "cancel_requested": self.cancel_requested,
             "records": [r.model_dump() for r in self.records],
             "signature_cache": self.signature_cache,
         }
@@ -75,6 +77,18 @@ class JobRegistry:
         with self._lock:
             job = Job(job_id=job_id, workdir=workdir)
             self._jobs[job_id] = job
+            job.save()
+            return job
+
+    def request_cancel(self, job_id: str) -> Job | None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            if job.status in {"done", "error", "cancelled"}:
+                return job
+            job.cancel_requested = True
+            job.message = "Stopping batch after the current step"
             job.save()
             return job
 
@@ -120,6 +134,7 @@ class JobRegistry:
                     created_at=created_at,
                     workdir=state.get("workdir", entry.path),
                     warnings=state.get("warnings", []),
+                    cancel_requested=state.get("cancel_requested", False),
                     records=[UnitRecord(**r) for r in state.get("records", [])],
                     signature_cache=state.get("signature_cache", {}),
                 )

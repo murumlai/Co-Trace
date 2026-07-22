@@ -6,7 +6,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 Result = Literal["PASS", "FAIL", "UNKNOWN"]
-JobState = Literal["pending", "running", "done", "error"]
+JobState = Literal["pending", "running", "done", "error", "cancelled"]
 DeviceClass = Literal["pan", "aic", "unknown"]
 
 

@@ -1,5 +1,4 @@
 import { useRef, useState } from 'react'
-import { api } from '../api'
 import { Button, Card, IconWell } from '../components/ui'
 
 // Reads a browser file's relative path (folder uploads set webkitRelativePath).
@@ -11,17 +10,15 @@ function isSingleZip(files) {
   return files.length === 1 && relPath(files[0]).toLowerCase().endsWith('.zip')
 }
 
-export default function Home({ onJobReady }) {
+export default function Home({ onStartBatch, onStopBatch, processing, progress, batchError }) {
   const [files, setFiles] = useState([])
   const [dragging, setDragging] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [progress, setProgress] = useState(null)
-  const [error, setError] = useState('')
+  const [localError, setLocalError] = useState('')
   const folderInput = useRef(null)
   const fileInput = useRef(null)
 
   const addFiles = (list) => {
-    setError('')
+    setLocalError('')
     setFiles(Array.from(list))
   }
 
@@ -43,53 +40,16 @@ export default function Home({ onJobReady }) {
   const start = async () => {
     if (!files.length) return
     if (files.length > 1000 && !isSingleZip(files)) {
-      setError(`This upload has ${files.length} files. Upload a .zip archive to avoid the 1000-file browser/API limit.`)
+      setLocalError(`This upload has ${files.length} files. Upload a .zip archive to avoid the 1000-file browser/API limit.`)
       return
     }
-    setUploading(true)
-    setError('')
-    setProgress({ status: 'uploading', processed: 0, total: files.length })
-    try {
-      const fd = new FormData()
-      for (const f of files) {
-        fd.append('files', f)
-        fd.append('paths', relPath(f))
-      }
-      const { job_id } = await api.upload(fd)
-      await poll(job_id)
-    } catch (err) {
-      setError(err.message)
-      setUploading(false)
-    }
-  }
-
-  const poll = async (jobId) => {
-    // Poll job status until done/error.
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const s = await api.status(jobId)
-      setProgress({
-        status: s.status,
-        processed: s.progress.processed,
-        total: s.progress.total,
-        message: s.message,
-      })
-      if (s.status === 'done') {
-        setUploading(false)
-        onJobReady(jobId, s.warnings || [])
-        return
-      }
-      if (s.status === 'error') {
-        setError(s.message)
-        setUploading(false)
-        return
-      }
-      await new Promise((r) => setTimeout(r, 700))
-    }
+    setLocalError('')
+    onStartBatch(files)
   }
 
   const pct = progress && progress.total ? Math.round((progress.processed / progress.total) * 100) : 0
   const progressLabel = progress && progress.total ? `${progress.processed}/${progress.total} • ${pct}%` : `${pct}%`
+  const error = localError || batchError
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-12">
@@ -159,6 +119,7 @@ export default function Home({ onJobReady }) {
             <button
               className="text-sm text-muted hover:text-ink focus-ring rounded-lg px-2 py-1"
               onClick={() => setFiles([])}
+              disabled={processing}
             >
               Clear
             </button>
@@ -187,9 +148,14 @@ export default function Home({ onJobReady }) {
         )}
 
         <div className="mt-8 flex justify-center">
-          <Button variant="primary" onClick={start} disabled={!files.length || uploading}>
-            {uploading ? 'Processing…' : 'Process batch'}
-          </Button>
+          <div className="flex flex-wrap justify-center gap-3">
+            <Button variant="primary" onClick={start} disabled={!files.length || processing}>
+              {processing ? 'Processing…' : 'Process batch'}
+            </Button>
+            {processing && (
+              <Button onClick={onStopBatch}>Stop batch</Button>
+            )}
+          </div>
         </div>
       </Card>
     </div>

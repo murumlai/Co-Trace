@@ -144,6 +144,15 @@ def job_status(job_id: str, user: str = Depends(require_user)) -> dict:
     return job.to_status().model_dump()
 
 
+@app.post("/api/jobs/{job_id}/stop")
+def stop_job(job_id: str, user: str = Depends(require_user)) -> dict:  # noqa: ARG001
+    job = registry.request_cancel(job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found")
+    log.info("Stop requested for job %s.", job_id[:8])
+    return job.to_status().model_dump()
+
+
 # --------------------------------------------------------------------------
 # Engineer view
 # --------------------------------------------------------------------------

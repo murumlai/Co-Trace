@@ -40,6 +40,9 @@ defined in [designUI.md](designUI.md). The preprocessing design is tracked in
 - **Folder, file, or `.zip` upload** from the browser. Large batches can be uploaded as
   one root-level zip archive to avoid browser/API multipart file-count limits.
 - **Async processing** with job progress polling.
+- **Manual batch stop**: processing continues if the user changes tabs and only stops
+  when the user clicks `Stop batch`. Stop requests are honored between processing steps
+  and between LLM failure-signature calls.
 - **Disk-backed result storage**: completed jobs keep parsed records, warnings, progress,
   and analysis results in `job_state.json`. Uploaded folders, extracted zip contents, and
   preprocessed artifacts are removed after processing by default; the cross-upload LLM
