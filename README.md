@@ -26,6 +26,8 @@ defined in [designUI.md](designUI.md). The preprocessing design is tracked in
   get a bounded, redacted `debug_excerpt` selected around the FTRunner-detected failure.
 - Each processed batch emits one redacted `<product_code>.json` per product into the
   per-job working directory; this artifact serves both the Engineer and Manager tabs.
+- Job state is persisted to disk as `job_state.json` under each per-job working directory,
+  restored on backend startup, and automatically deleted after the job TTL expires.
 - GitHub Models integration is wired, but if `GITHUB_TOKEN` is not set, analysis uses a
   deterministic offline stub and makes no external LLM calls.
 
@@ -33,8 +35,9 @@ defined in [designUI.md](designUI.md). The preprocessing design is tracked in
 
 - **Folder or file upload** from the browser. No server-side path browsing is required.
 - **Async processing** with job progress polling.
-- **Ephemeral storage**: uploaded files and parsed results are job-scoped; no database is
-  used.
+- **Disk-backed job storage**: uploaded files, parsed records, warnings, progress, and
+  signature-analysis cache are job-scoped and persisted under `.cotrace_work`; no database
+  is used.
 - **Incomplete-folder warnings**: run folders that contain neither `ftrunnerlog01.txt` nor
   a reachable `debuglog.txt` are surfaced as a dismissible UI banner rather than silently
   dropped.
@@ -87,7 +90,9 @@ The implemented parser uses:
   variables.
 - The backend redacts sensitive fields before invoking the LLM client.
 - Placeholder credentials default to `admin / admin`. Change these before shared use.
-- Job data is in memory. Restarting the server loses active/completed job results.
+- Job data is persisted in `.cotrace_work/<job_id>/job_state.json`. Completed/error jobs
+  survive backend restarts until their TTL expires; jobs interrupted while `running` are
+  restored as `error` and should be uploaded again.
 
 ## Prerequisites
 
@@ -168,7 +173,7 @@ To stop the server, press `Ctrl+C` in the terminal running Uvicorn.
 | `APP_PASSWORD` | `admin` | Placeholder login password. |
 | `SESSION_TTL_S` | `28800` | Placeholder auth session lifetime in seconds. |
 | `WORK_DIR` | `.cotrace_work` under the process working directory | Temporary per-job upload storage. |
-| `JOB_TTL_S` | `7200` | In-memory job expiry window in seconds. |
+| `JOB_TTL_S` | `2592000` | Job persistence and auto-delete window in seconds (30 days). |
 | `DEBUG_EXCERPT_CHAR_BUDGET` | `6000` | Max characters for a failed unit's DebugLog excerpt. |
 | `ZIP_MAX_TOTAL_BYTES` | `209715200` | Total extraction budget per run folder (zip-bomb guard). |
 | `ZIP_MAX_FILE_BYTES` | `104857600` | Max size of a single extracted zip member. |
@@ -194,7 +199,7 @@ backend/app/
   preprocessor.py  FTRunner-primary parser: scan/step/done blocks, DebugLog discovery,
                    per-product JSON emission, incomplete-folder warnings
   orchestrator.py  Background job pipeline, JSON emission, and progress updates
-  job_registry.py  In-memory ephemeral job store
+  job_registry.py  Disk-backed job registry with 30-day TTL cleanup
   aggregator.py    Manager metrics: FPY, trend, Pareto, stations, lots
   analyzer.py      Engineer signature deduplication and diagnosis flow
   redaction.py     Sensitive-data scrubbing (keep_serial mode for at-rest JSON)
@@ -227,13 +232,11 @@ git status --short --ignored
 
 ## Current Limitations
 
-- **Disk cleanup**: job metadata expires from memory, but per-job upload folders (and the
-  `preprocessed/` JSON plus extracted zip scratch dirs) are not deleted from disk yet.
 - **DebugLog excerpt tuning**: extraction anchors on the FTRunner failure signal with a
   generic-marker fallback; the exact markers and char budget remain a tuning item.
-- **LLM prompt design**: the per-product JSON carries empty `root_cause` /
-  `suggested_solution` placeholders for a future LLM step; prompt design is out of scope
-  for the current preprocessing work.
+- **Per-product JSON backfill**: the preprocessing JSON still carries empty `root_cause` /
+  `suggested_solution` placeholders. Engineer diagnosis is populated later in persisted
+  job state after the analyzer runs.
 - **Docker packaging**: the app is structured to be containerized, but no Dockerfile or
   compose file is included yet.
 - **Placeholder auth**: SimpleAuth is intentionally temporary (in-memory tokens do not
