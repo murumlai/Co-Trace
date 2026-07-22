@@ -48,6 +48,13 @@ class Settings:
     WORK_DIR: str = os.getenv("WORK_DIR", os.path.join(os.getcwd(), ".cotrace_work"))
     JOB_TTL_S: int = int(os.getenv("JOB_TTL_S", str(60 * 60 * 24 * 30)))  # 30 days
 
+    # --- Logging ---
+    APP_DEBUG: bool = _env_flag("COTRACE_DEBUG", False) or _env_flag("APP_DEBUG", False)
+    LOG_DIR: str = os.getenv("LOG_DIR", os.getcwd())
+    BACKEND_LOG_FILE: str = os.getenv("BACKEND_LOG_FILE", os.path.join(LOG_DIR, "backendLog.txt"))
+    FRONTEND_LOG_FILE: str = os.getenv("FRONTEND_LOG_FILE", os.path.join(LOG_DIR, "frontend_Log.txt"))
+    FRONTEND_LOG_MAX_CONTEXT_CHARS: int = int(os.getenv("FRONTEND_LOG_MAX_CONTEXT_CHARS", "4000"))
+
     # --- Preprocessing (FTRunner-primary) ---
     DEBUG_EXCERPT_CHAR_BUDGET: int = int(os.getenv("DEBUG_EXCERPT_CHAR_BUDGET", "6000"))
     FTRUNNER_SNIPPET_CHAR_BUDGET: int = int(os.getenv("FTRUNNER_SNIPPET_CHAR_BUDGET", "2000"))

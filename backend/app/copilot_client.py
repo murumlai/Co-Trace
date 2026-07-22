@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from typing import Any
 
@@ -62,6 +63,8 @@ _DIAGNOSE_SYSTEM_PROMPT = (
     "solution. Be concise and specific. Respond ONLY as compact JSON with keys "
     '"root_cause" and "suggested_solution".'
 )
+
+log = logging.getLogger("cotrace.copilot")
 
 _SUMMARIZE_SYSTEM_PROMPT = (
     "ROLE\n"
@@ -275,13 +278,22 @@ def analyze(
     if not _SDK_AVAILABLE:
         from . import llm_client
 
+        log.warning("copilot sdk unavailable; using stub")
         root, solution, _ = llm_client._offline_stub(error_code, error_message)
         return root, f"{solution} (Copilot SDK not installed.)", "stub"
 
     context = snippet or error_message or ""
 
     try:
+        log.info(
+            "copilot analyze start mini_model=%s reasoning_model=%s mini_enrich=%s context_chars=%s",
+            settings.COPILOT_MINI_MODEL,
+            settings.COPILOT_REASONING_MODEL,
+            settings.COPILOT_ENABLE_MINI_ENRICH,
+            len(context),
+        )
         if settings.COPILOT_ENABLE_MINI_ENRICH and context.strip():
+            log.debug("copilot mini pass start model=%s", settings.COPILOT_MINI_MODEL)
             summary = _run(
                 _stream_once(
                     _build_mini_prompt(context),
@@ -289,6 +301,7 @@ def analyze(
                     _SUMMARIZE_SYSTEM_PROMPT,
                 )
             ).strip()
+            log.debug("copilot mini pass done summary_chars=%s", len(summary))
             if summary:
                 context = (
                     "triage_summary (model-derived hints, non-authoritative — "
@@ -296,6 +309,7 @@ def analyze(
                     f"{summary}\n\n--- raw excerpt (authoritative) ---\n{context}"
                 )
 
+            log.debug("copilot reasoning pass start model=%s context_chars=%s", settings.COPILOT_REASONING_MODEL, len(context))
         content = _run(
             _stream_once(
                 _build_diagnose_prompt(error_code, error_message, context),
@@ -304,9 +318,11 @@ def analyze(
             )
         )
         root, solution = _parse_json_content(content)
+        log.info("copilot analyze done output_chars=%s", len(content))
         return root, solution, "llm"
     except Exception as exc:  # noqa: BLE001 - degrade gracefully to stub
         from . import llm_client
 
+        log.exception("copilot analyze failed; using stub")
         root, solution, _ = llm_client._offline_stub(error_code, error_message)
         return root, f"{solution} (Copilot error: {type(exc).__name__})", "stub"

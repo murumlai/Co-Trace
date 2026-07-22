@@ -115,8 +115,12 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+python run_backend.py
 ```
+
+Use `python run_backend.py --debug` for verbose request, job, and Copilot-provider
+logging. Each backend start rewrites `backendLog.txt` and `frontend_Log.txt` in the
+repo root by default.
 
 Backend health check:
 
@@ -124,10 +128,10 @@ Backend health check:
 Invoke-RestMethod http://127.0.0.1:8000/api/health | ConvertTo-Json -Compress
 ```
 
-Expected response without an LLM token:
+Expected response:
 
 ```json
-{"status":"ok","llm":"offline-stub"}
+{"status":"ok","llm_provider":"copilot_sdk","debug":false}
 ```
 
 ## Frontend Setup
@@ -137,6 +141,10 @@ cd frontend
 npm install
 npm run dev
 ```
+
+Use `npm run dev -- --debug` (or `npm run dev:debug`) for verbose browser-side API
+and navigation logging. The wrapper rewrites `frontend_Log.txt` and mirrors Vite
+output into it on each frontend start.
 
 The Vite dev server runs at http://localhost:5173 and proxies `/api` to the backend on
 port `8000`.
@@ -157,7 +165,7 @@ cd frontend
 npm run build
 
 cd ..\backend
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000
+.\.venv\Scripts\python.exe run_backend.py
 ```
 
 Open http://127.0.0.1:8000.
@@ -168,15 +176,15 @@ To stop the server, press `Ctrl+C` in the terminal running Uvicorn.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `LLM_PROVIDER` | `github_models` | Diagnosis provider: `github_models`, `copilot_sdk`, or `offline_stub`. |
+| `LLM_PROVIDER` | `copilot_sdk` | Diagnosis provider: `github_models`, `copilot_sdk`, or `offline_stub`. |
 | `GITHUB_TOKEN` | empty | GitHub Models token. If unset, failed-unit diagnosis uses the offline stub. |
 | `LLM_ENDPOINT` | `https://models.inference.ai.azure.com/chat/completions` | Chat completions endpoint. |
-| `LLM_MODEL` | `gpt-4o-mini` | Configurable cost-conscious model default. |
+| `LLM_MODEL` | `gpt-5.4-mini` | Configurable GitHub Models default. |
 | `LLM_TIMEOUT_S` | `30` | LLM request timeout in seconds. |
 | `LLM_MAX_RETRIES` | `2` | Number of retry attempts after an LLM call failure. |
 | `COPILOT_MINI_MODEL` | `gpt-5.4-mini` | Copilot SDK model for excerpt summarization/classification. |
-| `COPILOT_REASONING_MODEL` | `gpt-5.4-mini` | Copilot SDK model for final root-cause/solution. |
-| `COPILOT_PROXY` | empty | Optional `HTTP(S)_PROXY` used by the Copilot SDK subprocess. |
+| `COPILOT_REASONING_MODEL` | `claude-sonnet-4.6` | Copilot SDK model for final root-cause/solution. |
+| `COPILOT_PROXY` | `http://proxy-us.intel.com:912` | Optional `HTTP(S)_PROXY` used by the Copilot SDK subprocess. |
 | `COPILOT_TIMEOUT_S` | `60` | Per-call timeout for a Copilot SDK streaming session. |
 | `COPILOT_ENABLE_MINI_ENRICH` | `1` | Run the mini summarization pass before the reasoning call. |
 | `APP_USERNAME` | `admin` | Placeholder login username. |
@@ -184,6 +192,11 @@ To stop the server, press `Ctrl+C` in the terminal running Uvicorn.
 | `SESSION_TTL_S` | `28800` | Placeholder auth session lifetime in seconds. |
 | `WORK_DIR` | `.cotrace_work` under the process working directory | Temporary per-job upload storage. |
 | `JOB_TTL_S` | `2592000` | Job persistence and auto-delete window in seconds (30 days). |
+| `COTRACE_DEBUG` / `APP_DEBUG` | `0` | Enable verbose backend/frontend logging. Set by `run_backend.py --debug`. |
+| `LOG_DIR` | current working directory | Directory for default log files. |
+| `BACKEND_LOG_FILE` | `<LOG_DIR>/backendLog.txt` | Backend run log; rewritten on backend start. |
+| `FRONTEND_LOG_FILE` | `<LOG_DIR>/frontend_Log.txt` | Browser/Vite frontend run log; rewritten on backend/frontend start. |
+| `FRONTEND_LOG_MAX_CONTEXT_CHARS` | `4000` | Max context payload retained per frontend log line in debug mode. |
 | `DEBUG_EXCERPT_CHAR_BUDGET` | `6000` | Max characters for a failed unit's DebugLog excerpt. |
 | `FTRUNNER_SNIPPET_CHAR_BUDGET` | `2000` | Max characters for a failed unit's FTRunner snippet (compact mode). |
 | `ZIP_MAX_TOTAL_BYTES` | `209715200` | Total extraction budget per run folder (zip-bomb guard). |

@@ -1,4 +1,5 @@
 // Thin API client. Token is kept in localStorage for the placeholder auth.
+import { debugLog, log } from './logger'
 
 const TOKEN_KEY = 'cotrace_token'
 
@@ -12,15 +13,24 @@ export function setToken(t) {
 
 async function request(path, { method = 'GET', body, headers = {} } = {}) {
   const token = getToken()
-  const res = await fetch(path, {
-    method,
-    headers: {
-      ...(body && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...headers,
-    },
-    body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
-  })
+  const started = performance.now()
+  let res
+  try {
+    res = await fetch(path, {
+      method,
+      headers: {
+        ...(body && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...headers,
+      },
+      body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
+    })
+  } catch (error) {
+    log('error', 'api_network_error', { path, method, error: error.message })
+    throw error
+  }
+  const durationMs = Math.round(performance.now() - started)
+  debugLog('api_response', { path, method, status: res.status, durationMs })
   if (res.status === 401 && path !== '/api/login') {
     // Stale/expired bearer token (e.g. backend restarted, or the session
     // TTL lapsed). Clear it and let the app fall back to the login screen
@@ -30,7 +40,11 @@ async function request(path, { method = 'GET', body, headers = {} } = {}) {
   }
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}))
+    log('warning', 'api_error', { path, method, status: res.status, durationMs, detail: detail.detail })
     throw new Error(detail.detail || `Request failed (${res.status})`)
+  }
+  if (method !== 'GET') {
+    log('info', 'api_mutation', { path, method, status: res.status, durationMs })
   }
   return res.json()
 }

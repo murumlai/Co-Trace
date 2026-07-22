@@ -4,6 +4,7 @@ import Login from './pages/Login'
 import Home from './pages/Home'
 import Engineer from './pages/Engineer'
 import Manager from './pages/Manager'
+import { debugLog, log } from './logger'
 
 const TABS = [
   ['home', 'Home'],
@@ -24,11 +25,13 @@ function Shell() {
     setJobId(id)
     setWarnings(jobWarnings)
     setTab('engineer')
+    log('info', 'job_ready', { jobId: id, warningCount: jobWarnings.length })
   }
 
   const NavButton = ({ id, label }) => (
     <button
       onClick={() => {
+        debugLog('tab_change', { tab: id })
         setTab(id)
         setMenuOpen(false)
       }}

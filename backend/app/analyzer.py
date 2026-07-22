@@ -7,6 +7,7 @@ unique signature and the result is cached on the job.
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from collections.abc import Callable
 
@@ -16,6 +17,7 @@ from .models import UnitRecord
 
 _WS = re.compile(r"\s+")
 _NUM = re.compile(r"\d+")
+log = logging.getLogger("cotrace.analyzer")
 
 AnalyzeFailure = Callable[[str | None, str | None, str], tuple[str, str, str]]
 
@@ -61,10 +63,13 @@ def _redacted_context(record: UnitRecord) -> tuple[str, str, str]:
 
 def analyze_job(job: Job, analyze_failure: AnalyzeFailure = llm_client.analyze) -> None:
     """Populate root cause / solution for all failed units, using the cache."""
+    fail_count = sum(1 for rec in job.records if rec.result == "FAIL")
+    log.info("analysis start job_id=%s fail_count=%s cache_size=%s", job.job_id, fail_count, len(job.signature_cache))
     for rec in job.records:
         if rec.result != "FAIL":
             continue
         _analyze_unit(job, rec, force=False, analyze_failure=analyze_failure)
+    log.info("analysis done job_id=%s cache_size=%s", job.job_id, len(job.signature_cache))
 
 
 def _analyze_unit(
@@ -84,13 +89,23 @@ def _analyze_unit(
         rec.root_cause = root
         rec.suggested_solution = solution
         rec.analysis_source = "cached"
+        log.debug("analysis cache hit job_id=%s unit_id=%s signature=%s", job.job_id, rec.unit_id, sig)
         return
 
+    log.info(
+        "analysis call job_id=%s unit_id=%s signature=%s context_source=%s force=%s",
+        job.job_id,
+        rec.unit_id,
+        sig,
+        context_source,
+        force,
+    )
     root, solution, source = analyze_failure(rec.error_code, err_msg, snippet)
     job.signature_cache[sig] = (root, solution, source)
     rec.root_cause = root
     rec.suggested_solution = solution
     rec.analysis_source = source
+    log.info("analysis result job_id=%s unit_id=%s signature=%s source=%s", job.job_id, rec.unit_id, sig, source)
 
 
 def reanalyze_unit(

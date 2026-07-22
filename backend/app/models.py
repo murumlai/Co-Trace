@@ -77,3 +77,9 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     token: str
     username: str
+
+
+class FrontendLogRequest(BaseModel):
+    level: str = "info"
+    message: str
+    context: dict = Field(default_factory=dict)
