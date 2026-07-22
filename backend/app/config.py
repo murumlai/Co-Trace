@@ -16,14 +16,14 @@ class Settings:
     # Routes failed-unit diagnosis. One of: "github_models" | "copilot_sdk" |
     # "offline_stub". Default preserves the original GitHub Models behavior
     # (which itself degrades to the offline stub when GITHUB_TOKEN is unset).
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "github_models")
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "copilot_sdk")
 
     # --- LLM (GitHub Models) ---
     # If no token is present the analyzer falls back to a deterministic offline stub,
     # so the app is fully runnable without any external calls.
     GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "")
     LLM_ENDPOINT: str = os.getenv("LLM_ENDPOINT", "https://models.inference.ai.azure.com/chat/completions")
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-4o-mini")  # cost-efficient default
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-5.4-mini")  # cost-efficient default
     LLM_TIMEOUT_S: float = float(os.getenv("LLM_TIMEOUT_S", "30"))
     LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "2"))
 
@@ -33,8 +33,8 @@ class Settings:
     # root cause and suggested solution. Both default to the mini model so a
     # single-model setup works out of the box.
     COPILOT_MINI_MODEL: str = os.getenv("COPILOT_MINI_MODEL", "gpt-5.4-mini")
-    COPILOT_REASONING_MODEL: str = os.getenv("COPILOT_REASONING_MODEL", "gpt-5.4-mini")
-    COPILOT_PROXY: str = os.getenv("COPILOT_PROXY", "")
+    COPILOT_REASONING_MODEL: str = os.getenv("COPILOT_REASONING_MODEL", "claude-sonnet-4.6")
+    COPILOT_PROXY: str = os.getenv("COPILOT_PROXY", "http://proxy-us.intel.com:912")
     COPILOT_TIMEOUT_S: float = float(os.getenv("COPILOT_TIMEOUT_S", "60"))
     # Run the mini enrichment/summarization pass before the reasoning call.
     COPILOT_ENABLE_MINI_ENRICH: bool = _env_flag("COPILOT_ENABLE_MINI_ENRICH", True)
