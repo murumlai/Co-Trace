@@ -31,9 +31,10 @@ defined in [designUI.md](designUI.md). The preprocessing design is tracked in
 - Job state is persisted to disk as `job_state.json` under each per-job working directory,
   restored on backend startup, and automatically deleted after the job TTL expires.
 - Failed-unit diagnosis routes through a configurable provider (`LLM_PROVIDER`): GitHub
-  Models (default), the GitHub Copilot SDK, or a deterministic offline stub. If the chosen
-  provider is unavailable (e.g. no `GITHUB_TOKEN`, or the Copilot SDK is not installed),
-  analysis degrades to the offline stub and makes no external calls.
+  Copilot SDK (default), GitHub Models, or a deterministic offline stub. If the chosen
+  provider is unavailable (for example, Copilot SDK/CLI auth is unavailable or a GitHub
+  Models token is missing), analysis degrades to the offline stub and makes no external
+  calls.
 
 ## Key Features
 
@@ -51,10 +52,12 @@ defined in [designUI.md](designUI.md). The preprocessing design is tracked in
   a reachable `debuglog.txt` are surfaced as a dismissible UI banner rather than silently
   dropped.
 - **LLM cost control**: passing units never trigger LLM analysis. Failed units are grouped
-  by error signature so the app analyzes each unique signature once and applies the result
-  to matching units.
+  by error signature so the app analyzes each unique signature once, then persists
+  successful LLM diagnoses in a local cache for reuse across repeated uploads.
 - **Manual re-analysis**: engineers can force a fresh diagnosis for an individual failed
   unit.
+- **Cache management**: engineers can clear a specific cached analysis result from the
+  failed-unit detail panel when they want the next matching run to call the model again.
 - **Redaction at rest and pre-LLM**: serial numbers, IP addresses, hostnames, usernames,
   passwords, credential-like key/value pairs, and MAC addresses are scrubbed. The at-rest
   per-product JSON keeps the serial number (needed for yield math) while still removing
@@ -234,24 +237,36 @@ backend/app/
   auth.py          Pluggable auth provider with SimpleAuth placeholder
   config.py        Environment-driven settings
   models.py        Pydantic API/domain schemas
+  upload_storage.py Safe upload persistence, root zip extraction, and payload cleanup
   preprocessor.py  FTRunner-primary parser: scan/step/done blocks, DebugLog discovery,
                    per-product JSON emission, incomplete-folder warnings
+  record_views.py  Derived views such as latest run per serial for Engineer/API artifacts
   orchestrator.py  Background job pipeline, JSON emission, and progress updates
   job_registry.py  Disk-backed job registry with 30-day TTL cleanup
   aggregator.py    Manager metrics: FPY, trend, Pareto, stations, lots
   analyzer.py      Engineer signature deduplication and diagnosis flow
+  analysis_cache.py Persistent local cache for successful LLM diagnoses
   redaction.py     Sensitive-data scrubbing (keep_serial mode for at-rest JSON)
+  logging_config.py Run-scoped backend/frontend log setup
   llm_client.py    Provider router (GitHub Models) with offline stub fallback
   copilot_client.py GitHub Copilot SDK provider (two-tier mini + reasoning models)
+
+backend/
+  run_backend.py   Backend launcher with --debug logging switch
+  scripts/measure_preprocessed.py JSON size measurement helper
 
 frontend/src/
   App.jsx                  Login-gated shell, Home/Engineer/Manager tabs, warning banner
   api.js                   Fetch wrapper, bearer-token handling, 401 recovery
   auth.jsx                 Placeholder auth context with session-expiry handling
+  logger.js                Browser log forwarding to frontend_Log.txt via backend endpoint
   components/ui.jsx        Neumorphic UI primitives
   pages/Home.jsx           Upload and progress UI
   pages/Engineer.jsx       Unit-level diagnostics (table / cards views)
   pages/Manager.jsx        Yield and failure analytics
+
+frontend/scripts/
+  dev-server.mjs           Vite wrapper that rewrites/mirrors frontend_Log.txt
 ```
 
 ## Useful Commands
@@ -276,10 +291,9 @@ git status --short --ignored
 
 - **DebugLog excerpt tuning**: extraction anchors on the FTRunner failure signal with a
   generic-marker fallback; the exact markers and char budget remain a tuning item.
-- **Per-product JSON backfill**: in compact mode the preprocessing JSON omits the empty
-  `root_cause` / `suggested_solution` placeholders (they are always empty at write time);
-  Engineer diagnosis is populated later in persisted job state after the analyzer runs.
-  Set `PREPROCESSED_JSON_FORMAT=legacy` to restore the fully-populated shape.
+- **Preprocessed artifact retention**: per-product JSON is written during processing but
+  removed after terminal job state by default (`CLEANUP_JOB_WORKDIR_AFTER_RUN=1`). Set
+  cleanup off when you need to inspect the generated JSON files after a run.
 - **Docker packaging**: the app is structured to be containerized, but no Dockerfile or
   compose file is included yet.
 - **Placeholder auth**: SimpleAuth is intentionally temporary (in-memory tokens do not
