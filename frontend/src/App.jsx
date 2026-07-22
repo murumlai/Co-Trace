@@ -161,11 +161,11 @@ function Shell() {
           className,
         ].join(' ')}
       >
-        <span className="relative h-6 w-11 rounded-full bg-base shadow-inset-sm">
+        <span className="relative h-6 w-11 shrink-0 overflow-hidden rounded-full bg-base shadow-inset-sm">
           <span
             className={[
-              'absolute top-1 h-4 w-4 rounded-full bg-accent shadow-extruded-sm transition-transform duration-300',
-              dark ? 'translate-x-6' : 'translate-x-1',
+              'absolute left-1 top-1 h-4 w-4 rounded-full bg-accent shadow-extruded-sm transition-transform duration-300',
+              dark ? 'translate-x-5' : 'translate-x-0',
             ].join(' ')}
           />
         </span>
