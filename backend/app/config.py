@@ -54,6 +54,8 @@ class Settings:
     BACKEND_LOG_FILE: str = os.getenv("BACKEND_LOG_FILE", os.path.join(LOG_DIR, "backendLog.txt"))
     FRONTEND_LOG_FILE: str = os.getenv("FRONTEND_LOG_FILE", os.path.join(LOG_DIR, "frontend_Log.txt"))
     FRONTEND_LOG_MAX_CONTEXT_CHARS: int = int(os.getenv("FRONTEND_LOG_MAX_CONTEXT_CHARS", "4000"))
+    ANALYSIS_CACHE_ENABLED: bool = _env_flag("ANALYSIS_CACHE_ENABLED", True)
+    ANALYSIS_CACHE_FILE: str = os.getenv("ANALYSIS_CACHE_FILE", os.path.join(WORK_DIR, "analysis_cache.json"))
 
     # --- Preprocessing (FTRunner-primary) ---
     DEBUG_EXCERPT_CHAR_BUDGET: int = int(os.getenv("DEBUG_EXCERPT_CHAR_BUDGET", "6000"))

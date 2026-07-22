@@ -51,8 +51,9 @@ class UnitRecord(BaseModel):
     root_cause: Optional[str] = None
     suggested_solution: Optional[str] = None
     redacted_snippet: Optional[str] = None
-    analysis_source: Optional[str] = None  # "llm" | "stub" | "cached"
+    analysis_source: Optional[str] = None  # "llm" | "stub" | "cached" | "local-cache"
     analysis_context_source: Optional[str] = None  # "debug_excerpt" | "ftrunner_snippet" | "error_message"
+    analysis_cache_key: Optional[str] = None
 
 
 class JobProgress(BaseModel):

@@ -11,7 +11,7 @@ import logging
 import re
 from collections.abc import Callable
 
-from . import llm_client, redaction
+from . import analysis_cache, llm_client, redaction
 from .job_registry import Job
 from .models import UnitRecord
 
@@ -123,14 +123,34 @@ def _analyze_unit(
     err_msg, snippet, context_source = _redacted_context(rec)
     rec.redacted_snippet = snippet
     rec.analysis_context_source = context_source
+    cache_key = analysis_cache.make_key(
+        error_code=rec.error_code,
+        error_message=err_msg,
+        context=snippet,
+        context_source=context_source,
+        signature=sig,
+    )
+    rec.analysis_cache_key = cache_key
 
     if not force and sig in job.signature_cache:
         root, solution, _src = job.signature_cache[sig]
         rec.root_cause = root
         rec.suggested_solution = solution
-        rec.analysis_source = "cached"
+        rec.analysis_source = "local-cache" if _src == "local-cache" else "cached"
         log.debug("Used cached analysis for unit %s (signature %s).", rec.unit_id, sig)
         return
+
+    if not force:
+        cached = analysis_cache.get_entry(cache_key)
+        if cached:
+            root = str(cached.get("root_cause") or "No root cause returned.")
+            solution = str(cached.get("suggested_solution") or "No solution returned.")
+            job.signature_cache[sig] = (root, solution, "local-cache")
+            rec.root_cause = root
+            rec.suggested_solution = solution
+            rec.analysis_source = "local-cache"
+            log.info("Used saved analysis cache for unit %s (cache %s).", rec.unit_id, cache_key[:8])
+            return
 
     log.info(
         "Analyzing unit %s with %s context (signature %s, force=%s).",
@@ -144,6 +164,21 @@ def _analyze_unit(
     rec.root_cause = root
     rec.suggested_solution = solution
     rec.analysis_source = source
+    analysis_cache.set_entry(
+        cache_key,
+        root_cause=root,
+        suggested_solution=solution,
+        source=source,
+        metadata={
+            "signature": sig,
+            "error_code": rec.error_code,
+            "error_message": err_msg,
+            "context_source": context_source,
+            "unit_id": rec.unit_id,
+            "product_code": rec.product_code,
+            "failing_step": rec.failing_step,
+        },
+    )
     log.info("Analysis result for unit %s came from %s.", rec.unit_id, source)
 
 
