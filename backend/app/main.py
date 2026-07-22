@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,7 +16,14 @@ from .config import settings
 from .job_registry import registry
 from .models import LoginRequest, LoginResponse
 
-app = FastAPI(title="Co_Trace — Manufacturing Log Dashboard")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):  # noqa: ARG001
+    registry.load_from_disk()
+    yield
+
+
+app = FastAPI(title="Co_Trace — Manufacturing Log Dashboard", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

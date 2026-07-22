@@ -21,7 +21,7 @@ class Settings:
 
     # --- Jobs / storage ---
     WORK_DIR: str = os.getenv("WORK_DIR", os.path.join(os.getcwd(), ".cotrace_work"))
-    JOB_TTL_S: int = int(os.getenv("JOB_TTL_S", str(60 * 60 * 2)))
+    JOB_TTL_S: int = int(os.getenv("JOB_TTL_S", str(60 * 60 * 24 * 30)))  # 30 days
 
     # --- Preprocessing (FTRunner-primary) ---
     DEBUG_EXCERPT_CHAR_BUDGET: int = int(os.getenv("DEBUG_EXCERPT_CHAR_BUDGET", "6000"))

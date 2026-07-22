@@ -16,6 +16,7 @@ def run_job(job_id: str) -> None:
 
     job.status = "running"
     job.message = "Scanning uploaded files"
+    job.save()
 
     try:
         pre = get_preprocessor()
@@ -38,6 +39,7 @@ def run_job(job_id: str) -> None:
         job.warnings = [
             f"No ftrunnerlog01.txt or debuglog.txt found in: {rel}" for rel in incomplete
         ]
+        job.save()
 
         # One redacted <product_code>.json per product, serving both tabs.
         job.message = "Writing per-product JSON"
@@ -51,6 +53,8 @@ def run_job(job_id: str) -> None:
 
         job.status = "done"
         job.message = f"Completed: {len(records)} unit runs"
+        job.save()
     except Exception as exc:  # noqa: BLE001 - surface failure to the UI
         job.status = "error"
         job.message = f"Processing failed: {type(exc).__name__}: {exc}"
+        job.save()
