@@ -171,3 +171,59 @@ def _save(data: dict[str, Any]) -> None:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# DiskAnalysisCache — concrete adapter for the AnalysisCache contract
+# ---------------------------------------------------------------------------
+
+class DiskAnalysisCache:
+    """Wraps module-level cache functions as an ``AnalysisCache`` implementation.
+
+    Method names match the ``AnalysisCache`` protocol (``get`` / ``put`` /
+    ``make_key``). Implementations delegate to the module-level functions so
+    tests that monkeypatch ``get_entry`` / ``set_entry`` continue to work.
+    """
+
+    def make_key(
+        self,
+        *,
+        error_code: str | None,
+        error_message: str | None,
+        context: str,
+        context_source: str,
+        signature: str,
+    ) -> str:
+        return make_key(
+            error_code=error_code,
+            error_message=error_message,
+            context=context,
+            context_source=context_source,
+            signature=signature,
+        )
+
+    def get(self, cache_key: str) -> dict[str, Any] | None:
+        """Return a cached entry or ``None`` on a miss."""
+        return get_entry(cache_key)
+
+    def put(
+        self,
+        cache_key: str,
+        *,
+        root_cause: str,
+        suggested_solution: str,
+        source: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        """Store an analysis result (only persisted when source == "llm")."""
+        set_entry(
+            cache_key,
+            root_cause=root_cause,
+            suggested_solution=suggested_solution,
+            source=source,
+            metadata=metadata,
+        )
+
+
+# Module-level default instance used when no cache is explicitly injected.
+_default_cache = DiskAnalysisCache()

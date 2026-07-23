@@ -15,6 +15,7 @@ from collections.abc import Callable
 from typing import Any
 
 from . import analyzer as _analyzer_module
+from .analyzer import AnalyzerService
 from .config import settings
 from .contracts import ArtifactWriter, FailureAnalyzer, JobRepository, PayloadCleaner, Preprocessor
 from .job_registry import registry
@@ -42,13 +43,6 @@ class _FunctionArtifactWriter:
         warnings: list[str] | None = None,
     ) -> list[str]:
         return write_product_jsons(records, output_dir, warnings=warnings)
-
-
-class _FunctionFailureAnalyzer:
-    """Wraps ``analyzer.analyze_job`` as a ``FailureAnalyzer``."""
-
-    def analyze_job(self, job: Any, progress_callback: Callable | None = None) -> None:
-        _analyzer_module.analyze_job(job, progress_callback=progress_callback)
 
 
 class _FunctionPayloadCleaner:
@@ -181,7 +175,7 @@ _default_orchestrator = JobOrchestrator(
     repository=registry,
     preprocessor=FtrunnerPreprocessor(),
     artifact_writer=_FunctionArtifactWriter(),
-    analyzer=_FunctionFailureAnalyzer(),
+    analyzer=AnalyzerService(),       # uses DiskAnalysisCache + llm_client.analyze defaults
     cleaner=_FunctionPayloadCleaner(),
 )
 

@@ -66,8 +66,13 @@ def analyze_job(
     job: Job,
     analyze_failure: AnalyzeFailure = llm_client.analyze,
     progress_callback: AnalysisProgress | None = None,
+    cache: object | None = None,
 ) -> None:
-    """Populate root cause / solution for all failed units, using the cache."""
+    """Populate root cause / solution for all failed units, using the cache.
+
+    ``cache`` may be any object satisfying the ``AnalysisCache`` protocol.
+    When ``None`` the module-level ``DiskAnalysisCache`` default is used.
+    """
     failed = [rec for rec in job.records if rec.result == "FAIL"]
     total_signatures = len({signature_for(rec) for rec in failed})
     log.info(
@@ -95,6 +100,7 @@ def analyze_job(
             rec,
             force=False,
             analyze_failure=analyze_failure,
+            cache=cache,
             progress_callback=(
                 lambda message: progress_callback(
                     len(completed_signatures),
@@ -140,13 +146,16 @@ def _analyze_unit(
     progress_callback: Callable[[str], None] | None = None,
     progress_index: int = 1,
     progress_total: int = 1,
+    cache: object | None = None,
 ) -> str:
+    from . import analysis_cache as _ac_module  # avoid circular at import time
+    _cache: object = cache if cache is not None else _ac_module._default_cache
     sig = signature_for(rec)
     rec.signature = sig
     err_msg, snippet, context_source = _redacted_context(rec)
     rec.redacted_snippet = snippet
     rec.analysis_context_source = context_source
-    cache_key = analysis_cache.make_key(
+    cache_key = _cache.make_key(
         error_code=rec.error_code,
         error_message=err_msg,
         context=snippet,
@@ -164,10 +173,10 @@ def _analyze_unit(
         return rec.analysis_source
 
     if not force:
-        cached = analysis_cache.get_entry(cache_key)
-        if cached:
-            root = str(cached.get("root_cause") or "No root cause returned.")
-            solution = str(cached.get("suggested_solution") or "No solution returned.")
+        cached_entry = _cache.get(cache_key)
+        if cached_entry:
+            root = str(cached_entry.get("root_cause") or "No root cause returned.")
+            solution = str(cached_entry.get("suggested_solution") or "No solution returned.")
             job.signature_cache[sig] = (root, solution, "local-cache")
             rec.root_cause = root
             rec.suggested_solution = solution
@@ -190,7 +199,7 @@ def _analyze_unit(
     rec.root_cause = root
     rec.suggested_solution = solution
     rec.analysis_source = source
-    analysis_cache.set_entry(
+    _cache.put(
         cache_key,
         root_cause=root,
         suggested_solution=solution,
@@ -222,3 +231,39 @@ def reanalyze_unit(
             _analyze_unit(job, rec, force=True, analyze_failure=analyze_failure)
             return rec
     return None
+
+
+# ---------------------------------------------------------------------------
+# AnalyzerService — concrete adapter for the FailureAnalyzer contract
+# ---------------------------------------------------------------------------
+
+class AnalyzerService:
+    """Encapsulates injected cache and LLM provider for the ``FailureAnalyzer``
+    protocol, allowing tests to substitute either dependency without importing
+    or monkeypatching module globals.
+
+    When ``cache`` is ``None`` the module-level ``DiskAnalysisCache`` default
+    is used. When ``analyze_failure`` is ``None`` ``llm_client.analyze`` is
+    used (which itself routes to the configured provider).
+    """
+
+    def __init__(
+        self,
+        analyze_failure: AnalyzeFailure | None = None,
+        cache: object | None = None,
+    ) -> None:
+        self._analyze_failure: AnalyzeFailure = analyze_failure or llm_client.analyze
+        self._cache = cache  # None ⇒ module default inside analyze_job/_analyze_unit
+
+    def analyze_job(
+        self,
+        job: Job,
+        progress_callback: AnalysisProgress | None = None,
+    ) -> None:
+        """Implements the ``FailureAnalyzer.analyze_job`` contract."""
+        analyze_job(
+            job,
+            analyze_failure=self._analyze_failure,
+            progress_callback=progress_callback,
+            cache=self._cache,
+        )

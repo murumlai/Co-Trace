@@ -60,6 +60,48 @@ def analyze(error_code: str | None, error_message: str | None, snippet: str) -> 
     return _analyze_github_models(error_code, error_message, snippet)
 
 
+# ---------------------------------------------------------------------------
+# LLMProvider implementations (concrete adapters for the LLMProvider contract)
+# ---------------------------------------------------------------------------
+
+class OfflineStubProvider:
+    """Deterministic offline stub — no external calls, no token required."""
+
+    def analyze(
+        self,
+        error_code: str | None,
+        error_message: str | None,
+        snippet: str,
+    ) -> tuple[str, str, str]:
+        return _offline_stub(error_code, error_message)
+
+
+class GitHubModelsProvider:
+    """GitHub Models chat-completions API; falls back to stub without a token."""
+
+    def analyze(
+        self,
+        error_code: str | None,
+        error_message: str | None,
+        snippet: str,
+    ) -> tuple[str, str, str]:
+        return _analyze_github_models(error_code, error_message, snippet)
+
+
+class CopilotSdkProvider:
+    """GitHub Copilot SDK provider (requires ``copilot auth login``)."""
+
+    def analyze(
+        self,
+        error_code: str | None,
+        error_message: str | None,
+        snippet: str,
+    ) -> tuple[str, str, str]:
+        from . import copilot_client  # noqa: PLC0415
+
+        return copilot_client.analyze(error_code, error_message, snippet)
+
+
 def _analyze_github_models(
     error_code: str | None, error_message: str | None, snippet: str
 ) -> tuple[str, str, str]:
