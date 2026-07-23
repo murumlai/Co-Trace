@@ -35,6 +35,12 @@ defined in [designUI.md](designUI.md). The preprocessing design is tracked in
   provider is unavailable (for example, Copilot SDK/CLI auth is unavailable or a GitHub
   Models token is missing), analysis degrades to the offline stub and makes no external
   calls.
+- The backend follows SOLID service boundaries: narrow `typing.Protocol` contracts
+  (`contracts.py`), concrete adapters wired in a composition root (`dependencies.py`),
+  and injected application services (`JobOrchestrator`, `AnalyzerService`,
+  `DiskJobStateStore`, `DiskAnalysisCache`, provider classes). A 108-test pytest
+  safety-net suite in `backend/tests/` locks parser, analyzer, registry, upload, and
+  API behavior.
 
 ## Key Features
 
@@ -143,6 +149,17 @@ Expected response:
 
 ```json
 {"status":"ok","llm_provider":"copilot_sdk","debug":false}
+```
+
+## Backend Tests
+
+The backend has a pytest safety-net suite (108 tests) covering FTRunner parsing,
+DebugLog excerpt selection, product JSON construction, analyzer dedup/cache behavior,
+job registry persistence/restore/TTL, upload zip safety, and FastAPI route smoke paths.
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pytest tests/ -q
 ```
 
 ## Frontend Setup
