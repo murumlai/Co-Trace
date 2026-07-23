@@ -10,12 +10,55 @@ function isSingleZip(files) {
   return files.length === 1 && relPath(files[0]).toLowerCase().endsWith('.zip')
 }
 
+function formatCount(count, singular, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`
+}
+
+function summarizeNames(names, limit = 3) {
+  const visible = names.slice(0, limit)
+  const extra = names.length - visible.length
+  return extra > 0 ? [...visible, `+ ${extra} more`] : visible
+}
+
+function uploadSummary(files) {
+  if (!files.length) return null
+
+  const paths = files.map(relPath)
+
+  if (isSingleZip(files)) {
+    return {
+      title: paths[0],
+      detail: 'ZIP archive ready',
+      names: [paths[0]],
+    }
+  }
+
+  const folderRoots = Array.from(
+    new Set(paths.filter((path) => path.includes('/')).map((path) => path.split('/')[0])),
+  )
+
+  if (folderRoots.length) {
+    return {
+      title: summarizeNames(folderRoots).join(', '),
+      detail: `${formatCount(files.length, 'file')} selected from ${formatCount(folderRoots.length, 'folder')}`,
+      names: summarizeNames(folderRoots),
+    }
+  }
+
+  return {
+    title: summarizeNames(paths).join(', '),
+    detail: `${formatCount(files.length, 'file')} ready`,
+    names: summarizeNames(paths),
+  }
+}
+
 export default function Home({ onStartBatch, onStopBatch, processing, progress, batchError }) {
   const [files, setFiles] = useState([])
   const [dragging, setDragging] = useState(false)
   const [localError, setLocalError] = useState('')
   const folderInput = useRef(null)
   const fileInput = useRef(null)
+  const selectedUpload = uploadSummary(files)
 
   const addFiles = (list) => {
     setLocalError('')
@@ -88,6 +131,40 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
           </p>
           <p className="mt-1 text-sm text-muted">or choose below</p>
 
+          {selectedUpload && (
+            <div className="mt-6 mx-auto max-w-2xl rounded-2xl bg-base shadow-inset-sm px-5 py-4 text-left">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted">Selected upload</p>
+                  <p className="mt-1 truncate font-display text-lg font-semibold text-ink" title={selectedUpload.title}>
+                    {selectedUpload.title}
+                  </p>
+                  <p className="mt-1 text-sm text-muted">{selectedUpload.detail}</p>
+                </div>
+                <button
+                  className="self-start rounded-lg px-2 py-1 text-sm text-muted hover:text-ink focus-ring"
+                  onClick={() => setFiles([])}
+                  disabled={processing}
+                >
+                  Clear
+                </button>
+              </div>
+              {selectedUpload.names.length > 1 && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {selectedUpload.names.map((name, index) => (
+                    <span
+                      key={`${name}-${index}`}
+                      className="inline-block max-w-full truncate rounded-full bg-base px-3 py-1 text-xs font-medium text-muted shadow-extruded-sm"
+                      title={name}
+                    >
+                      {name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
             <Button onClick={() => folderInput.current?.click()}>Select folder</Button>
             <Button onClick={() => fileInput.current?.click()}>Select files or .zip</Button>
@@ -110,21 +187,6 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
             onChange={(e) => addFiles(e.target.files)}
           />
         </div>
-
-        {files.length > 0 && (
-          <div className="mt-6 flex items-center justify-between rounded-2xl bg-base shadow-inset-sm px-5 py-4">
-            <span className="text-sm text-ink font-medium">
-              {files.length} file{files.length === 1 ? '' : 's'} ready
-            </span>
-            <button
-              className="text-sm text-muted hover:text-ink focus-ring rounded-lg px-2 py-1"
-              onClick={() => setFiles([])}
-              disabled={processing}
-            >
-              Clear
-            </button>
-          </div>
-        )}
 
         {progress && (
           <div className="mt-6">
