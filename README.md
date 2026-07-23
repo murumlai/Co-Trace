@@ -35,6 +35,12 @@ defined in [designUI.md](designUI.md). The preprocessing design is tracked in
   provider is unavailable (for example, Copilot SDK/CLI auth is unavailable or a GitHub
   Models token is missing), analysis degrades to the offline stub and makes no external
   calls.
+- The backend follows SOLID service boundaries: narrow `typing.Protocol` contracts
+  (`contracts.py`), concrete adapters wired in a composition root (`dependencies.py`),
+  and injected application services (`JobOrchestrator`, `AnalyzerService`,
+  `DiskJobStateStore`, `DiskAnalysisCache`, provider classes). A 108-test pytest
+  safety-net suite in `backend/tests/` locks parser, analyzer, registry, upload, and
+  API behavior.
 
 ## Key Features
 
@@ -145,6 +151,17 @@ Expected response:
 {"status":"ok","llm_provider":"copilot_sdk","debug":false}
 ```
 
+## Backend Tests
+
+The backend has a pytest safety-net suite (108 tests) covering FTRunner parsing,
+DebugLog excerpt selection, product JSON construction, analyzer dedup/cache behavior,
+job registry persistence/restore/TTL, upload zip safety, and FastAPI route smoke paths.
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pytest tests/ -q
+```
+
 ## Frontend Setup
 
 ```powershell
@@ -236,22 +253,31 @@ $env:GITHUB_TOKEN = "<set-at-runtime-only>"
 
 ```text
 backend/app/
-  main.py          FastAPI routes and static SPA serving
-  auth.py          Pluggable auth provider with SimpleAuth placeholder
+  main.py          FastAPI routes and static SPA serving (HTTP concerns only;
+                   services injected via Depends from dependencies.py)
+  auth.py          Pluggable AuthProvider protocol with SimpleAuth placeholder
   config.py        Environment-driven settings
   models.py        Pydantic API/domain schemas
+  contracts.py     Narrow typing.Protocol interfaces: JobRepository, JobStateStore,
+                   Preprocessor, ArtifactWriter, FailureAnalyzer, AnalysisCache,
+                   LLMProvider, PayloadCleaner
+  dependencies.py  Composition root: wires concrete adapters; provides FastAPI
+                   Depends functions (get_registry, get_orchestrator, etc.)
   upload_storage.py Safe upload persistence, root zip extraction, and payload cleanup
-  preprocessor.py  FTRunner-primary parser: scan/step/done blocks, DebugLog discovery,
+  preprocessor.py  FtrunnerPreprocessor: scan/step/done blocks, DebugLog discovery,
                    per-product JSON emission, incomplete-folder warnings
   record_views.py  Derived views such as latest run per serial for Engineer/API artifacts
-  orchestrator.py  Background job pipeline, JSON emission, and progress updates
-  job_registry.py  Disk-backed job registry with 30-day TTL cleanup
+  orchestrator.py  JobOrchestrator service (injected repo/preprocessor/writer/analyzer/
+                   cleaner); run_job() compat wrapper for BackgroundTasks callers
+  job_registry.py  Job domain object + DiskJobStateStore adapter + JobRegistry with
+                   injected store dependency; 30-day TTL cleanup
   aggregator.py    Manager metrics: FPY, trend, Pareto, stations, lots
-  analyzer.py      Engineer signature deduplication and diagnosis flow
-  analysis_cache.py Persistent local cache for successful LLM diagnoses
+  analyzer.py      AnalyzerService (injected cache+provider) + signature dedup logic
+  analysis_cache.py DiskAnalysisCache adapter (wraps persistent JSON cache functions)
   redaction.py     Sensitive-data scrubbing (keep_serial mode for at-rest JSON)
   logging_config.py Run-scoped backend/frontend log setup
-  llm_client.py    Provider router (GitHub Models) with offline stub fallback
+  llm_client.py    Provider implementations: OfflineStubProvider, GitHubModelsProvider,
+                   CopilotSdkProvider; routing analyze() compat wrapper
   copilot_client.py GitHub Copilot SDK provider (two-tier mini + reasoning models)
 
 backend/
@@ -275,6 +301,10 @@ frontend/scripts/
 ## Useful Commands
 
 ```powershell
+# Run backend test suite (108 tests covering parser, analyzer, registry, upload, API smoke)
+cd backend
+.\.venv\Scripts\python.exe -m pytest tests/ -q
+
 # Backend smoke test against a sample product folder (FTRunner-primary)
 .\backend\.venv\Scripts\python.exe -c "import sys, collections; sys.path.insert(0,'backend'); from app.preprocessor import get_preprocessor; from app import aggregator; recs=get_preprocessor().process_folder(r'Log_Files_Folder/All_LogFiles_M95113-001'); mv=aggregator.build_manager_view(recs); print(len(recs)); print(collections.Counter(r.result for r in recs)); print(mv['summary'])"
 

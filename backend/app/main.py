@@ -1,4 +1,10 @@
-"""FastAPI app: auth, upload, job status, engineer & manager views, static serving."""
+"""FastAPI app: auth, upload, job status, engineer & manager views, static serving.
+
+Phase 7 (SOLID refactor): routes depend on abstract service providers from
+``dependencies.py`` rather than importing concrete module globals directly.
+``app.dependency_overrides`` can be used in tests to inject alternative
+implementations without monkeypatching module-level singletons.
+"""
 from __future__ import annotations
 
 import logging
@@ -7,16 +13,17 @@ import shutil
 import time
 import uuid
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import aggregator, analysis_cache as analysis_cache_store, analyzer, orchestrator
+from . import aggregator
 from .auth import get_auth, require_user
 from .config import settings
-from .job_registry import registry
+from .dependencies import get_analysis_cache, get_analyzer_service, get_orchestrator, get_registry
 from .logging_config import setup_backend_logging, write_frontend_log
 from .models import FrontendLogRequest, LoginRequest, LoginResponse
 from .record_views import latest_records_by_serial
@@ -29,7 +36,7 @@ log = logging.getLogger("cotrace.main")
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
     log.info("Backend started. Provider: %s. Debug: %s. Work dir: %s.", settings.LLM_PROVIDER, settings.APP_DEBUG, settings.WORK_DIR)
-    registry.load_from_disk()
+    get_registry().load_from_disk()
     yield
     log.info("Backend stopped.")
 
@@ -111,6 +118,8 @@ async def upload(
     files: list[UploadFile] = File(...),
     paths: list[str] = Form(default=[]),
     user: str = Depends(require_user),
+    reg: Any = Depends(get_registry),
+    orch: Any = Depends(get_orchestrator),
 ) -> dict:
     if not files:
         raise HTTPException(400, "No files uploaded")
@@ -131,23 +140,25 @@ async def upload(
         raise HTTPException(400, f"Upload failed: {type(exc).__name__}: {exc}") from exc
     log.info("Stored upload for job %s: %s files, %s zip archives.", job_id[:8], saved.file_count, saved.zip_count)
 
-    registry.create(job_id, workdir)
-    background.add_task(orchestrator.run_job, job_id)
+    reg.create(job_id, workdir)
+    background.add_task(orch.run_job, job_id)
     log.info("Upload queued for processing (job %s).", job_id[:8])
     return {"job_id": job_id}
 
 
 @app.get("/api/jobs/{job_id}/status")
-def job_status(job_id: str, user: str = Depends(require_user)) -> dict:
-    job = registry.get(job_id)
+def job_status(job_id: str, user: str = Depends(require_user),
+               reg: Any = Depends(get_registry)) -> dict:
+    job = reg.get(job_id)
     if job is None:
         raise HTTPException(404, "Job not found")
     return job.to_status().model_dump()
 
 
 @app.post("/api/jobs/{job_id}/stop")
-def stop_job(job_id: str, user: str = Depends(require_user)) -> dict:  # noqa: ARG001
-    job = registry.request_cancel(job_id)
+def stop_job(job_id: str, user: str = Depends(require_user),  # noqa: ARG001
+             reg: Any = Depends(get_registry)) -> dict:
+    job = reg.request_cancel(job_id)
     if job is None:
         raise HTTPException(404, "Job not found")
     log.info("Stop requested for job %s.", job_id[:8])
@@ -158,8 +169,9 @@ def stop_job(job_id: str, user: str = Depends(require_user)) -> dict:  # noqa: A
 # Engineer view
 # --------------------------------------------------------------------------
 @app.get("/api/jobs/{job_id}/units")
-def units(job_id: str, user: str = Depends(require_user)) -> dict:
-    job = registry.get(job_id)
+def units(job_id: str, user: str = Depends(require_user),
+          reg: Any = Depends(get_registry)) -> dict:
+    job = reg.get(job_id)
     if job is None:
         raise HTTPException(404, "Job not found")
     latest_units = latest_records_by_serial(job.records)
@@ -171,11 +183,13 @@ def units(job_id: str, user: str = Depends(require_user)) -> dict:
 
 
 @app.post("/api/jobs/{job_id}/units/{unit_id}/reanalyze")
-def reanalyze(job_id: str, unit_id: str, user: str = Depends(require_user)) -> dict:
-    job = registry.get(job_id)
+def reanalyze(job_id: str, unit_id: str, user: str = Depends(require_user),
+              reg: Any = Depends(get_registry),
+              analyzer_svc: Any = Depends(get_analyzer_service)) -> dict:
+    job = reg.get(job_id)
     if job is None:
         raise HTTPException(404, "Job not found")
-    rec = analyzer.reanalyze_unit(job, unit_id)
+    rec = analyzer_svc.reanalyze_unit(job, unit_id)
     if rec is None:
         raise HTTPException(404, "Unit not found")
     return rec.model_dump()
@@ -185,8 +199,9 @@ def reanalyze(job_id: str, unit_id: str, user: str = Depends(require_user)) -> d
 # Manager view
 # --------------------------------------------------------------------------
 @app.get("/api/jobs/{job_id}/manager")
-def manager(job_id: str, user: str = Depends(require_user)) -> dict:
-    job = registry.get(job_id)
+def manager(job_id: str, user: str = Depends(require_user),
+            reg: Any = Depends(get_registry)) -> dict:
+    job = reg.get(job_id)
     if job is None:
         raise HTTPException(404, "Job not found")
     return aggregator.build_manager_view(job.records)
@@ -199,13 +214,15 @@ async def frontend_log(body: FrontendLogRequest) -> dict:
 
 
 @app.get("/api/cache/analysis")
-def list_analysis_cache(user: str = Depends(require_user)) -> dict:  # noqa: ARG001
-    return {"entries": analysis_cache_store.list_entries()}
+def list_analysis_cache(user: str = Depends(require_user),
+                        cache: Any = Depends(get_analysis_cache)) -> dict:  # noqa: ARG001
+    return {"entries": cache.list_entries()}
 
 
 @app.delete("/api/cache/analysis/{cache_key}")
-def clear_analysis_cache(cache_key: str, user: str = Depends(require_user)) -> dict:  # noqa: ARG001
-    return {"cache_key": cache_key, "deleted": analysis_cache_store.delete_entry(cache_key)}
+def clear_analysis_cache(cache_key: str, user: str = Depends(require_user),
+                         cache: Any = Depends(get_analysis_cache)) -> dict:  # noqa: ARG001
+    return {"cache_key": cache_key, "deleted": cache.delete_entry(cache_key)}
 
 
 @app.get("/api/health")
