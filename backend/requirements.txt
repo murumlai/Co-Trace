@@ -7,3 +7,7 @@ pydantic>=2.11.0
 # Optional: GitHub Copilot SDK provider (LLM_PROVIDER=copilot_sdk).
 # Requires `copilot auth login` on the host and proxy access where applicable.
 github-copilot-sdk==0.2.0
+
+# Dev / test tooling
+pytest>=8.0
+pytest-asyncio>=0.23
