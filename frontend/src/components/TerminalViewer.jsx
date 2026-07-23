@@ -59,7 +59,6 @@ export default function TerminalViewer({
   timestamp = null,
 }) {
   const [query, setQuery] = useState('')
-  const [wrap, setWrap] = useState(false)
   const searchId = useId()
 
   const allLines = useMemo(() => (text ? String(text).split(/\r?\n/) : []), [text])
@@ -109,14 +108,6 @@ export default function TerminalViewer({
         <span className="text-xs text-term-muted">
           {query ? `${lines.length} of ${allLines.length} lines` : `${allLines.length} lines`}
         </span>
-        <button
-          type="button"
-          onClick={() => setWrap((w) => !w)}
-          aria-pressed={wrap}
-          className="ml-auto rounded-md border border-term-border bg-term-bg px-2.5 py-1.5 text-xs font-medium text-term-muted transition-colors hover:text-term-text focus-visible:border-term-accent focus-visible:outline-none"
-        >
-          {wrap ? 'No wrap' : 'Wrap'}
-        </button>
       </div>
 
       {/* Body */}
@@ -130,18 +121,14 @@ export default function TerminalViewer({
         </div>
       ) : (
         <div className="max-h-96 overflow-auto px-2 py-3">
-          <div className={wrap ? '' : 'min-w-max'}>
+          <div>
             {lines.map(({ line, n }) => (
               <div key={n} className="flex gap-3 px-2 leading-relaxed">
                 <span className="w-10 shrink-0 select-none text-right text-xs text-term-muted/60">
                   {n}
                 </span>
                 <code
-                  className={[
-                    'text-xs',
-                    wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre',
-                    severityClass(line),
-                  ].join(' ')}
+                  className={['text-xs whitespace-pre-wrap break-words', severityClass(line)].join(' ')}
                 >
                   {line ? highlightMatches(line, query, n) : '\u00A0'}
                 </code>
