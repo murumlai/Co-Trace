@@ -31,6 +31,7 @@ export default function Engineer({ jobId }) {
   const [expanded, setExpanded] = useState(null)
   const [reanalyzing, setReanalyzing] = useState(null)
   const [clearingCache, setClearingCache] = useState(null)
+  const [clearingAll, setClearingAll] = useState(false)
   const [actionError, setActionError] = useState('')
 
   useEffect(() => {
@@ -54,6 +55,16 @@ export default function Engineer({ jobId }) {
       Array.from(new Set(units.map((u) => u.serial_number || u.unit_id).filter(Boolean))).sort(),
     [units],
   )
+
+  const cachedKeyCount = useMemo(() => {
+    const keys = new Set()
+    units.forEach((g) =>
+      g.failures?.forEach((f) => {
+        if (f.analysis_cache_key) keys.add(f.analysis_cache_key)
+      }),
+    )
+    return keys.size
+  }, [units])
 
   const setClassFilter = (cls) => {
     setFilter(cls)
@@ -133,6 +144,27 @@ export default function Engineer({ jobId }) {
     }
   }
 
+  const clearAllCache = async () => {
+    if (!jobId || clearingAll || cachedKeyCount === 0) return
+    setClearingAll(true)
+    setActionError('')
+    try {
+      await api.clearJobCache(jobId)
+      setUnits((prev) =>
+        prev.map((g) => ({
+          ...g,
+          failures: g.failures?.map((f) =>
+            f.analysis_cache_key ? { ...f, analysis_cache_key: null, cache_cleared: true } : f,
+          ),
+        })),
+      )
+    } catch (err) {
+      setActionError(err.message)
+    } finally {
+      setClearingAll(false)
+    }
+  }
+
   if (!jobId) return <EmptyState />
 
   const detailProps = {
@@ -187,6 +219,15 @@ export default function Engineer({ jobId }) {
               ))}
             </optgroup>
           </select>
+          <ToolbarButton
+            onClick={clearAllCache}
+            disabled={clearingAll || cachedKeyCount === 0}
+            title="Delete cached analysis results for the currently loaded folder/file/zip only"
+            className="disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {clearingAll ? 'Clearing…' : 'Clear cached results'}
+            {cachedKeyCount > 0 && <span className="opacity-60">({cachedKeyCount})</span>}
+          </ToolbarButton>
         </div>
 
         <SegmentedControl

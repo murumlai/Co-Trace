@@ -199,6 +199,31 @@ def reanalyze(job_id: str, unit_id: str, user: str = Depends(require_user),
     return rec.model_dump()
 
 
+@app.delete("/api/jobs/{job_id}/cache")
+def clear_job_cache(job_id: str, user: str = Depends(require_user),  # noqa: ARG001
+                    reg: Any = Depends(get_registry),
+                    cache: Any = Depends(get_analysis_cache)) -> dict:
+    """Delete only the analysis cache entries used by this job's records.
+
+    Cross-upload cache entries not referenced by the currently loaded job are
+    left untouched.
+    """
+    job = reg.get(job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found")
+    keys = {rec.analysis_cache_key for rec in job.records if rec.analysis_cache_key}
+    deleted = 0
+    for key in keys:
+        if cache.delete_entry(key):
+            deleted += 1
+        rec_matches = [rec for rec in job.records if rec.analysis_cache_key == key]
+        for rec in rec_matches:
+            rec.analysis_cache_key = None
+    log.info("Cleared %s analysis cache entr%s for job %s.", deleted,
+             "y" if deleted == 1 else "ies", job_id[:8])
+    return {"job_id": job_id, "deleted": deleted}
+
+
 # --------------------------------------------------------------------------
 # Manager view
 # --------------------------------------------------------------------------

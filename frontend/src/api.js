@@ -66,4 +66,5 @@ export const api = {
   analysisCache: () => request('/api/cache/analysis'),
   clearAnalysisCache: (cacheKey) =>
     request(`/api/cache/analysis/${cacheKey}`, { method: 'DELETE' }),
+  clearJobCache: (jobId) => request(`/api/jobs/${jobId}/cache`, { method: 'DELETE' }),
 }
