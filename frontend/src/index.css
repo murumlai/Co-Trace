@@ -2,46 +2,91 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+  Hybrid UI token system.
+
+  - Enterprise light shell for the whole application (dashboards, forms,
+    tables, charts). Subtle borders + low-blur elevation instead of the old
+    Neumorphic extruded/inset shadows.
+  - Terminal-dark tokens (prefixed --term-*) reserved for raw/redacted trace
+    surfaces rendered by TerminalViewer. They are theme-independent.
+*/
+
 :root {
   color-scheme: light;
-  --color-base: 224 229 236;
-  --color-ink: 61 72 82;
-  --color-muted: 107 114 128;
-  --color-accent: 108 99 255;
-  --color-accent-light: 139 132 255;
-  --color-teal: 56 178 172;
-  --color-danger: 224 82 96;
-  --color-placeholder: 160 174 192;
-  --color-warning: 180 83 9;
-  --color-warning-muted: 217 119 6;
-  --color-grid: 201 208 218;
-  --shadow-extruded: 9px 9px 16px rgb(163 177 198 / 0.6), -9px -9px 16px rgb(255 255 255 / 0.5);
-  --shadow-extruded-hover: 12px 12px 20px rgb(163 177 198 / 0.7), -12px -12px 20px rgb(255 255 255 / 0.6);
-  --shadow-extruded-sm: 5px 5px 10px rgb(163 177 198 / 0.6), -5px -5px 10px rgb(255 255 255 / 0.5);
-  --shadow-inset: inset 6px 6px 10px rgb(163 177 198 / 0.6), inset -6px -6px 10px rgb(255 255 255 / 0.5);
-  --shadow-inset-deep: inset 10px 10px 20px rgb(163 177 198 / 0.7), inset -10px -10px 20px rgb(255 255 255 / 0.6);
-  --shadow-inset-sm: inset 3px 3px 6px rgb(163 177 198 / 0.6), inset -3px -3px 6px rgb(255 255 255 / 0.5);
+
+  /* Surfaces */
+  --color-canvas: 241 245 249;      /* #F1F5F9 page background */
+  --color-surface: 255 255 255;     /* #FFFFFF primary surface */
+  --color-surface-2: 248 250 252;   /* #F8FAFC secondary surface */
+  --color-border: 226 232 240;      /* #E2E8F0 */
+  --color-border-strong: 203 213 225; /* #CBD5E1 muted/strong border */
+
+  /* Text */
+  --color-ink: 15 23 42;            /* #0F172A primary text */
+  --color-ink-2: 71 85 105;         /* #475569 secondary text */
+  --color-muted: 100 116 139;       /* #64748B muted text */
+  --color-placeholder: 148 163 184; /* #94A3B8 */
+
+  /* Action + semantic */
+  --color-accent: 37 99 235;        /* #2563EB primary action */
+  --color-accent-hover: 29 78 216;  /* #1D4ED8 */
+  --color-teal: 5 150 105;          /* #059669 pass / high FPY */
+  --color-teal-soft: 16 185 129;    /* #10B981 */
+  --color-warning: 217 119 6;       /* #D97706 warning / marginal */
+  --color-warning-soft: 245 158 11; /* #F59E0B */
+  --color-danger: 220 38 38;        /* #DC2626 failure / critical */
+  --color-danger-soft: 239 68 68;   /* #EF4444 */
+
+  /* Chart grid */
+  --color-grid: 226 232 240;
+
+  /* Subtle elevation — low blur, low opacity, panel hierarchy only */
+  --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.06);
+  --shadow-md: 0 2px 4px rgb(15 23 42 / 0.05), 0 4px 12px rgb(15 23 42 / 0.08);
+  --shadow-lg: 0 8px 24px rgb(15 23 42 / 0.12);
+
+  /* Terminal-dark palette — used only inside TerminalViewer. */
+  --term-bg: 15 23 42;         /* #0F172A */
+  --term-surface: 30 41 59;    /* #1E293B */
+  --term-border: 51 65 85;     /* #334155 */
+  --term-text: 226 232 240;    /* #E2E8F0 */
+  --term-muted: 148 163 184;   /* #94A3B8 */
+  --term-warn: 245 158 11;     /* #F59E0B */
+  --term-error: 239 68 68;     /* #EF4444 */
+  --term-success: 16 185 129;  /* #10B981 */
+  --term-accent: 6 182 212;    /* #06B6D4 timestamp / syntax accent */
 }
 
+/* Conventional enterprise dark theme (no Neumorphic shadows). */
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --color-base: 30 36 46;
-  --color-ink: 230 236 244;
-  --color-muted: 166 177 193;
-  --color-accent: 154 146 255;
-  --color-accent-light: 191 186 255;
-  --color-teal: 80 209 201;
-  --color-danger: 255 117 129;
-  --color-placeholder: 120 134 154;
-  --color-warning: 251 191 36;
-  --color-warning-muted: 245 158 11;
-  --color-grid: 77 89 106;
-  --shadow-extruded: 9px 9px 16px rgb(10 14 20 / 0.5), -9px -9px 16px rgb(63 73 88 / 0.32);
-  --shadow-extruded-hover: 12px 12px 20px rgb(10 14 20 / 0.58), -12px -12px 20px rgb(70 81 98 / 0.36);
-  --shadow-extruded-sm: 5px 5px 10px rgb(10 14 20 / 0.5), -5px -5px 10px rgb(63 73 88 / 0.32);
-  --shadow-inset: inset 6px 6px 10px rgb(10 14 20 / 0.55), inset -6px -6px 10px rgb(63 73 88 / 0.28);
-  --shadow-inset-deep: inset 10px 10px 20px rgb(10 14 20 / 0.62), inset -10px -10px 20px rgb(63 73 88 / 0.3);
-  --shadow-inset-sm: inset 3px 3px 6px rgb(10 14 20 / 0.55), inset -3px -3px 6px rgb(63 73 88 / 0.28);
+
+  --color-canvas: 15 23 42;         /* #0F172A */
+  --color-surface: 30 41 59;        /* #1E293B */
+  --color-surface-2: 15 23 42;      /* #0F172A */
+  --color-border: 51 65 85;         /* #334155 */
+  --color-border-strong: 71 85 105; /* #475569 */
+
+  --color-ink: 226 232 240;         /* #E2E8F0 */
+  --color-ink-2: 203 213 225;       /* #CBD5E1 */
+  --color-muted: 148 163 184;       /* #94A3B8 */
+  --color-placeholder: 100 116 139; /* #64748B */
+
+  --color-accent: 59 130 246;       /* #3B82F6 */
+  --color-accent-hover: 96 165 250; /* #60A5FA */
+  --color-teal: 16 185 129;         /* #10B981 */
+  --color-teal-soft: 52 211 153;    /* #34D399 */
+  --color-warning: 245 158 11;      /* #F59E0B */
+  --color-warning-soft: 251 191 36; /* #FBBF24 */
+  --color-danger: 239 68 68;        /* #EF4444 */
+  --color-danger-soft: 248 113 113; /* #F87171 */
+
+  --color-grid: 51 65 85;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3), 0 1px 3px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 2px 4px rgb(0 0 0 / 0.35), 0 4px 12px rgb(0 0 0 / 0.45);
+  --shadow-lg: 0 8px 24px rgb(0 0 0 / 0.55);
 }
 
 html {
@@ -50,7 +95,7 @@ html {
 
 body {
   margin: 0;
-  background-color: rgb(var(--color-base));
+  background-color: rgb(var(--color-canvas));
   color: rgb(var(--color-ink));
   font-family: 'DM Sans', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -61,8 +106,13 @@ body {
   font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
 }
 
-/* Accessible focus ring on the cool base surface */
+.font-mono {
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, 'SFMono-Regular',
+    Menlo, Consolas, monospace;
+}
+
+/* Accessible focus ring — visible on both light and dark shells. */
 .focus-ring:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px rgb(var(--color-base)), 0 0 0 4px rgb(var(--color-accent));
+  box-shadow: 0 0 0 2px rgb(var(--color-surface)), 0 0 0 4px rgb(var(--color-accent));
 }

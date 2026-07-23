@@ -115,8 +115,8 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
           className={[
-            'rounded-card p-10 md:p-16 text-center transition-all duration-300',
-            dragging ? 'bg-base shadow-inset-deep' : 'bg-base shadow-inset',
+            'rounded-panel border-2 border-dashed p-10 md:p-16 text-center transition-colors duration-200',
+            dragging ? 'border-accent bg-accent/5' : 'border-border bg-surface-2',
           ].join(' ')}
         >
           <IconWell className="h-20 w-20 mx-auto mb-6">
@@ -132,7 +132,7 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
           <p className="mt-1 text-sm text-muted">or choose below</p>
 
           {selectedUpload && (
-            <div className="mt-6 mx-auto max-w-2xl rounded-2xl bg-base shadow-inset-sm px-5 py-4 text-left">
+            <div className="mt-6 mx-auto max-w-2xl rounded-lg border border-border bg-surface px-5 py-4 text-left">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted">Selected upload</p>
@@ -154,7 +154,7 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
                   {selectedUpload.names.map((name, index) => (
                     <span
                       key={`${name}-${index}`}
-                      className="inline-block max-w-full truncate rounded-full bg-base px-3 py-1 text-xs font-medium text-muted shadow-extruded-sm"
+                      className="inline-block max-w-full truncate rounded-full border border-border bg-surface px-3 py-1 text-xs font-medium text-ink-2"
                       title={name}
                     >
                       {name}
@@ -194,7 +194,7 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
               <span>{progress.message || progress.status}</span>
               <span>{progressLabel}</span>
             </div>
-            <div className="h-4 rounded-full bg-base shadow-inset-sm overflow-hidden">
+            <div className="h-3 rounded-full bg-surface-2 border border-border overflow-hidden">
               <div
                 className="h-full rounded-full bg-accent transition-all duration-500"
                 style={{ width: `${pct}%` }}
@@ -204,7 +204,7 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
         )}
 
         {error && (
-          <div className="mt-6 rounded-2xl bg-base shadow-inset-sm px-4 py-3 text-sm text-danger">
+          <div className="mt-6 rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
             {error}
           </div>
         )}

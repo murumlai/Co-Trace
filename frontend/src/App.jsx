@@ -15,15 +15,6 @@ const TABS = [
   ['about', 'About'],
 ]
 
-// Per-tab identity colors. All tokens are theme-aware (defined for both light
-// and dark in index.css), so the selected color stays visible in either mode.
-const TAB_COLORS = {
-  home: { text: 'text-accent', dot: 'bg-accent' },
-  engineer: { text: 'text-teal', dot: 'bg-teal' },
-  manager: { text: 'text-warning', dot: 'bg-warning' },
-  about: { text: 'text-danger', dot: 'bg-danger' },
-}
-
 function relPath(file) {
   return file.webkitRelativePath || file.name
 }
@@ -141,7 +132,6 @@ function Shell() {
   }
 
   const NavButton = ({ id, label }) => {
-    const c = TAB_COLORS[id] || TAB_COLORS.home
     const selected = tab === id
     return (
       <button
@@ -150,20 +140,12 @@ function Shell() {
           setTab(id)
           setMenuOpen(false)
         }}
+        aria-current={selected ? 'page' : undefined}
         className={[
-          'inline-flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-medium transition-all duration-300 focus-ring',
-          selected
-            ? `bg-base ${c.text} shadow-inset`
-            : 'bg-base text-muted shadow-extruded-sm hover:-translate-y-px',
+          'rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-150 focus-ring',
+          selected ? 'bg-accent/10 text-accent' : 'text-muted hover:text-ink hover:bg-surface-2',
         ].join(' ')}
       >
-        <span
-          className={[
-            'h-2 w-2 rounded-full transition-opacity duration-300',
-            c.dot,
-            selected ? 'opacity-100' : 'opacity-50',
-          ].join(' ')}
-        />
         {label}
       </button>
     )
@@ -179,15 +161,15 @@ function Shell() {
         aria-label={`Switch to ${dark ? 'light' : 'dark'} mode`}
         onClick={toggleTheme}
         className={[
-          'flex items-center gap-2 rounded-2xl bg-base px-3 py-2 text-sm text-muted shadow-extruded-sm transition-all duration-300 hover:-translate-y-px hover:text-ink focus-ring',
+          'flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-muted transition-colors duration-150 hover:bg-surface-2 hover:text-ink focus-ring',
           className,
         ].join(' ')}
       >
-        <span className="relative h-6 w-11 shrink-0 overflow-hidden rounded-full bg-base shadow-inset-sm">
+        <span className="relative h-5 w-9 shrink-0 rounded-full bg-surface-2 border border-border">
           <span
             className={[
-              'absolute left-1 top-1 h-4 w-4 rounded-full bg-accent shadow-extruded-sm transition-transform duration-300',
-              dark ? 'translate-x-5' : 'translate-x-0',
+              'absolute left-0.5 top-0.5 h-3.5 w-3.5 rounded-full bg-accent transition-transform duration-200',
+              dark ? 'translate-x-4' : 'translate-x-0',
             ].join(' ')}
           />
         </span>
@@ -198,28 +180,28 @@ function Shell() {
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-20 backdrop-blur-sm">
-        <div className="mx-auto max-w-7xl px-6 py-4">
-          <div className="flex items-center justify-between rounded-card bg-base shadow-extruded px-5 py-3">
+      <header className="sticky top-0 z-20 border-b border-border bg-surface/80 backdrop-blur">
+        <div className="mx-auto max-w-7xl px-6">
+          <div className="flex h-16 items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-base shadow-inset-deep">
-                <span className="font-display text-sm font-extrabold text-accent">CT</span>
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent">
+                <span className="font-display text-sm font-extrabold text-white">CT</span>
               </div>
               <span className="font-display font-bold text-ink hidden sm:block">Co-Trace</span>
             </div>
 
-            <nav className="hidden md:flex items-center gap-3">
+            <nav className="hidden md:flex items-center gap-1">
               {TABS.map(([id, label]) => (
                 <NavButton key={id} id={id} label={label} />
               ))}
             </nav>
 
-            <div className="hidden md:flex items-center gap-4">
+            <div className="hidden md:flex items-center gap-3">
               <ThemeSwitch />
               {batchRunning && (
                 <button
                   onClick={stopBatch}
-                  className="rounded-2xl bg-base px-4 py-2 text-sm text-danger shadow-extruded-sm hover:-translate-y-px transition-all duration-300 focus-ring"
+                  className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-danger transition-colors duration-150 hover:border-danger hover:bg-danger/5 focus-ring"
                 >
                   Stop batch
                 </button>
@@ -227,14 +209,14 @@ function Shell() {
               <span className="text-sm text-muted">{username || 'user'}</span>
               <button
                 onClick={logout}
-                className="rounded-2xl bg-base px-4 py-2 text-sm text-muted shadow-extruded-sm hover:-translate-y-px hover:text-ink transition-all duration-300 focus-ring"
+                className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-muted transition-colors duration-150 hover:bg-surface-2 hover:text-ink focus-ring"
               >
                 Sign out
               </button>
             </div>
 
             <button
-              className="md:hidden flex h-11 w-11 items-center justify-center rounded-2xl bg-base shadow-extruded-sm focus-ring"
+              className="md:hidden flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface text-ink focus-ring"
               onClick={() => setMenuOpen((o) => !o)}
               aria-label="Toggle menu"
             >
@@ -243,14 +225,14 @@ function Shell() {
           </div>
 
           {menuOpen && (
-            <div className="md:hidden mt-3 rounded-card bg-base shadow-extruded p-4 flex flex-col gap-3">
+            <div className="md:hidden mb-3 rounded-panel border border-border bg-surface shadow-md p-4 flex flex-col gap-2">
               {TABS.map(([id, label]) => (
                 <NavButton key={id} id={id} label={label} />
               ))}
               {batchRunning && (
                 <button
                   onClick={stopBatch}
-                  className="rounded-2xl bg-base px-4 py-2.5 text-sm text-danger shadow-inset-sm focus-ring"
+                  className="rounded-lg border border-border bg-surface px-4 py-2.5 text-sm text-danger focus-ring"
                 >
                   Stop batch
                 </button>
@@ -258,7 +240,7 @@ function Shell() {
               <ThemeSwitch className="justify-center" />
               <button
                 onClick={logout}
-                className="rounded-2xl bg-base px-4 py-2.5 text-sm text-muted shadow-inset-sm focus-ring"
+                className="rounded-lg border border-border bg-surface px-4 py-2.5 text-sm text-muted focus-ring"
               >
                 Sign out ({username || 'user'})
               </button>
@@ -267,19 +249,19 @@ function Shell() {
         </div>
 
         {warnings.length > 0 && (
-          <div className="mx-auto max-w-7xl px-6 pt-4">
-            <div className="rounded-card bg-base shadow-inset-sm px-5 py-3 flex items-start justify-between gap-4">
+          <div className="mx-auto max-w-7xl px-6 py-3">
+            <div className="rounded-panel border border-warning/30 bg-warning/10 px-4 py-3 flex items-start justify-between gap-4">
               <div className="text-sm text-warning">
                 <span className="font-semibold">{warnings.length} folder{warnings.length === 1 ? '' : 's'} skipped:</span>{' '}
                 no ftrunnerlog01.txt or debuglog.txt found. These runs were excluded from the results.
-                <ul className="mt-1 list-disc list-inside text-xs text-warning-muted max-h-24 overflow-auto">
+                <ul className="mt-1 list-disc list-inside text-xs text-warning/80 max-h-24 overflow-auto">
                   {warnings.map((w) => (
                     <li key={w}>{w}</li>
                   ))}
                 </ul>
               </div>
               <button
-                className="text-xs text-muted hover:text-ink focus-ring rounded-lg px-2 py-1 shrink-0"
+                className="text-xs text-muted hover:text-ink focus-ring rounded-md px-2 py-1 shrink-0"
                 onClick={() => setWarnings([])}
               >
                 Dismiss
