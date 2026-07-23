@@ -40,7 +40,7 @@ terminal-dark trace viewer for log evidence. The preprocessing design is tracked
 - The backend follows SOLID service boundaries: narrow `typing.Protocol` contracts
   (`contracts.py`), concrete adapters wired in a composition root (`dependencies.py`),
   and injected application services (`JobOrchestrator`, `AnalyzerService`,
-  `DiskJobStateStore`, `DiskAnalysisCache`, provider classes). A 108-test pytest
+  `DiskJobStateStore`, `DiskAnalysisCache`, provider classes). A 124-test pytest
   safety-net suite in `backend/tests/` locks parser, analyzer, registry, upload, and
   API behavior.
 
@@ -65,7 +65,10 @@ terminal-dark trace viewer for log evidence. The preprocessing design is tracked
 - **Manual re-analysis**: engineers can force a fresh diagnosis for an individual failed
   unit.
 - **Cache management**: engineers can clear a specific cached analysis result from the
-  failed-unit detail panel when they want the next matching run to call the model again.
+  failed-unit detail panel, or clear every cached result for the currently loaded
+  folder/file/zip in one click from the Engineer view toolbar, when they want the next
+  matching run to call the model again. The per-job clear only removes cache entries
+  referenced by the loaded job; other jobs' cached results are left untouched.
 - **Redaction at rest and pre-LLM**: serial numbers, IP addresses, hostnames, usernames,
   passwords, credential-like key/value pairs, and MAC addresses are scrubbed. The at-rest
   per-product JSON keeps the serial number (needed for yield math) while still removing
@@ -158,7 +161,7 @@ Expected response:
 
 ## Backend Tests
 
-The backend has a pytest safety-net suite (108 tests) covering FTRunner parsing,
+The backend has a pytest safety-net suite (124 tests) covering FTRunner parsing,
 DebugLog excerpt selection, product JSON construction, analyzer dedup/cache behavior,
 job registry persistence/restore/TTL, upload zip safety, and FastAPI route smoke paths.
 
@@ -307,7 +310,7 @@ frontend/scripts/
 ## Useful Commands
 
 ```powershell
-# Run backend test suite (108 tests covering parser, analyzer, registry, upload, API smoke)
+# Run backend test suite (124 tests covering parser, analyzer, registry, upload, API smoke)
 cd backend
 .\.venv\Scripts\python.exe -m pytest tests/ -q
 
