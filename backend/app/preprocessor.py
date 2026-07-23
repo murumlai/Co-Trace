@@ -297,6 +297,15 @@ class FtrunnerPreprocessor:
                 records.append(rec)
         return records
 
+    def find_incomplete_folders(self, root: str) -> list[str]:
+        """Return relative paths of run folders that have no recognisable log.
+
+        Delegates to the module-level ``find_incomplete_folders`` function so
+        the ``Preprocessor`` protocol can be satisfied without importing the
+        free function directly.
+        """
+        return find_incomplete_folders(root)
+
     # -- discovery ------------------------------------------------------
     def iter_run_folders(self, root: str) -> Iterable[str]:
         for dirpath, dirnames, filenames in os.walk(root):

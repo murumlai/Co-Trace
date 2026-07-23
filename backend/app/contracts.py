@@ -106,6 +106,13 @@ class Preprocessor(Protocol):
         """Walk ``root`` and return one normalised record per run folder."""
         ...
 
+    def find_incomplete_folders(self, root: str) -> list[str]:
+        """Return relative paths of run folders that have no recognisable log files.
+
+        Surfaced as UI warnings — not treated as errors.
+        """
+        ...
+
 
 class ArtifactWriter(Protocol):
     """Writes the per-product preprocessed JSON artifacts for a completed job."""

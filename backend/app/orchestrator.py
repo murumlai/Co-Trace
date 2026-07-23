@@ -18,12 +18,7 @@ from . import analyzer as _analyzer_module
 from .config import settings
 from .contracts import ArtifactWriter, FailureAnalyzer, JobRepository, PayloadCleaner, Preprocessor
 from .job_registry import registry
-from .preprocessor import (
-    FtrunnerPreprocessor,
-    find_incomplete_folders,
-    get_preprocessor,
-    write_product_jsons,
-)
+from .preprocessor import FtrunnerPreprocessor, get_preprocessor, write_product_jsons
 from .upload_storage import cleanup_job_workdir, get_job_input_root
 
 log = logging.getLogger("cotrace.orchestrator")
@@ -122,7 +117,7 @@ class JobOrchestrator:
             job.records = records
             _raise_if_cancelled(job)
 
-            incomplete = find_incomplete_folders(input_root)
+            incomplete = self._pre.find_incomplete_folders(input_root)
             job.warnings = [
                 f"No ftrunnerlog01.txt or debuglog.txt found in: {rel}" for rel in incomplete
             ]
