@@ -9,6 +9,13 @@ Result = Literal["PASS", "FAIL", "UNKNOWN"]
 JobState = Literal["pending", "running", "done", "error", "cancelled"]
 DeviceClass = Literal["pan", "aic", "unknown"]
 
+# Per-serial outcome across all of a unit's test attempts:
+#   first_pass  - passed on the first attempt, never failed (no LLM needed)
+#   retry_pass  - failed one or more times, then passed on the last attempt
+#   fail        - the latest attempt is still failing
+#   unknown     - the latest attempt result is UNKNOWN
+Classification = Literal["first_pass", "retry_pass", "fail", "unknown"]
+
 
 class StepRecord(BaseModel):
     name: str
@@ -54,6 +61,26 @@ class UnitRecord(BaseModel):
     analysis_source: Optional[str] = None  # "llm" | "stub" | "cached" | "local-cache"
     analysis_context_source: Optional[str] = None  # "debug_excerpt" | "ftrunner_snippet" | "error_message"
     analysis_cache_key: Optional[str] = None
+
+
+class SerialUnitGroup(BaseModel):
+    """One physical unit (serial number) with all of its test attempts grouped.
+
+    The Engineer view shows one of these per serial so first-test-pass,
+    retry-pass, and consistently-failing units can be told apart. ``failures``
+    holds the failing attempts (chronological) carrying the LLM root-cause /
+    solution; ``final`` is the latest attempt used for the headline result and
+    identity metadata.
+    """
+
+    serial_number: Optional[str] = None
+    unit_id: str                        # final attempt's unit_id (stable key)
+    classification: Classification
+    result: Result                      # result of the final attempt
+    attempt_count: int
+    failure_count: int
+    final: UnitRecord
+    failures: list["UnitRecord"] = Field(default_factory=list)
 
 
 class JobProgress(BaseModel):

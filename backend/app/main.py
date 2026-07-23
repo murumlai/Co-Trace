@@ -26,7 +26,7 @@ from .config import settings
 from .dependencies import get_analysis_cache, get_analyzer_service, get_orchestrator, get_registry
 from .logging_config import setup_backend_logging, write_frontend_log
 from .models import FrontendLogRequest, LoginRequest, LoginResponse
-from .record_views import latest_records_by_serial
+from .record_views import group_units_by_serial
 from .upload_storage import UploadStorageError, save_uploads
 
 setup_backend_logging(settings.APP_DEBUG)
@@ -174,11 +174,15 @@ def units(job_id: str, user: str = Depends(require_user),
     job = reg.get(job_id)
     if job is None:
         raise HTTPException(404, "Job not found")
-    latest_units = latest_records_by_serial(job.records)
+    groups = group_units_by_serial(job.records)
+    classification_counts = {"first_pass": 0, "retry_pass": 0, "fail": 0, "unknown": 0}
+    for g in groups:
+        classification_counts[g.classification] += 1
     return {
-        "units": [r.model_dump() for r in latest_units],
+        "units": [g.model_dump() for g in groups],
         "run_count": len(job.records),
-        "unique_serial_count": len(latest_units),
+        "unique_serial_count": len(groups),
+        "classification_counts": classification_counts,
     }
 
 
