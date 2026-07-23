@@ -37,14 +37,14 @@ export default function About() {
           <span className="text-2xl">🧭</span>
         </IconWell>
         <div>
-          <h1 className="font-display text-4xl font-extrabold tracking-tight text-ink">About Co_Trace</h1>
+          <h1 className="font-display text-4xl font-extrabold tracking-tight text-ink">About Co-Trace</h1>
           <p className="mt-1 text-muted">Manufacturing test-log dashboard</p>
         </div>
       </div>
 
       <Card className="p-8 mb-8">
         <p className="text-ink leading-relaxed">
-          Co_Trace turns raw manufacturing test logs into clear, audience-specific insights.
+          Co-Trace turns raw manufacturing test logs into clear, audience-specific insights.
           Upload a batch of FTRunner logs and the app parses every unit run, distinguishes
           first-pass, retry-pass, and consistently-failing units, and produces an AI-assisted
           root cause and suggested solution for each failure — all while keeping sensitive data

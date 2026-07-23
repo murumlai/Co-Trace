@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     log.info("Backend stopped.")
 
 
-app = FastAPI(title="Co_Trace — Manufacturing Log Dashboard", lifespan=lifespan)
+app = FastAPI(title="Co-Trace — Manufacturing Log Dashboard", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

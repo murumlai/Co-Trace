@@ -35,7 +35,7 @@ export default function Login() {
             <span className="font-display text-2xl font-extrabold text-accent">CT</span>
           </IconWell>
           <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">
-            Co_Trace
+            Co-Trace
           </h1>
           <p className="mt-2 text-muted">Manufacturing Log Dashboard</p>
         </div>

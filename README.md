@@ -1,6 +1,6 @@
-# Co_Trace - Manufacturing Log Dashboard
+# Co-Trace - Manufacturing Log Dashboard
 
-Co_Trace is a browser-based dashboard for manufacturing test logs. It accepts uploaded
+Co-Trace is a browser-based dashboard for manufacturing test logs. It accepts uploaded
 FTRunner-style log folders or files, parses per-unit test results, and presents two
 audience-specific views:
 

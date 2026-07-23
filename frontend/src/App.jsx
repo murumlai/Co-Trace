@@ -185,7 +185,7 @@ function Shell() {
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-base shadow-inset-deep">
                 <span className="font-display text-sm font-extrabold text-accent">CT</span>
               </div>
-              <span className="font-display font-bold text-ink hidden sm:block">Co_Trace</span>
+              <span className="font-display font-bold text-ink hidden sm:block">Co-Trace</span>
             </div>
 
             <nav className="hidden md:flex items-center gap-3">
