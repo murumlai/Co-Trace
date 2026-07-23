@@ -6,7 +6,8 @@ audience-specific views:
 
 - **Engineer view**: latest Pass/Fail result per serial number, shown as a filterable table
   (default) or expandable cards. Failed units show a most-probable root cause, suggested
-  solution, and an expandable redacted snippet used for diagnosis.
+  solution, and an expandable redacted log snippet rendered in a terminal-dark viewer with
+  an in-viewer line filter used for diagnosis.
 - **Manager view**: First-pass yield (FPY), yield trend, Pareto of failure reasons,
   station/tester breakdown, and lot-to-lot comparison.
 
@@ -74,6 +75,9 @@ terminal-dark trace viewer for log evidence. The preprocessing design is tracked
 - **Light/dark mode**: the authenticated app shell includes a persistent theme toggle;
   semantic color and shadow tokens keep buttons, tables, charts, and upload controls
   visible in both modes.
+- **Terminal-dark log viewer**: redacted failure snippets render in a monospace,
+  terminal-styled viewer with severity highlighting and an in-viewer line filter; long
+  lines always wrap for readability.
 - **Single-server deployment path**: the FastAPI app serves the built React SPA from
   `frontend/dist`.
 
