@@ -10,8 +10,9 @@ audience-specific views:
 - **Manager view**: First-pass yield (FPY), yield trend, Pareto of failure reasons,
   station/tester breakdown, and lot-to-lot comparison.
 
-The implementation follows [plan.md](plan.md) and the Neumorphism/Soft UI visual system
-defined in [designUI.md](designUI.md). The preprocessing design is tracked in
+The implementation follows [plan.md](plan.md) and uses the Hybrid UI system defined in
+[hybrid_UI.md](hybrid_UI.md): an enterprise light shell for dashboard workflows and a
+terminal-dark trace viewer for log evidence. The preprocessing design is tracked in
 [pre-process_plan.md](pre-process_plan.md).
 
 ## Current Status
@@ -289,7 +290,8 @@ frontend/src/
   api.js                   Fetch wrapper, bearer-token handling, 401 recovery
   auth.jsx                 Placeholder auth context with session-expiry handling
   logger.js                Browser log forwarding to frontend_Log.txt via backend endpoint
-  components/ui.jsx        Neumorphic UI primitives
+  components/ui.jsx        Hybrid UI primitives (enterprise light shell)
+  components/TerminalViewer.jsx  Terminal-dark viewer for redacted trace snippets
   pages/Home.jsx           Upload and progress UI
   pages/Engineer.jsx       Unit-level diagnostics (table / cards views)
   pages/Manager.jsx        Yield and failure analytics
