@@ -267,3 +267,17 @@ class AnalyzerService:
             progress_callback=progress_callback,
             cache=self._cache,
         )
+
+    def reanalyze_unit(self, job: Job, unit_id: str) -> UnitRecord | None:
+        """Force a fresh per-unit analysis, bypassing the signature cache."""
+        for rec in job.records:
+            if rec.unit_id == unit_id:
+                if rec.result != "FAIL":
+                    return rec
+                _analyze_unit(
+                    job, rec, force=True,
+                    analyze_failure=self._analyze_failure,
+                    cache=self._cache,
+                )
+                return rec
+        return None

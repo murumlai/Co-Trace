@@ -224,6 +224,16 @@ class DiskAnalysisCache:
             metadata=metadata,
         )
 
+    # --- Administrative helpers (not in the core AnalysisCache protocol) ---
+
+    def list_entries(self) -> list[dict[str, Any]]:
+        """Return all cache entries, most-recently-used first."""
+        return list_entries()
+
+    def delete_entry(self, cache_key: str) -> bool:
+        """Delete a specific cache entry; return True if it existed."""
+        return delete_entry(cache_key)
+
 
 # Module-level default instance used when no cache is explicitly injected.
 _default_cache = DiskAnalysisCache()
