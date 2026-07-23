@@ -231,11 +231,8 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
       <thead>
         <tr className="border-b border-border bg-surface-2 text-left text-muted">
           <th className="px-4 py-3 font-medium">Status</th>
-          <th className="px-4 py-3 font-medium">Timestamp</th>
           <th className="px-4 py-3 font-medium">Serial</th>
-          <th className="px-4 py-3 font-medium">Product</th>
           <th className="px-4 py-3 font-medium">Station</th>
-          <th className="px-4 py-3 font-medium">Lot</th>
           <th className="px-4 py-3 font-medium text-right">Attempts</th>
           <th className="px-4 py-3 font-medium text-right">Duration</th>
           <th className="px-4 py-3 font-medium text-right">Actions</th>
@@ -250,13 +247,10 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                 <td className="px-4 py-3 whitespace-nowrap">
                   <StatusBadge status={u.classification} />
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-muted">{fmtTs(u.final.start_time)}</td>
                 <td className="px-4 py-3 whitespace-nowrap font-medium">
                   {u.serial_number || u.unit_id}
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap">{u.final.product_code || '—'}</td>
                 <td className="px-4 py-3 whitespace-nowrap">{u.final.station_id || '—'}</td>
-                <td className="px-4 py-3 whitespace-nowrap">{u.final.lot_id || '—'}</td>
                 <td className="px-4 py-3 text-right whitespace-nowrap">{attemptsLabel(u)}</td>
                 <td className="px-4 py-3 text-right whitespace-nowrap">
                   {u.final.duration_s ? `${u.final.duration_s.toFixed(1)}s` : '—'}
@@ -276,7 +270,7 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
               </tr>
               {hasDetails && expanded === u.unit_id && (
                 <tr>
-                  <td colSpan={9} className="bg-surface-2 px-4 pb-5 pt-1">
+                  <td colSpan={6} className="bg-surface-2 px-4 pb-5 pt-1">
                     <UnitDetails
                       u={u}
                       reanalyzing={reanalyzing}
