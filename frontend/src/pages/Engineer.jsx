@@ -20,8 +20,6 @@ const FILTERS = [
   ['first_pass', 'First-pass'],
 ]
 
-const fmtTs = (iso) => (iso ? iso.replace('T', ' ').slice(0, 16) : '—')
-
 export default function Engineer({ jobId }) {
   const [units, setUnits] = useState([])
   const [runCount, setRunCount] = useState(0)
@@ -305,10 +303,7 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                   </span>
                 </div>
                 <div className="mt-2 text-sm text-muted flex flex-wrap gap-x-6 gap-y-1">
-                  <span>{fmtTs(u.final.start_time)}</span>
-                  <span>Product: {u.final.product_code || '—'}</span>
                   <span>Station: {u.final.station_id || '—'}</span>
-                  <span>Lot: {u.final.lot_id || '—'}</span>
                   <span>Attempts: {attemptsLabel(u)}</span>
                   {u.final.duration_s ? <span>{u.final.duration_s.toFixed(1)}s</span> : null}
                 </div>
