@@ -63,6 +63,7 @@ export function Badge({ tone = 'muted', children }) {
   const tones = {
     pass: 'text-teal',
     fail: 'text-danger',
+    warn: 'text-warning',
     unknown: 'text-muted',
   }
   return (
@@ -80,7 +81,9 @@ export function Badge({ tone = 'muted', children }) {
               ? 'rgb(var(--color-teal))'
               : tone === 'fail'
                 ? 'rgb(var(--color-danger))'
-                : 'rgb(var(--color-muted))',
+                : tone === 'warn'
+                  ? 'rgb(var(--color-warning))'
+                  : 'rgb(var(--color-muted))',
         }}
       />
       {children}
