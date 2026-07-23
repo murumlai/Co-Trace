@@ -15,6 +15,15 @@ const TABS = [
   ['about', 'About'],
 ]
 
+// Per-tab identity colors. All tokens are theme-aware (defined for both light
+// and dark in index.css), so the selected color stays visible in either mode.
+const TAB_COLORS = {
+  home: { text: 'text-accent', dot: 'bg-accent' },
+  engineer: { text: 'text-teal', dot: 'bg-teal' },
+  manager: { text: 'text-warning', dot: 'bg-warning' },
+  about: { text: 'text-danger', dot: 'bg-danger' },
+}
+
 function relPath(file) {
   return file.webkitRelativePath || file.name
 }
@@ -131,23 +140,34 @@ function Shell() {
     }
   }
 
-  const NavButton = ({ id, label }) => (
-    <button
-      onClick={() => {
-        debugLog('Tab changed', { tab: id })
-        setTab(id)
-        setMenuOpen(false)
-      }}
-      className={[
-        'rounded-2xl px-5 py-2.5 text-sm font-medium transition-all duration-300 focus-ring',
-        tab === id
-          ? 'bg-base text-accent shadow-inset'
-          : 'bg-base text-muted shadow-extruded-sm hover:-translate-y-px',
-      ].join(' ')}
-    >
-      {label}
-    </button>
-  )
+  const NavButton = ({ id, label }) => {
+    const c = TAB_COLORS[id] || TAB_COLORS.home
+    const selected = tab === id
+    return (
+      <button
+        onClick={() => {
+          debugLog('Tab changed', { tab: id })
+          setTab(id)
+          setMenuOpen(false)
+        }}
+        className={[
+          'inline-flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-medium transition-all duration-300 focus-ring',
+          selected
+            ? `bg-base ${c.text} shadow-inset`
+            : 'bg-base text-muted shadow-extruded-sm hover:-translate-y-px',
+        ].join(' ')}
+      >
+        <span
+          className={[
+            'h-2 w-2 rounded-full transition-opacity duration-300',
+            c.dot,
+            selected ? 'opacity-100' : 'opacity-50',
+          ].join(' ')}
+        />
+        {label}
+      </button>
+    )
+  }
 
   const ThemeSwitch = ({ className = '' }) => {
     const dark = theme === 'dark'
