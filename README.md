@@ -62,6 +62,8 @@ terminal-dark trace viewer for log evidence. The preprocessing design is tracked
 - **LLM cost control**: passing units never trigger LLM analysis. Failed units are grouped
   by error signature so the app analyzes each unique signature once, then persists
   successful LLM diagnoses in a local cache for reuse across repeated uploads.
+- **LLM usage metrics**: the Home page separates mini and reasoning model calls,
+  prompt/output size, token counts, cache skips, and estimated token credits.
 - **Manual re-analysis**: engineers can force a fresh diagnosis for an individual failed
   unit.
 - **Cache management**: engineers can clear a specific cached analysis result from the
@@ -223,6 +225,7 @@ To stop the server, press `Ctrl+C` in the terminal running Uvicorn.
 | `COPILOT_PROXY` | `http://proxy-us.intel.com:912` | Optional `HTTP(S)_PROXY` used by the Copilot SDK subprocess. |
 | `COPILOT_TIMEOUT_S` | `60` | Per-call timeout for a Copilot SDK streaming session. |
 | `COPILOT_ENABLE_MINI_ENRICH` | `1` | Run the mini summarization pass before the reasoning call. |
+| `LLM_TOKEN_CREDIT_SIZE` | `1000` | Token-credit display unit for estimated LLM usage metrics. |
 | `APP_USERNAME` | `admin` | Placeholder login username. |
 | `APP_PASSWORD` | `admin` | Placeholder login password. |
 | `SESSION_TTL_S` | `28800` | Placeholder auth session lifetime in seconds. |

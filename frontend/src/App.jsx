@@ -30,6 +30,7 @@ function Shell() {
   const [batchError, setBatchError] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
   const [warnings, setWarnings] = useState([])
+  const [llmMetrics, setLlmMetrics] = useState(null)
   const runToken = useRef(0)
   const uploadAbort = useRef(null)
 
@@ -57,6 +58,7 @@ function Shell() {
     setBatchRunning(true)
     setBatchError('')
     setWarnings([])
+    setLlmMetrics(null)
     setActiveJobId(null)
     setBatchProgress({ status: 'uploading', processed: 0, total: files.length, message: 'Uploading files' })
     const controller = new AbortController()
@@ -96,6 +98,7 @@ function Shell() {
         total: status.progress.total,
         message: status.message,
       })
+      setLlmMetrics(status.llm_metrics || null)
       if (status.status === 'done') {
         setBatchRunning(false)
         onJobReady(id, status.warnings || [])
@@ -279,6 +282,7 @@ function Shell() {
             processing={batchRunning}
             progress={batchProgress}
             batchError={batchError}
+            llmMetrics={llmMetrics}
           />
         )}
         {tab === 'engineer' && <Engineer jobId={jobId} />}
