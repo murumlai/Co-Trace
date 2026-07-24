@@ -18,9 +18,6 @@ terminal-dark trace viewer for log evidence. The preprocessing design is tracked
 
 ## Current Status
 
-- FastAPI backend and React frontend are implemented as a login-gated upload, Engineer,
-  and Manager dashboard with a persisted light/dark mode toggle.
-- Frontend production build has been verified with `npm run build`.
 - The preprocessor is **FTRunner-primary**: `ftrunnerlog01.txt` is the single source of
   truth for identity, per-step results, and authoritative PASS/FAIL. SIMS `.itf` reliance
   has been dropped.
@@ -30,19 +27,11 @@ terminal-dark trace viewer for log evidence. The preprocessing design is tracked
   per-job working directory before cleanup. Its `units` array keeps only the latest test
   run per serial number, includes `run_count`/`retests` in the summary, and can optionally
   be gzipped — see `PREPROCESSED_JSON_*` below.
-- Job state is persisted to disk as `job_state.json` under each per-job working directory,
-  restored on backend startup, and automatically deleted after the job TTL expires.
 - Failed-unit diagnosis routes through a configurable provider (`LLM_PROVIDER`): GitHub
   Copilot SDK (default), GitHub Models, or a deterministic offline stub. If the chosen
   provider is unavailable (for example, Copilot SDK/CLI auth is unavailable or a GitHub
   Models token is missing), analysis degrades to the offline stub and makes no external
   calls.
-- The backend follows SOLID service boundaries: narrow `typing.Protocol` contracts
-  (`contracts.py`), concrete adapters wired in a composition root (`dependencies.py`),
-  and injected application services (`JobOrchestrator`, `AnalyzerService`,
-  `DiskJobStateStore`, `DiskAnalysisCache`, provider classes). A 124-test pytest
-  safety-net suite in `backend/tests/` locks parser, analyzer, registry, upload, and
-  API behavior.
 
 ## Key Features
 
@@ -163,7 +152,7 @@ Expected response:
 
 ## Backend Tests
 
-The backend has a pytest safety-net suite (124 tests) covering FTRunner parsing,
+The backend has a pytest safety-net suite (126 tests) covering FTRunner parsing,
 DebugLog excerpt selection, product JSON construction, analyzer dedup/cache behavior,
 job registry persistence/restore/TTL, upload zip safety, and FastAPI route smoke paths.
 
@@ -313,7 +302,7 @@ frontend/scripts/
 ## Useful Commands
 
 ```powershell
-# Run backend test suite (124 tests covering parser, analyzer, registry, upload, API smoke)
+# Run backend test suite (126 tests covering parser, analyzer, registry, upload, API smoke)
 cd backend
 .\.venv\Scripts\python.exe -m pytest tests/ -q
 
