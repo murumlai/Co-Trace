@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../auth'
-import { Button, Card, IconWell, Input } from '../components/ui'
+import { Button, Card, Input } from '../components/ui'
 
 export default function Login() {
   const { login, sessionExpired } = useAuth()
@@ -23,17 +23,20 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-6 py-16">
-      {/* Ambient decorative wells */}
-      <div className="pointer-events-none absolute -z-0 opacity-60">
-        <div className="h-72 w-72 rounded-full bg-base shadow-extruded animate-float" />
+    <div className="relative min-h-screen flex items-center justify-center px-6 py-16">
+      {/* Subtle ambient accent glow */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
+      >
+        <div className="absolute left-1/2 top-1/3 h-72 w-72 -translate-x-1/2 rounded-full bg-accent/10 blur-3xl" />
       </div>
 
       <Card className="relative z-10 w-full max-w-md p-10 md:p-12">
         <div className="flex flex-col items-center text-center">
-          <IconWell className="h-16 w-16 mb-6">
-            <span className="font-display text-2xl font-extrabold text-accent">CT</span>
-          </IconWell>
+          <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-accent mb-6">
+            <span className="font-display text-2xl font-extrabold text-white">CT</span>
+          </div>
           <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">
             Co-Trace
           </h1>
@@ -42,7 +45,7 @@ export default function Login() {
 
         <form onSubmit={submit} className="mt-10 space-y-5">
           <div>
-            <label className="block text-sm font-medium text-muted mb-2" htmlFor="u">
+            <label className="block text-sm font-medium text-ink-2 mb-2" htmlFor="u">
               Username
             </label>
             <Input
@@ -54,7 +57,7 @@ export default function Login() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-muted mb-2" htmlFor="p">
+            <label className="block text-sm font-medium text-ink-2 mb-2" htmlFor="p">
               Password
             </label>
             <Input
@@ -68,13 +71,13 @@ export default function Login() {
           </div>
 
           {error && (
-            <div className="rounded-2xl bg-base shadow-inset-sm px-4 py-3 text-sm text-danger">
+            <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
               {error}
             </div>
           )}
 
           {!error && sessionExpired && (
-            <div className="rounded-2xl bg-base shadow-inset-sm px-4 py-3 text-sm text-warning">
+            <div className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
               Your session expired. Please sign in again.
             </div>
           )}
@@ -85,7 +88,7 @@ export default function Login() {
         </form>
 
         <p className="mt-6 text-center text-xs text-muted">
-          Placeholder auth — default <span className="font-semibold">admin / admin</span>
+          Placeholder auth — default <span className="font-semibold text-ink-2">admin / admin</span>
         </p>
       </Card>
     </div>

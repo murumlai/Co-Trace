@@ -52,8 +52,107 @@ function uploadSummary(files) {
   }
 }
 
-export default function Home({ onStartBatch, onStopBatch, processing, progress, batchError }) {
-  const [files, setFiles] = useState([])
+function formatNumber(value) {
+  return new Intl.NumberFormat().format(value || 0)
+}
+
+function formatCredits(value) {
+  const amount = Number(value || 0)
+  if (amount === 0) return '0'
+  return amount < 1 ? amount.toFixed(4) : amount.toFixed(2)
+}
+
+function providerLabel(provider) {
+  return provider ? provider.replace(/_/g, ' ') : 'Not used yet'
+}
+
+function tokenLabel(modelMetrics) {
+  const prefix = modelMetrics?.token_counts_estimated ? '~' : ''
+  const input = formatNumber(modelMetrics?.input_tokens)
+  const output = formatNumber(modelMetrics?.output_tokens)
+  return `${prefix}${input} in / ${prefix}${output} out`
+}
+
+function charsLabel(modelMetrics) {
+  return `${formatNumber(modelMetrics?.input_chars)} in / ${formatNumber(modelMetrics?.output_chars)} out`
+}
+
+function ModelMetricsCard({ title, metrics }) {
+  const calls = metrics?.calls || 0
+  const modelName = metrics?.model || (calls ? 'Configured model' : 'Not used')
+  return (
+    <div className="rounded-panel border border-border bg-surface-2 p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">{title}</p>
+          <p className="mt-1 truncate font-display text-lg font-semibold text-ink" title={modelName}>
+            {modelName}
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-surface px-3 py-2 text-right">
+          <p className="text-xs text-muted">Calls</p>
+          <p className="font-display text-xl font-extrabold text-accent">{formatNumber(calls)}</p>
+        </div>
+      </div>
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        <MetricRow label="Prompt / output size" value={charsLabel(metrics)} />
+        <MetricRow label="Tokens" value={tokenLabel(metrics)} />
+        <MetricRow label="Estimated credits" value={formatCredits(metrics?.estimated_credits)} />
+        <MetricRow label="Errors" value={formatNumber(metrics?.errors)} />
+      </div>
+    </div>
+  )
+}
+
+function MetricRow({ label, value }) {
+  return (
+    <div className="rounded-lg border border-border bg-surface px-4 py-3">
+      <p className="text-xs text-muted">{label}</p>
+      <p className="mt-1 font-mono text-sm font-semibold text-ink break-words">{value}</p>
+    </div>
+  )
+}
+
+function LlmMetricsPanel({ metrics }) {
+  if (!metrics) return null
+  return (
+    <Card className="mt-6 p-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">LLM usage</p>
+          <h2 className="mt-1 font-display text-2xl font-extrabold text-ink">Model cost and size metrics</h2>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[28rem]">
+          <SummaryMetric label="Provider" value={providerLabel(metrics.provider)} />
+          <SummaryMetric label="Live calls" value={formatNumber(metrics.total_calls)} />
+          <SummaryMetric label="Cache hits" value={formatNumber(metrics.cache_hits)} />
+          <SummaryMetric label="Credits" value={formatCredits(metrics.total_estimated_credits)} />
+        </div>
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <ModelMetricsCard title="Mini model" metrics={metrics.mini} />
+        <ModelMetricsCard title="Reasoning model" metrics={metrics.reasoning} />
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-3 text-xs text-muted">
+        <span>{metrics.credit_basis || 'Estimated token credits.'}</span>
+        <span>{formatNumber(metrics.calls_skipped_by_cache)} call{metrics.calls_skipped_by_cache === 1 ? '' : 's'} skipped by cache.</span>
+      </div>
+    </Card>
+  )
+}
+
+function SummaryMetric({ label, value }) {
+  return (
+    <div className="rounded-lg border border-border bg-surface-2 px-3 py-2">
+      <p className="text-[0.68rem] uppercase tracking-wide text-muted">{label}</p>
+      <p className="mt-1 truncate font-display text-sm font-bold text-ink" title={String(value)}>{value}</p>
+    </div>
+  )
+}
+
+export default function Home({ onStartBatch, onStopBatch, processing, progress, batchError, llmMetrics, files, setFiles }) {
   const [dragging, setDragging] = useState(false)
   const [localError, setLocalError] = useState('')
   const folderInput = useRef(null)
@@ -63,6 +162,12 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
   const addFiles = (list) => {
     setLocalError('')
     setFiles(Array.from(list))
+  }
+
+  const clearFiles = () => {
+    setFiles([])
+    if (folderInput.current) folderInput.current.value = ''
+    if (fileInput.current) fileInput.current.value = ''
   }
 
   const onDrop = async (e) => {
@@ -115,8 +220,8 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
           className={[
-            'rounded-card p-10 md:p-16 text-center transition-all duration-300',
-            dragging ? 'bg-base shadow-inset-deep' : 'bg-base shadow-inset',
+            'rounded-panel border-2 border-dashed p-10 md:p-16 text-center transition-colors duration-200',
+            dragging ? 'border-accent bg-accent/5' : 'border-border bg-surface-2',
           ].join(' ')}
         >
           <IconWell className="h-20 w-20 mx-auto mb-6">
@@ -132,7 +237,7 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
           <p className="mt-1 text-sm text-muted">or choose below</p>
 
           {selectedUpload && (
-            <div className="mt-6 mx-auto max-w-2xl rounded-2xl bg-base shadow-inset-sm px-5 py-4 text-left">
+            <div className="mt-6 mx-auto max-w-2xl rounded-lg border border-border bg-surface px-5 py-4 text-left">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted">Selected upload</p>
@@ -143,7 +248,7 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
                 </div>
                 <button
                   className="self-start rounded-lg px-2 py-1 text-sm text-muted hover:text-ink focus-ring"
-                  onClick={() => setFiles([])}
+                  onClick={clearFiles}
                   disabled={processing}
                 >
                   Clear
@@ -154,7 +259,7 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
                   {selectedUpload.names.map((name, index) => (
                     <span
                       key={`${name}-${index}`}
-                      className="inline-block max-w-full truncate rounded-full bg-base px-3 py-1 text-xs font-medium text-muted shadow-extruded-sm"
+                      className="inline-block max-w-full truncate rounded-full border border-border bg-surface px-3 py-1 text-xs font-medium text-ink-2"
                       title={name}
                     >
                       {name}
@@ -194,7 +299,7 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
               <span>{progress.message || progress.status}</span>
               <span>{progressLabel}</span>
             </div>
-            <div className="h-4 rounded-full bg-base shadow-inset-sm overflow-hidden">
+            <div className="h-3 rounded-full bg-surface-2 border border-border overflow-hidden">
               <div
                 className="h-full rounded-full bg-accent transition-all duration-500"
                 style={{ width: `${pct}%` }}
@@ -204,7 +309,7 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
         )}
 
         {error && (
-          <div className="mt-6 rounded-2xl bg-base shadow-inset-sm px-4 py-3 text-sm text-danger">
+          <div className="mt-6 rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
             {error}
           </div>
         )}
@@ -220,6 +325,8 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
           </div>
         </div>
       </Card>
+
+      <LlmMetricsPanel metrics={llmMetrics} />
     </div>
   )
 }

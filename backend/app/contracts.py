@@ -15,7 +15,7 @@ from collections.abc import Callable, Iterable
 from typing import Any, Protocol
 
 # Forward references avoid circular imports; callers import the concrete types.
-from .models import UnitRecord
+from .models import LlmAnalysisResult, UnitRecord
 
 
 # ---------------------------------------------------------------------------
@@ -25,8 +25,8 @@ from .models import UnitRecord
 AnalysisProgress = Callable[[int, int, str], None]
 """(processed: int, total: int, message: str) → None"""
 
-AnalyzeFailure = Callable[[str | None, str | None, str], tuple[str, str, str]]
-"""(error_code, error_message, snippet) → (root_cause, suggested_solution, source)"""
+AnalyzeFailure = Callable[[str | None, str | None, str], tuple[str, str, str] | LlmAnalysisResult]
+"""(error_code, error_message, snippet) → tuple or rich LLM analysis result."""
 
 
 # ---------------------------------------------------------------------------

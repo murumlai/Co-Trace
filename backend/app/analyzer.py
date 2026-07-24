@@ -13,13 +13,14 @@ from collections.abc import Callable
 
 from . import analysis_cache, llm_client, redaction
 from .job_registry import Job
-from .models import UnitRecord
+from .models import LlmAnalysisResult, UnitRecord
 
 _WS = re.compile(r"\s+")
 _NUM = re.compile(r"\d+")
 log = logging.getLogger("cotrace.analyzer")
 
-AnalyzeFailure = Callable[[str | None, str | None, str], tuple[str, str, str]]
+AnalysisReturn = tuple[str, str, str] | LlmAnalysisResult
+AnalyzeFailure = Callable[[str | None, str | None, str], AnalysisReturn]
 AnalysisProgress = Callable[[int, int, str], None]
 
 
@@ -64,7 +65,7 @@ def _redacted_context(record: UnitRecord) -> tuple[str, str, str]:
 
 def analyze_job(
     job: Job,
-    analyze_failure: AnalyzeFailure = llm_client.analyze,
+    analyze_failure: AnalyzeFailure = llm_client.analyze_with_metrics,
     progress_callback: AnalysisProgress | None = None,
     cache: object | None = None,
 ) -> None:
@@ -169,6 +170,7 @@ def _analyze_unit(
         rec.root_cause = root
         rec.suggested_solution = solution
         rec.analysis_source = "local-cache" if _src == "local-cache" else "cached"
+        job.llm_metrics.record_cache_hit(rec.analysis_source)
         log.debug("Used cached analysis for unit %s (signature %s).", rec.unit_id, sig)
         return rec.analysis_source
 
@@ -181,6 +183,7 @@ def _analyze_unit(
             rec.root_cause = root
             rec.suggested_solution = solution
             rec.analysis_source = "local-cache"
+            job.llm_metrics.record_cache_hit(rec.analysis_source)
             log.info("Used saved analysis cache for unit %s (cache %s).", rec.unit_id, cache_key[:8])
             return rec.analysis_source
 
@@ -194,7 +197,9 @@ def _analyze_unit(
         sig,
         force,
     )
-    root, solution, source = analyze_failure(rec.error_code, err_msg, snippet)
+    analysis_result = _coerce_analysis_result(analyze_failure(rec.error_code, err_msg, snippet))
+    root, solution, source = analysis_result.as_tuple()
+    job.llm_metrics.merge(analysis_result.metrics)
     job.signature_cache[sig] = (root, solution, source)
     rec.root_cause = root
     rec.suggested_solution = solution
@@ -218,10 +223,17 @@ def _analyze_unit(
     return source
 
 
+def _coerce_analysis_result(result: AnalysisReturn) -> LlmAnalysisResult:
+    if isinstance(result, LlmAnalysisResult):
+        return result
+    root, solution, source = result
+    return LlmAnalysisResult(root_cause=root, suggested_solution=solution, source=source)
+
+
 def reanalyze_unit(
     job: Job,
     unit_id: str,
-    analyze_failure: AnalyzeFailure = llm_client.analyze,
+    analyze_failure: AnalyzeFailure = llm_client.analyze_with_metrics,
 ) -> UnitRecord | None:
     """Force a fresh per-unit LLM call, bypassing the signature cache."""
     for rec in job.records:
@@ -252,7 +264,7 @@ class AnalyzerService:
         analyze_failure: AnalyzeFailure | None = None,
         cache: object | None = None,
     ) -> None:
-        self._analyze_failure: AnalyzeFailure = analyze_failure or llm_client.analyze
+        self._analyze_failure: AnalyzeFailure = analyze_failure or llm_client.analyze_with_metrics
         self._cache = cache  # None ⇒ module default inside analyze_job/_analyze_unit
 
     def analyze_job(

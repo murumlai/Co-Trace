@@ -31,6 +31,7 @@ import os
 from typing import Any
 
 from .config import settings
+from .models import LlmAnalysisResult, LlmModelRole, LlmUsageMetrics
 
 # ---- Optional SDK import (inert when unavailable) --------------------------
 try:  # pragma: no cover - import guard depends on host environment
@@ -269,6 +270,12 @@ def _parse_json_content(content: str) -> tuple[str, str]:
 def analyze(
     error_code: str | None, error_message: str | None, snippet: str
 ) -> tuple[str, str, str]:
+    return analyze_with_metrics(error_code, error_message, snippet).as_tuple()
+
+
+def analyze_with_metrics(
+    error_code: str | None, error_message: str | None, snippet: str
+) -> LlmAnalysisResult:
     """Diagnose a failure via the Copilot SDK. Returns (root, solution, source).
 
     Runs at most one mini-enrichment pass plus one reasoning pass. Callers
@@ -280,9 +287,16 @@ def analyze(
 
         log.warning("Copilot SDK is unavailable; using the offline stub.")
         root, solution, _ = llm_client._offline_stub(error_code, error_message)
-        return root, f"{solution} (Copilot SDK not installed.)", "stub"
+        return LlmAnalysisResult(
+            root_cause=root,
+            suggested_solution=f"{solution} (Copilot SDK not installed.)",
+            source="stub",
+            metrics=LlmUsageMetrics(provider="copilot_sdk"),
+        )
 
     context = snippet or error_message or ""
+    metrics = LlmUsageMetrics(provider="copilot_sdk")
+    active_role: LlmModelRole | None = None
 
     try:
         log.info(
@@ -294,13 +308,22 @@ def analyze(
         )
         if settings.COPILOT_ENABLE_MINI_ENRICH and context.strip():
             log.info("Copilot mini model call started (%s).", settings.COPILOT_MINI_MODEL)
+            active_role = "mini"
+            mini_prompt = _build_mini_prompt(context)
             summary = _run(
                 _stream_once(
-                    _build_mini_prompt(context),
+                    mini_prompt,
                     settings.COPILOT_MINI_MODEL,
                     _SUMMARIZE_SYSTEM_PROMPT,
                 )
             ).strip()
+            metrics.add_model_call(
+                "mini",
+                model=settings.COPILOT_MINI_MODEL,
+                input_chars=len(_SUMMARIZE_SYSTEM_PROMPT) + len(mini_prompt),
+                output_chars=len(summary),
+                credit_tokens_per_credit=settings.LLM_TOKEN_CREDIT_SIZE,
+            )
             log.info("Copilot mini model call finished: %s summary chars.", len(summary))
             if summary:
                 context = (
@@ -310,19 +333,47 @@ def analyze(
                 )
 
             log.debug("Copilot reasoning pass started (%s, %s context chars).", settings.COPILOT_REASONING_MODEL, len(context))
+        active_role = "reasoning"
+        diagnose_prompt = _build_diagnose_prompt(error_code, error_message, context)
         content = _run(
             _stream_once(
-                _build_diagnose_prompt(error_code, error_message, context),
+                diagnose_prompt,
                 settings.COPILOT_REASONING_MODEL,
                 _DIAGNOSE_SYSTEM_PROMPT,
             )
         )
+        metrics.add_model_call(
+            "reasoning",
+            model=settings.COPILOT_REASONING_MODEL,
+            input_chars=len(_DIAGNOSE_SYSTEM_PROMPT) + len(diagnose_prompt),
+            output_chars=len(content),
+            credit_tokens_per_credit=settings.LLM_TOKEN_CREDIT_SIZE,
+        )
         root, solution = _parse_json_content(content)
         log.info("Copilot analysis finished: %s output chars.", len(content))
-        return root, solution, "llm"
+        return LlmAnalysisResult(
+            root_cause=root,
+            suggested_solution=solution,
+            source="llm",
+            metrics=metrics,
+        )
     except Exception as exc:  # noqa: BLE001 - degrade gracefully to stub
         from . import llm_client
 
+        if active_role is not None:
+            metrics.add_model_error(
+                active_role,
+                model=(
+                    settings.COPILOT_MINI_MODEL
+                    if active_role == "mini"
+                    else settings.COPILOT_REASONING_MODEL
+                ),
+            )
         log.exception("Copilot analysis failed; using the offline stub.")
         root, solution, _ = llm_client._offline_stub(error_code, error_message)
-        return root, f"{solution} (Copilot error: {type(exc).__name__})", "stub"
+        return LlmAnalysisResult(
+            root_cause=root,
+            suggested_solution=f"{solution} (Copilot error: {type(exc).__name__})",
+            source="stub",
+            metrics=metrics,
+        )

@@ -6,12 +6,14 @@ audience-specific views:
 
 - **Engineer view**: latest Pass/Fail result per serial number, shown as a filterable table
   (default) or expandable cards. Failed units show a most-probable root cause, suggested
-  solution, and an expandable redacted snippet used for diagnosis.
+  solution, and an expandable redacted log snippet rendered in a terminal-dark viewer with
+  an in-viewer line filter used for diagnosis.
 - **Manager view**: First-pass yield (FPY), yield trend, Pareto of failure reasons,
   station/tester breakdown, and lot-to-lot comparison.
 
-The implementation follows [plan.md](plan.md) and the Neumorphism/Soft UI visual system
-defined in [designUI.md](designUI.md). The preprocessing design is tracked in
+The implementation follows [plan.md](plan.md) and uses the Hybrid UI system defined in
+[hybrid_UI.md](hybrid_UI.md): an enterprise light shell for dashboard workflows and a
+terminal-dark trace viewer for log evidence. The preprocessing design is tracked in
 [pre-process_plan.md](pre-process_plan.md).
 
 ## Current Status
@@ -38,7 +40,7 @@ defined in [designUI.md](designUI.md). The preprocessing design is tracked in
 - The backend follows SOLID service boundaries: narrow `typing.Protocol` contracts
   (`contracts.py`), concrete adapters wired in a composition root (`dependencies.py`),
   and injected application services (`JobOrchestrator`, `AnalyzerService`,
-  `DiskJobStateStore`, `DiskAnalysisCache`, provider classes). A 108-test pytest
+  `DiskJobStateStore`, `DiskAnalysisCache`, provider classes). A 124-test pytest
   safety-net suite in `backend/tests/` locks parser, analyzer, registry, upload, and
   API behavior.
 
@@ -60,10 +62,15 @@ defined in [designUI.md](designUI.md). The preprocessing design is tracked in
 - **LLM cost control**: passing units never trigger LLM analysis. Failed units are grouped
   by error signature so the app analyzes each unique signature once, then persists
   successful LLM diagnoses in a local cache for reuse across repeated uploads.
+- **LLM usage metrics**: the Home page separates mini and reasoning model calls,
+  prompt/output size, token counts, cache skips, and estimated token credits.
 - **Manual re-analysis**: engineers can force a fresh diagnosis for an individual failed
   unit.
 - **Cache management**: engineers can clear a specific cached analysis result from the
-  failed-unit detail panel when they want the next matching run to call the model again.
+  failed-unit detail panel, or clear every cached result for the currently loaded
+  folder/file/zip in one click from the Engineer view toolbar, when they want the next
+  matching run to call the model again. The per-job clear only removes cache entries
+  referenced by the loaded job; other jobs' cached results are left untouched.
 - **Redaction at rest and pre-LLM**: serial numbers, IP addresses, hostnames, usernames,
   passwords, credential-like key/value pairs, and MAC addresses are scrubbed. The at-rest
   per-product JSON keeps the serial number (needed for yield math) while still removing
@@ -73,6 +80,9 @@ defined in [designUI.md](designUI.md). The preprocessing design is tracked in
 - **Light/dark mode**: the authenticated app shell includes a persistent theme toggle;
   semantic color and shadow tokens keep buttons, tables, charts, and upload controls
   visible in both modes.
+- **Terminal-dark log viewer**: redacted failure snippets render in a monospace,
+  terminal-styled viewer with severity highlighting and an in-viewer line filter; long
+  lines always wrap for readability.
 - **Single-server deployment path**: the FastAPI app serves the built React SPA from
   `frontend/dist`.
 
@@ -153,7 +163,7 @@ Expected response:
 
 ## Backend Tests
 
-The backend has a pytest safety-net suite (108 tests) covering FTRunner parsing,
+The backend has a pytest safety-net suite (124 tests) covering FTRunner parsing,
 DebugLog excerpt selection, product JSON construction, analyzer dedup/cache behavior,
 job registry persistence/restore/TTL, upload zip safety, and FastAPI route smoke paths.
 
@@ -215,6 +225,7 @@ To stop the server, press `Ctrl+C` in the terminal running Uvicorn.
 | `COPILOT_PROXY` | `http://proxy-us.intel.com:912` | Optional `HTTP(S)_PROXY` used by the Copilot SDK subprocess. |
 | `COPILOT_TIMEOUT_S` | `60` | Per-call timeout for a Copilot SDK streaming session. |
 | `COPILOT_ENABLE_MINI_ENRICH` | `1` | Run the mini summarization pass before the reasoning call. |
+| `LLM_TOKEN_CREDIT_SIZE` | `1000` | Token-credit display unit for estimated LLM usage metrics. |
 | `APP_USERNAME` | `admin` | Placeholder login username. |
 | `APP_PASSWORD` | `admin` | Placeholder login password. |
 | `SESSION_TTL_S` | `28800` | Placeholder auth session lifetime in seconds. |
@@ -289,7 +300,8 @@ frontend/src/
   api.js                   Fetch wrapper, bearer-token handling, 401 recovery
   auth.jsx                 Placeholder auth context with session-expiry handling
   logger.js                Browser log forwarding to frontend_Log.txt via backend endpoint
-  components/ui.jsx        Neumorphic UI primitives
+  components/ui.jsx        Hybrid UI primitives (enterprise light shell)
+  components/TerminalViewer.jsx  Terminal-dark viewer for redacted trace snippets
   pages/Home.jsx           Upload and progress UI
   pages/Engineer.jsx       Unit-level diagnostics (table / cards views)
   pages/Manager.jsx        Yield and failure analytics
@@ -301,7 +313,7 @@ frontend/scripts/
 ## Useful Commands
 
 ```powershell
-# Run backend test suite (108 tests covering parser, analyzer, registry, upload, API smoke)
+# Run backend test suite (124 tests covering parser, analyzer, registry, upload, API smoke)
 cd backend
 .\.venv\Scripts\python.exe -m pytest tests/ -q
 

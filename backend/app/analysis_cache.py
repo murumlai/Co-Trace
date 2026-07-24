@@ -10,7 +10,9 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -162,11 +164,47 @@ def _load() -> dict[str, Any]:
 
 def _save(data: dict[str, Any]) -> None:
     path = settings.ANALYSIS_CACHE_FILE
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, ensure_ascii=True, separators=(",", ":"))
-    os.replace(tmp, path)
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    # Write to a unique temp file so concurrent writers (another thread, or a
+    # second backend instance sharing this cache dir) never collide on the same
+    # scratch file.
+    fd, tmp = tempfile.mkstemp(prefix="analysis_cache.", suffix=".tmp", dir=directory)
+    replaced = False
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=True, separators=(",", ":"))
+        _atomic_replace(tmp, path)
+        replaced = True
+    except OSError:
+        # Persisting the cache is best-effort; a write failure (e.g. a transient
+        # Windows lock from AV/indexer or a second instance) must never abort
+        # log processing. Keep the in-memory copy and move on.
+        log.exception("Could not persist analysis cache to %s; keeping in-memory copy only.", path)
+    finally:
+        if not replaced and os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+def _atomic_replace(src: str, dst: str, *, attempts: int = 5, delay: float = 0.1) -> None:
+    """``os.replace`` with retry.
+
+    On Windows the replace raises ``PermissionError`` (WinError 5/32) when
+    another process momentarily holds the destination open — antivirus, the
+    search indexer, or a concurrent backend instance. Retry briefly before
+    giving up.
+    """
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay * (attempt + 1))
 
 
 def _now() -> str:

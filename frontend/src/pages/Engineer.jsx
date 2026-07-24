@@ -1,16 +1,17 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
-import { Badge, Button, Card, IconWell } from '../components/ui'
-
-// Per-classification display metadata for the Engineer view.
-const CLASS_META = {
-  first_pass: { tone: 'pass', label: 'First-pass' },
-  retry_pass: { tone: 'warn', label: 'Retry-pass' },
-  fail: { tone: 'fail', label: 'Failing' },
-  unknown: { tone: 'unknown', label: 'Unknown' },
-}
-
-const classMeta = (c) => CLASS_META[c] || CLASS_META.unknown
+import {
+  Badge,
+  Button,
+  Card,
+  IconWell,
+  Panel,
+  SegmentedControl,
+  StatusBadge,
+  ToolbarButton,
+  TableShell,
+} from '../components/ui'
+import TerminalViewer from '../components/TerminalViewer'
 
 const FILTERS = [
   ['all', 'All'],
@@ -30,6 +31,7 @@ export default function Engineer({ jobId }) {
   const [expanded, setExpanded] = useState(null)
   const [reanalyzing, setReanalyzing] = useState(null)
   const [clearingCache, setClearingCache] = useState(null)
+  const [clearingAll, setClearingAll] = useState(false)
   const [actionError, setActionError] = useState('')
 
   useEffect(() => {
@@ -53,6 +55,16 @@ export default function Engineer({ jobId }) {
       Array.from(new Set(units.map((u) => u.serial_number || u.unit_id).filter(Boolean))).sort(),
     [units],
   )
+
+  const cachedKeyCount = useMemo(() => {
+    const keys = new Set()
+    units.forEach((g) =>
+      g.failures?.forEach((f) => {
+        if (f.analysis_cache_key) keys.add(f.analysis_cache_key)
+      }),
+    )
+    return keys.size
+  }, [units])
 
   const setClassFilter = (cls) => {
     setFilter(cls)
@@ -132,6 +144,27 @@ export default function Engineer({ jobId }) {
     }
   }
 
+  const clearAllCache = async () => {
+    if (!jobId || clearingAll || cachedKeyCount === 0) return
+    setClearingAll(true)
+    setActionError('')
+    try {
+      await api.clearJobCache(jobId)
+      setUnits((prev) =>
+        prev.map((g) => ({
+          ...g,
+          failures: g.failures?.map((f) =>
+            f.analysis_cache_key ? { ...f, analysis_cache_key: null, cache_cleared: true } : f,
+          ),
+        })),
+      )
+    } catch (err) {
+      setActionError(err.message)
+    } finally {
+      setClearingAll(false)
+    }
+  }
+
   if (!jobId) return <EmptyState />
 
   const detailProps = {
@@ -144,50 +177,35 @@ export default function Engineer({ jobId }) {
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-12">
-      <h1 className="font-display text-4xl font-extrabold tracking-tight text-ink mb-8">
-        Engineer view
-      </h1>
-      {!loading && runCount > units.length && (
-        <p className="mb-5 text-sm text-muted">
-          {units.length} units from {runCount} test runs. First-pass units need no analysis;
-          retry-pass and failing units show root cause and solution for each failure.
-        </p>
-      )}
+    <div className="mx-auto max-w-6xl px-6 py-10">
+      <div className="mb-6">
+        <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">
+          Engineer view
+        </h1>
+        {!loading && runCount > units.length && (
+          <p className="mt-1 text-sm text-muted">
+            {units.length} units from {runCount} test runs. First-pass units need no analysis;
+            retry-pass and failing units show root cause and solution for each failure.
+          </p>
+        )}
+      </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
-        <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div className="flex flex-wrap items-center gap-2">
           {FILTERS.map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => setClassFilter(key)}
-              className={[
-                'rounded-2xl px-5 py-2.5 text-sm font-medium transition-all duration-300 focus-ring',
-                filter === key
-                  ? 'bg-base text-accent shadow-inset'
-                  : 'bg-base text-muted shadow-extruded-sm hover:-translate-y-px',
-              ].join(' ')}
-            >
+            <ToolbarButton key={key} active={filter === key} onClick={() => setClassFilter(key)}>
               {label} <span className="opacity-60">({counts[key] ?? 0})</span>
-            </button>
+            </ToolbarButton>
           ))}
           {counts.unknown > 0 && (
-            <button
-              onClick={() => setClassFilter('unknown')}
-              className={[
-                'rounded-2xl px-5 py-2.5 text-sm font-medium transition-all duration-300 focus-ring',
-                filter === 'unknown'
-                  ? 'bg-base text-accent shadow-inset'
-                  : 'bg-base text-muted shadow-extruded-sm hover:-translate-y-px',
-              ].join(' ')}
-            >
+            <ToolbarButton active={filter === 'unknown'} onClick={() => setClassFilter('unknown')}>
               Unknown <span className="opacity-60">({counts.unknown})</span>
-            </button>
+            </ToolbarButton>
           )}
           <select
             value={quickFilter}
             onChange={(event) => setDropdownFilter(event.target.value)}
-            className="rounded-2xl bg-base px-5 py-2.5 text-sm font-medium text-muted shadow-extruded-sm focus-ring"
+            className="rounded-lg border border-border bg-surface px-3.5 py-2 text-sm font-medium text-ink-2 focus-ring"
           >
             <option value="all">All units</option>
             <option value="class:fail">Failing units</option>
@@ -201,30 +219,33 @@ export default function Engineer({ jobId }) {
               ))}
             </optgroup>
           </select>
+          <ToolbarButton
+            onClick={clearAllCache}
+            disabled={clearingAll || cachedKeyCount === 0}
+            title="Delete cached analysis results for the currently loaded folder/file/zip only"
+            className="disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {clearingAll ? 'Clearing…' : 'Clear cached results'}
+            {cachedKeyCount > 0 && <span className="opacity-60">({cachedKeyCount})</span>}
+          </ToolbarButton>
         </div>
 
-        <div className="flex items-center gap-1 rounded-2xl bg-base shadow-inset-sm p-1 shrink-0">
-          {[
+        <SegmentedControl
+          options={[
             ['table', 'Table'],
             ['cards', 'Cards'],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => setView(key)}
-              className={[
-                'rounded-xl px-4 py-2 text-sm font-medium transition-all duration-300 focus-ring',
-                view === key
-                  ? 'bg-base text-accent shadow-extruded-sm'
-                  : 'text-muted hover:text-ink',
-              ].join(' ')}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+          ]}
+          value={view}
+          onChange={setView}
+          className="shrink-0"
+        />
       </div>
 
-      {actionError && <Card className="p-4 mb-4 text-sm text-danger">{actionError}</Card>}
+      {actionError && (
+        <div className="mb-4 rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+          {actionError}
+        </div>
+      )}
 
       {loading ? (
         <Card className="p-10 text-center text-muted">Loading units…</Card>
@@ -245,72 +266,65 @@ const attemptsLabel = (u) =>
 
 function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache }) {
   return (
-    <Card className="p-6 md:p-8">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-muted text-left">
-              <th className="pb-3 font-medium">Status</th>
-              <th className="pb-3 font-medium">Serial</th>
-              <th className="pb-3 font-medium">Station</th>
-              <th className="pb-3 font-medium">Lot</th>
-              <th className="pb-3 font-medium text-right">Attempts</th>
-              <th className="pb-3 font-medium text-right">Duration</th>
-              <th className="pb-3 font-medium text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {units.map((u) => {
-              const meta = classMeta(u.classification)
-              const hasDetails = u.failure_count > 0
-              return (
-                <Fragment key={u.unit_id}>
-                  <tr className="text-ink border-t border-ink/5">
-                    <td className="py-3 whitespace-nowrap">
-                      <Badge tone={meta.tone}>{meta.label}</Badge>
-                    </td>
-                    <td className="py-3 whitespace-nowrap font-medium">
-                      {u.serial_number || u.unit_id}
-                    </td>
-                    <td className="py-3 whitespace-nowrap">{u.final.station_id || '—'}</td>
-                    <td className="py-3 whitespace-nowrap">{u.final.lot_id || '—'}</td>
-                    <td className="py-3 text-right whitespace-nowrap">{attemptsLabel(u)}</td>
-                    <td className="py-3 text-right whitespace-nowrap">
-                      {u.final.duration_s ? `${u.final.duration_s.toFixed(1)}s` : '—'}
-                    </td>
-                    <td className="py-3 text-right whitespace-nowrap">
-                      {hasDetails ? (
-                        <button
-                          className="text-muted hover:text-ink focus-ring rounded-lg px-2 py-1"
-                          onClick={() => setExpanded(expanded === u.unit_id ? null : u.unit_id)}
-                        >
-                          {expanded === u.unit_id ? 'Hide' : 'Details'}
-                        </button>
-                      ) : (
-                        <span className="text-placeholder">—</span>
-                      )}
-                    </td>
-                  </tr>
-                  {hasDetails && expanded === u.unit_id && (
-                    <tr>
-                      <td colSpan={7} className="pb-5 pt-1">
-                        <UnitDetails
-                          u={u}
-                          reanalyzing={reanalyzing}
-                          onReanalyze={onReanalyze}
-                          clearingCache={clearingCache}
-                          onClearCache={onClearCache}
-                        />
-                      </td>
-                    </tr>
+    <TableShell>
+      <thead>
+        <tr className="border-b border-border bg-surface-2 text-left text-muted">
+          <th className="px-4 py-3 font-medium">Status</th>
+          <th className="px-4 py-3 font-medium">Serial</th>
+          <th className="px-4 py-3 font-medium">Station</th>
+          <th className="px-4 py-3 font-medium text-right">Attempts</th>
+          <th className="px-4 py-3 font-medium text-right">Duration</th>
+          <th className="px-4 py-3 font-medium text-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {units.map((u) => {
+          const hasDetails = u.failure_count > 0
+          return (
+            <Fragment key={u.unit_id}>
+              <tr className="border-b border-border/60 text-ink transition-colors hover:bg-surface-2/60">
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <StatusBadge status={u.classification} />
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap font-medium">
+                  {u.serial_number || u.unit_id}
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">{u.final.station_id || '—'}</td>
+                <td className="px-4 py-3 text-right whitespace-nowrap">{attemptsLabel(u)}</td>
+                <td className="px-4 py-3 text-right whitespace-nowrap">
+                  {u.final.duration_s ? `${u.final.duration_s.toFixed(1)}s` : '—'}
+                </td>
+                <td className="px-4 py-3 text-right whitespace-nowrap">
+                  {hasDetails ? (
+                    <button
+                      className="rounded-md px-2 py-1 text-accent hover:bg-accent/10 focus-ring"
+                      onClick={() => setExpanded(expanded === u.unit_id ? null : u.unit_id)}
+                    >
+                      {expanded === u.unit_id ? 'Hide' : 'Details'}
+                    </button>
+                  ) : (
+                    <span className="text-placeholder">—</span>
                   )}
-                </Fragment>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </Card>
+                </td>
+              </tr>
+              {hasDetails && expanded === u.unit_id && (
+                <tr>
+                  <td colSpan={6} className="bg-surface-2 px-4 pb-5 pt-1">
+                    <UnitDetails
+                      u={u}
+                      reanalyzing={reanalyzing}
+                      onReanalyze={onReanalyze}
+                      clearingCache={clearingCache}
+                      onClearCache={onClearCache}
+                    />
+                  </td>
+                </tr>
+              )}
+            </Fragment>
+          )
+        })}
+      </tbody>
+    </TableShell>
   )
 }
 
@@ -318,29 +332,26 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
   return (
     <div className="space-y-4">
       {units.map((u) => {
-        const meta = classMeta(u.classification)
         const hasDetails = u.failure_count > 0
         return (
           <Card key={u.unit_id} className="p-6">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <div className="flex items-center gap-3 flex-wrap">
-                  <Badge tone={meta.tone}>{meta.label}</Badge>
+                  <StatusBadge status={u.classification} />
                   <span className="font-display font-bold text-ink truncate">
                     {u.serial_number || u.unit_id}
                   </span>
                 </div>
                 <div className="mt-2 text-sm text-muted flex flex-wrap gap-x-6 gap-y-1">
-                  <span>Product: {u.final.product_code || '—'}</span>
                   <span>Station: {u.final.station_id || '—'}</span>
-                  <span>Lot: {u.final.lot_id || '—'}</span>
                   <span>Attempts: {attemptsLabel(u)}</span>
                   {u.final.duration_s ? <span>{u.final.duration_s.toFixed(1)}s</span> : null}
                 </div>
               </div>
               {hasDetails && (
                 <button
-                  className="shrink-0 text-sm text-muted hover:text-ink focus-ring rounded-lg px-2 py-1"
+                  className="shrink-0 rounded-md px-2 py-1 text-sm text-accent hover:bg-accent/10 focus-ring"
                   onClick={() => setExpanded(expanded === u.unit_id ? null : u.unit_id)}
                 >
                   {expanded === u.unit_id ? 'Hide' : 'Details'}
@@ -405,7 +416,7 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
   const when = attempt.start_time ? attempt.start_time.replace('T', ' ').slice(0, 19) : null
 
   return (
-    <div className="rounded-2xl bg-base shadow-inset p-5">
+    <Panel className="p-5">
       <div className="flex items-center justify-between gap-3 mb-3">
         <div className="flex items-center gap-2 flex-wrap">
           <Badge tone="fail">FAIL</Badge>
@@ -438,10 +449,13 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
 
       {showSnippet && (
         <div className="mt-4">
-          <div className="text-xs uppercase tracking-wide text-muted mb-2">Redacted log snippet</div>
-          <pre className="rounded-xl bg-base shadow-inset-sm p-4 text-xs text-ink overflow-x-auto whitespace-pre-wrap">
-            {attempt.redacted_snippet || '(none)'}
-          </pre>
+          <TerminalViewer
+            text={attempt.redacted_snippet || ''}
+            title="Redacted log snippet"
+            errorCode={attempt.error_code || null}
+            failingStep={attempt.failing_step || null}
+            timestamp={when || null}
+          />
         </div>
       )}
 
@@ -458,7 +472,7 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
           </Button>
         )}
       </div>
-    </div>
+    </Panel>
   )
 }
 

@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .config import settings
-from .models import JobProgress, JobState, JobStatus, UnitRecord
+from .models import JobProgress, JobState, JobStatus, LlmUsageMetrics, UnitRecord
 from .upload_storage import cleanup_job_workdir
 
 log = logging.getLogger(__name__)
@@ -35,6 +35,7 @@ class Job:
     workdir: str = ""
     warnings: list[str] = field(default_factory=list)
     cancel_requested: bool = False
+    llm_metrics: LlmUsageMetrics = field(default_factory=LlmUsageMetrics)
     # signature -> (root_cause, suggested_solution, analysis_source)
     signature_cache: dict[str, tuple[str, str, str]] = field(default_factory=dict)
     # Injected by the registry so save() does not hard-code disk paths.
@@ -50,6 +51,7 @@ class Job:
             message=self.message,
             unit_count=len(self.records),
             warnings=self.warnings,
+            llm_metrics=self.llm_metrics,
         )
 
     def save(self) -> None:
@@ -79,6 +81,7 @@ def _inline_save(job: Job) -> None:
         "workdir": job.workdir,
         "warnings": job.warnings,
         "cancel_requested": job.cancel_requested,
+        "llm_metrics": job.llm_metrics.model_dump(),
         "records": [r.model_dump() for r in job.records],
         "signature_cache": job.signature_cache,
     }
@@ -144,6 +147,7 @@ class DiskJobStateStore:
                     workdir=state.get("workdir", entry.path),
                     warnings=state.get("warnings", []),
                     cancel_requested=state.get("cancel_requested", False),
+                    llm_metrics=LlmUsageMetrics(**state.get("llm_metrics", {})),
                     records=[UnitRecord(**r) for r in state.get("records", [])],
                     signature_cache=state.get("signature_cache", {}),
                 )
