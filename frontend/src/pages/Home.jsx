@@ -152,8 +152,7 @@ function SummaryMetric({ label, value }) {
   )
 }
 
-export default function Home({ onStartBatch, onStopBatch, processing, progress, batchError, llmMetrics }) {
-  const [files, setFiles] = useState([])
+export default function Home({ onStartBatch, onStopBatch, processing, progress, batchError, llmMetrics, files, setFiles }) {
   const [dragging, setDragging] = useState(false)
   const [localError, setLocalError] = useState('')
   const folderInput = useRef(null)
@@ -163,6 +162,12 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
   const addFiles = (list) => {
     setLocalError('')
     setFiles(Array.from(list))
+  }
+
+  const clearFiles = () => {
+    setFiles([])
+    if (folderInput.current) folderInput.current.value = ''
+    if (fileInput.current) fileInput.current.value = ''
   }
 
   const onDrop = async (e) => {
@@ -243,7 +248,7 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
                 </div>
                 <button
                   className="self-start rounded-lg px-2 py-1 text-sm text-muted hover:text-ink focus-ring"
-                  onClick={() => setFiles([])}
+                  onClick={clearFiles}
                   disabled={processing}
                 >
                   Clear

@@ -31,6 +31,7 @@ function Shell() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [warnings, setWarnings] = useState([])
   const [llmMetrics, setLlmMetrics] = useState(null)
+  const [selectedFiles, setSelectedFiles] = useState([])
   const runToken = useRef(0)
   const uploadAbort = useRef(null)
 
@@ -283,6 +284,8 @@ function Shell() {
             progress={batchProgress}
             batchError={batchError}
             llmMetrics={llmMetrics}
+            files={selectedFiles}
+            setFiles={setSelectedFiles}
           />
         )}
         {tab === 'engineer' && <Engineer jobId={jobId} />}
