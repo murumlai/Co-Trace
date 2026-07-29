@@ -200,12 +200,29 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
     return next
   }
 
-  const addFiles = (list, inputRef) => {
+  const addFiles = (list, inputRef, replace = false) => {
     setLocalError('')
     const snapshot = Array.from(list)  // snapshot before resetting the input (FileList is live)
     if (inputRef?.current) inputRef.current.value = ''
     if (!snapshot.length) return
-    setFiles((prev) => mergeFiles(prev, snapshot))
+
+    if (replace) {
+      // Folder pick: replace the entire selection with this folder's contents.
+      setFiles(snapshot)
+      return
+    }
+
+    // Individual file pick: .zip replaces everything; .txt merges; anything else is rejected.
+    const zips = snapshot.filter((f) => f.name.toLowerCase().endsWith('.zip'))
+    if (zips.length) {
+      setFiles([zips[0]])
+      if (zips.length > 1) setLocalError('Only one .zip can be loaded at a time.')
+      return
+    }
+    const txts = snapshot.filter((f) => f.name.toLowerCase().endsWith('.txt'))
+    const skipped = snapshot.length - txts.length
+    if (skipped) setLocalError(`${skipped} file${skipped > 1 ? 's' : ''} skipped — only .txt files can be added individually.`)
+    if (txts.length) setFiles((prev) => mergeFiles(prev, txts))
   }
 
   const clearFiles = () => {
@@ -217,6 +234,7 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
   const onDrop = async (e) => {
     e.preventDefault()
     setDragging(false)
+    setLocalError('')
     const dropped = []
     const items = e.dataTransfer.items
     if (items && items.length && items[0].webkitGetAsEntry) {
@@ -226,7 +244,26 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
     } else {
       dropped.push(...Array.from(e.dataTransfer.files))
     }
-    if (dropped.length) setFiles((prev) => mergeFiles(prev, dropped))
+    if (!dropped.length) return
+
+    const hasZip = dropped.some((f) => f.name.toLowerCase().endsWith('.zip'))
+    const hasFolder = dropped.some((f) => (f.webkitRelativePath || '').includes('/'))
+
+    if (hasZip) {
+      // Zip drop: take only the first zip, replace everything.
+      setFiles(dropped.filter((f) => f.name.toLowerCase().endsWith('.zip')).slice(0, 1))
+      return
+    }
+    if (hasFolder) {
+      // Folder drop: replace everything with the folder's contents.
+      setFiles(dropped)
+      return
+    }
+    // Plain file drop: .txt only, merge.
+    const txts = dropped.filter((f) => f.name.toLowerCase().endsWith('.txt'))
+    const skipped = dropped.length - txts.length
+    if (skipped) setLocalError(`${skipped} file${skipped > 1 ? 's' : ''} skipped — only .txt files can be added individually.`)
+    if (txts.length) setFiles((prev) => mergeFiles(prev, txts))
   }
 
   const start = async () => {
@@ -278,7 +315,7 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
           <p className="font-display text-lg font-semibold text-ink">
             {dragging ? 'Drop to add files' : 'Drag & drop logs or a .zip here'}
           </p>
-          <p className="mt-1 text-sm text-muted">or pick folders / files below — each pick adds to the selection</p>
+          <p className="mt-1 text-sm text-muted">or pick below — folders and .zip load one at a time; multiple .txt files accumulate</p>
 
           {selectedUpload && (
             <div className="mt-6 mx-auto max-w-2xl rounded-lg border border-border bg-surface px-5 py-4 text-left">
@@ -335,13 +372,14 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
             webkitdirectory=""
             directory=""
             multiple
-            onChange={(e) => addFiles(e.target.files, folderInput)}
+            onChange={(e) => addFiles(e.target.files, folderInput, true)}
           />
           <input
             ref={fileInput}
             type="file"
             className="hidden"
             multiple
+            accept=".txt,.zip"
             onChange={(e) => addFiles(e.target.files, fileInput)}
           />
         </div>
