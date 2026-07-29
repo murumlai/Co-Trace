@@ -97,8 +97,16 @@ The implemented parser uses:
     durations (ANSI codes are stripped, and a tolerant classifier handles `passed.`,
     `TEST PASSED`, `...failed.`, `Copy to STC process failed.`);
   - the authoritative `done file content:` block for `Result`, `EndTime`, `ErrorMsg`, and
-    `Errorcode`. Simple TestApp/APSE flows that omit this block on success are treated as
-    an implicit PASS when no error-level line is present.
+    `Errorcode`.
+  - **Implicit-PASS / abort classification**: runs that omit the done block are handled
+    differently by mode. *TestApp* runs with no done block and no ERR line are implicit
+    PASS (K77469-400 pattern). *APSE* runs without a done block are classified via a
+    two-pass, data-driven threshold: a pre-scan collects the average `Total Test time(s)`
+    of explicit PASS runs for each `(product_code, op_id)` pair; if a no-done-block APSE
+    run's duration is below `max(5 s, avg × 5 %)` it is classified as FAIL (FTRunner
+    aborted, e.g. missing `testflow.xml`), otherwise as PASS. Groups by
+    `(product_code, op_id)` so different operations on the same product use independent
+    thresholds. Products/OPIDs with no explicit PASS reference fall back to the 5 s floor.
 - Recursive, guarded `.zip` traversal to locate a nested `DebugLog.txt` for failed units
   and extract a failure-relevant `debug_excerpt` (zip-slip / zip-bomb / depth caps apply).
   Add-in cards normally have no DebugLog, which is expected and not an error.
