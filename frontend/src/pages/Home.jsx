@@ -159,9 +159,24 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
   const fileInput = useRef(null)
   const selectedUpload = uploadSummary(files)
 
-  const addFiles = (list) => {
+  const mergeFiles = (prev, incoming) => {
+    const seen = new Set(prev.map(relPath))
+    const next = [...prev]
+    for (const f of Array.from(incoming)) {
+      const p = relPath(f)
+      if (!seen.has(p)) {
+        next.push(f)
+        seen.add(p)
+      }
+    }
+    return next
+  }
+
+  const addFiles = (list, inputRef) => {
     setLocalError('')
-    setFiles(Array.from(list))
+    setFiles((prev) => mergeFiles(prev, list))
+    // Reset so the same folder/files can be re-opened on the next click.
+    if (inputRef?.current) inputRef.current.value = ''
   }
 
   const clearFiles = () => {
@@ -182,7 +197,7 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
     } else {
       dropped.push(...Array.from(e.dataTransfer.files))
     }
-    if (dropped.length) setFiles(dropped)
+    if (dropped.length) setFiles((prev) => mergeFiles(prev, dropped))
   }
 
   const start = async () => {
@@ -234,7 +249,7 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
           <p className="font-display text-lg font-semibold text-ink">
             {dragging ? 'Drop to add files' : 'Drag & drop logs or a .zip here'}
           </p>
-          <p className="mt-1 text-sm text-muted">or choose below</p>
+          <p className="mt-1 text-sm text-muted">or pick folders / files below — each pick adds to the selection</p>
 
           {selectedUpload && (
             <div className="mt-6 mx-auto max-w-2xl rounded-lg border border-border bg-surface px-5 py-4 text-left">
@@ -282,14 +297,14 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
             webkitdirectory=""
             directory=""
             multiple
-            onChange={(e) => addFiles(e.target.files)}
+            onChange={(e) => addFiles(e.target.files, folderInput)}
           />
           <input
             ref={fileInput}
             type="file"
             className="hidden"
             multiple
-            onChange={(e) => addFiles(e.target.files)}
+            onChange={(e) => addFiles(e.target.files, fileInput)}
           />
         </div>
 
