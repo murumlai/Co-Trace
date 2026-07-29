@@ -132,3 +132,53 @@ tabs. **No LLM call** in this task — prompt design comes later.
 ## Open tuning items
 - `debug_excerpt` char budget (default ~4–6k chars) — finalize exact markers after
   inspecting the extracted `debuglog.txt` during implementation.
+
+## Post-implementation discovery: APSE implicit-PASS / abort classification
+
+### Problem (2026-07-29)
+Some APSE-mode runs omit a `done file content:` block and have no ERR-level log line,
+so the previous implicit-PASS fallback silently marked every such run as PASS. Two
+contrasting real-world patterns exist:
+
+| Pattern | Example product | Duration | Correct result |
+|---------|----------------|----------|----------------|
+| FTRunner aborted before test started (e.g. `testflow.xml` not found) | N32828-201 | ~0.2 s | **FAIL** |
+| Genuine APSE run, result not emitted to done file | M13983-700, M79060-001 EEPROM3 | 58–1115 s | **PASS** |
+
+Note: the `testflow file not found` log line is **not** a reliable abort signal — it
+appears in genuine M13983-700 and M79060-001 EEPROM3 runs that still complete
+normally (TestProgramRunner.exe continues without it).
+
+### Solution implemented in `FtrunnerPreprocessor`
+`process_folder()` now runs a two-pass approach:
+
+**Pass 1 — `_compute_apse_thresholds(folders)`**
+- Lightweight pre-scan of every run folder.
+- Collects `Total Test time(s):` from APSE runs whose `done file content:` block carries
+  `Result=PASS`, grouped by `(product_code, op_id)`.
+- Threshold per group = `max(_APSE_ABORT_FLOOR_S, avg_pass_duration × _APSE_ABORT_FACTOR)`
+  (defaults: floor = 5.0 s, factor = 0.05).
+- `(product_code, op_id)` pairs with no explicit PASS reference fall back to the 5.0 s
+  floor.
+
+**Pass 2 — main parse loop**
+- Each run is processed by `process_run_folder()` as before.
+- After parsing, if `result == PASS` AND `test_mode == APSE` AND
+  `duration_s < threshold[(product, op_id)]` → reclassify to FAIL with message
+  `"FTRunner aborted before test completed (duration: Xs, threshold: Ys)"`.
+
+### Why group by (product_code, op_id)
+M79060-001 has two distinct APSE operation types on the same product:
+- `OPID=SI1`: explicit PASS runs averaging ~4900 s → threshold ≈ 245 s.
+- `OPID=EEPROM3`: no explicit PASS runs, genuine runs 94–1115 s → uses 5.0 s floor.
+Without grouping, SI1's high average would incorrectly penalise EEPROM3 runs.
+
+### Corpus verification
+| Product | Runs | Result after change |
+|---------|------|---------------------|
+| N32828-201 APSE | 3 | FAIL (0.19–0.22 s, below 5 s floor) ✓ |
+| M13983-700 APSE | 107 | PASS (58–779 s, no PASS refs → 5 s floor) ✓ |
+| M79060-001 APSE EEPROM3 | ~32 | PASS (94–1115 s, no PASS refs → 5 s floor) ✓ |
+| M79060-001 APSE SI1 explicit PASS | 32 | PASS (unchanged, done block present) ✓ |
+| M79060-001 APSE SI1 explicit FAIL | 142+ | FAIL (unchanged, done block present) ✓ |
+| K77469-400 TestApp | 95 | Unaffected (check is APSE-mode-only) ✓ |
