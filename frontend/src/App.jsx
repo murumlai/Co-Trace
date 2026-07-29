@@ -66,10 +66,16 @@ function Shell() {
     uploadAbort.current = controller
     try {
       const formData = new FormData()
-      for (const file of files) {
+      files.forEach((file, i) => {
         formData.append('files', file)
-        formData.append('paths', relPath(file))
-      }
+        // webkitRelativePath is set by the folder picker and already encodes
+        // the subfolder hierarchy. Individual file picks leave it empty, so
+        // every file would get the same flat path (just file.name) and the
+        // backend would overwrite them. Assign a synthetic unique folder so
+        // each pick ends up in its own run directory.
+        const path = file.webkitRelativePath || `run_${i}/${file.name}`
+        formData.append('paths', path)
+      })
       const { job_id } = await api.upload(formData, { signal: controller.signal })
       if (runToken.current !== token) return
       uploadAbort.current = null
