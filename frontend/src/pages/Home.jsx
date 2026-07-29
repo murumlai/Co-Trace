@@ -174,9 +174,10 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
 
   const addFiles = (list, inputRef) => {
     setLocalError('')
-    setFiles((prev) => mergeFiles(prev, list))
-    // Reset so the same folder/files can be re-opened on the next click.
+    const snapshot = Array.from(list)  // snapshot before resetting the input (FileList is live)
     if (inputRef?.current) inputRef.current.value = ''
+    if (!snapshot.length) return
+    setFiles((prev) => mergeFiles(prev, snapshot))
   }
 
   const clearFiles = () => {
