@@ -70,10 +70,12 @@ function Shell() {
         formData.append('files', file)
         // webkitRelativePath is set by the folder picker and already encodes
         // the subfolder hierarchy. Individual file picks leave it empty, so
-        // every file would get the same flat path (just file.name) and the
-        // backend would overwrite them. Assign a synthetic unique folder so
-        // each pick ends up in its own run directory.
-        const path = file.webkitRelativePath || `run_${i}/${file.name}`
+        // every .txt would get the same flat path and the backend would overwrite
+        // them — assign a synthetic unique folder per file.
+        // .zip files must stay flat (no subfolder) so the backend's _is_root_zip
+        // check recognises them as batch containers to extract.
+        const isZip = file.name.toLowerCase().endsWith('.zip')
+        const path = file.webkitRelativePath || (isZip ? file.name : `run_${i}/${file.name}`)
         formData.append('paths', path)
       })
       const { job_id } = await api.upload(formData, { signal: controller.signal })
