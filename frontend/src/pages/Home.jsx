@@ -6,6 +6,13 @@ function relPath(file) {
   return file.webkitRelativePath || file.name
 }
 
+// Stable dedup key: relative path when available (folder picker), otherwise
+// name+size+lastModified so same-named files from different folders are treated
+// as distinct when picked individually (individual file picks don't expose path).
+function fileKey(file) {
+  return file.webkitRelativePath || `${file.name}::${file.size}::${file.lastModified}`
+}
+
 function isSingleZip(files) {
   return files.length === 1 && relPath(files[0]).toLowerCase().endsWith('.zip')
 }
@@ -160,13 +167,13 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
   const selectedUpload = uploadSummary(files)
 
   const mergeFiles = (prev, incoming) => {
-    const seen = new Set(prev.map(relPath))
+    const seen = new Set(prev.map(fileKey))
     const next = [...prev]
-    for (const f of Array.from(incoming)) {
-      const p = relPath(f)
-      if (!seen.has(p)) {
+    for (const f of incoming) {
+      const k = fileKey(f)
+      if (!seen.has(k)) {
         next.push(f)
-        seen.add(p)
+        seen.add(k)
       }
     }
     return next
