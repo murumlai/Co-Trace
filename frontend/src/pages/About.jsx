@@ -4,12 +4,12 @@ const FEATURES = [
   {
     icon: '📤',
     title: 'Upload logs',
-    body: 'Drop FTRunner log folders, individual files, or a single .zip archive for large batches. One upload powers every view.',
+    body: 'Drop FTRunner log folders, individual files, or a single root-level .zip archive for large batches. Processing runs asynchronously with progress polling and manual stop support.',
   },
   {
     icon: '🔧',
     title: 'Engineer view',
-    body: 'One row per serial number, classified as first-pass, retry-pass, or failing. Failed attempts get an AI root cause and suggested solution.',
+    body: 'One row per serial number, classified as first-pass, retry-pass, or failing. Failed attempts get root-cause guidance, log evidence, cache controls, and manual re-analysis.',
   },
   {
     icon: '📊',
@@ -19,7 +19,26 @@ const FEATURES = [
   {
     icon: '🔒',
     title: 'Private by design',
-    body: 'Serial numbers, IPs, hostnames, and credentials are redacted before anything is analyzed. Passing units never trigger an AI call.',
+    body: 'Credentials, IPs, hostnames, usernames, MAC addresses, and serials are redacted before analysis. Passing units never trigger an AI call.',
+  },
+]
+
+const UPDATES = [
+  {
+    title: 'FTRunner-primary preprocessing',
+    body: 'ftrunnerlog01.txt is the source of truth for identity, steps, duration, result, and failure fields. SIMS .itf files are no longer used as the authority.',
+  },
+  {
+    title: 'Redacted product artifacts',
+    body: 'Each batch writes one redacted JSON artifact per product in the job work area. Manager metrics use compact PASS records; failed records keep the details needed for diagnosis.',
+  },
+  {
+    title: 'Failure evidence from DebugLog',
+    body: 'For failed PAN, HST, Aguila, and related flows, Co-Trace safely searches nested zip archives for DebugLog.txt and extracts a bounded excerpt around the FTRunner failure signal.',
+  },
+  {
+    title: 'APSE abort detection',
+    body: 'APSE runs with no done block now use a dynamic per-product and OPID threshold based only on explicit PASS durations. Very short aborts are marked FAIL while genuine no-done-block runs remain PASS.',
   },
 ]
 
@@ -45,12 +64,21 @@ export default function About() {
       <Card className="p-8 mb-8">
         <p className="text-ink leading-relaxed">
           Co-Trace turns raw manufacturing test logs into clear, audience-specific insights.
-          Upload a batch of FTRunner logs and the app parses every unit run, distinguishes
-          first-pass, retry-pass, and consistently-failing units, and produces an AI-assisted
-          root cause and suggested solution for each failure — all while keeping sensitive data
-          redacted.
+          Upload a batch of FTRunner logs and the app parses every unit run, protects sensitive
+          fields, separates first-pass, retry-pass, and failing units, and turns failed attempts
+          into actionable evidence for engineers and yield trends for managers.
         </p>
       </Card>
+
+      <h2 className="font-display text-2xl font-bold text-ink mb-4">Current updates</h2>
+      <div className="grid gap-4 mb-8">
+        {UPDATES.map((item) => (
+          <Card key={item.title} className="p-5">
+            <h3 className="font-display font-bold text-ink">{item.title}</h3>
+            <p className="mt-1 text-sm text-muted leading-relaxed">{item.body}</p>
+          </Card>
+        ))}
+      </div>
 
       <h2 className="font-display text-2xl font-bold text-ink mb-4">What it does</h2>
       <div className="grid gap-6 sm:grid-cols-2 mb-8">
@@ -82,6 +110,12 @@ export default function About() {
             </li>
           ))}
         </ul>
+        <div className="mt-5 rounded-lg border border-border bg-surface/70 p-4 text-sm text-muted leading-relaxed">
+          Runs without a done block are handled by mode. TestApp logs with no ERR line remain
+          implicit PASS. APSE logs use a dynamic threshold from explicit PASS durations for the
+          same product and OPID, with a 5 second floor, so near-instant FTRunner aborts are
+          classified as FAIL.
+        </div>
       </Card>
 
       <p className="text-sm text-muted text-center">
