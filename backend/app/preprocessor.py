@@ -18,6 +18,7 @@ import json
 import os
 import re
 import zipfile
+from collections import defaultdict
 from datetime import datetime
 from typing import Iterable, Protocol
 
@@ -289,13 +290,99 @@ def _zip_contains_debuglog(zip_path: str) -> bool:
 class FtrunnerPreprocessor:
     """ftrunnerlog-primary implementation. See module docstring."""
 
+    # Fraction of the average explicit-PASS duration used as the abort
+    # threshold for APSE no-done-block runs.  Runs whose duration is below
+    # this fraction of the per-(product, op_id) average are classified as
+    # FTRunner aborts (FAIL) rather than implicit PASSes.
+    _APSE_ABORT_FACTOR: float = 0.05
+    # Hard floor: regardless of the computed fraction, a run under this many
+    # seconds is always an abort (handles products with no explicit PASS refs).
+    _APSE_ABORT_FLOOR_S: float = 5.0
+
     def process_folder(self, root: str) -> list[UnitRecord]:
+        folders = list(self.iter_run_folders(root))
+        apse_thresholds = self._compute_apse_thresholds(folders)
         records: list[UnitRecord] = []
-        for run_folder in self.iter_run_folders(root):
+        for run_folder in folders:
             rec = self.process_run_folder(run_folder, root)
-            if rec is not None:
-                records.append(rec)
+            if rec is None:
+                continue
+            # Post-classify APSE implicit-PASS runs: compare duration against
+            # the per-(product, op_id) threshold derived from explicit PASSes.
+            # ERR-flagged and explicit-done-block runs are already correct.
+            if (
+                rec.result == "PASS"
+                and (rec.test_mode or "").upper() == "APSE"
+                and rec.duration_s < apse_thresholds.get(
+                    (rec.product_code or "", rec.op_id or ""),
+                    self._APSE_ABORT_FLOOR_S,
+                )
+            ):
+                threshold = apse_thresholds.get(
+                    (rec.product_code or "", rec.op_id or ""),
+                    self._APSE_ABORT_FLOOR_S,
+                )
+                rec = rec.model_copy(update={
+                    "result": "FAIL",
+                    "error_code": "UNKNOWN",
+                    "error_message": (
+                        f"FTRunner aborted before test completed "
+                        f"(duration: {rec.duration_s:.3f}s, "
+                        f"threshold: {threshold:.1f}s)."
+                    ),
+                })
+            records.append(rec)
         return records
+
+    @staticmethod
+    def _compute_apse_thresholds(
+        folders: list[str],
+    ) -> dict[tuple[str, str], float]:
+        """Pre-scan run folders to derive per-(product_code, op_id) abort
+        thresholds for APSE no-done-block runs.
+
+        Only explicit PASS runs (done block with Result=PASS) contribute to
+        the average, so the threshold reflects the expected duration of a
+        genuine passing test for that product/operation combination.
+
+        Threshold = max(_APSE_ABORT_FLOOR_S, avg_pass_duration * _APSE_ABORT_FACTOR).
+        Products/OPIDs with no explicit PASS reference fall back to the floor.
+        """
+        pass_durations: dict[tuple[str, str], list[float]] = defaultdict(list)
+        _re_total = re.compile(r"Total Test time\(s\):\s*([\d.]+)")
+        for folder in folders:
+            try:
+                files = os.listdir(folder)
+            except OSError:
+                continue
+            ft_files = [
+                f for f in files if FtrunnerPreprocessor._is_ftrunner(f)
+            ]
+            if not ft_files:
+                continue
+            text = _strip_ansi(_read(os.path.join(folder, ft_files[0])))
+            # Only APSE mode
+            mode_m = _RE_TEST_MODE.search(text)
+            if not mode_m or mode_m.group(1).upper() != "APSE":
+                continue
+            # Only explicit PASS done blocks
+            raw = _extract_kv_block(text, _RE_DONE_HEADER)
+            if not raw or (raw.get("Result") or "").upper() != "PASS":
+                continue
+            meta = _extract_kv_block(text, _RE_SCAN_HEADER)
+            key = (meta.get("PRODUCTCODE") or "", meta.get("OPID") or "")
+            dur_m = _re_total.search(text)
+            if dur_m:
+                pass_durations[key].append(float(dur_m.group(1)))
+
+        thresholds: dict[tuple[str, str], float] = {}
+        for key, durations in pass_durations.items():
+            avg = sum(durations) / len(durations)
+            thresholds[key] = max(
+                FtrunnerPreprocessor._APSE_ABORT_FLOOR_S,
+                avg * FtrunnerPreprocessor._APSE_ABORT_FACTOR,
+            )
+        return thresholds
 
     def find_incomplete_folders(self, root: str) -> list[str]:
         """Return relative paths of run folders that have no recognisable log.
