@@ -36,7 +36,7 @@ function uploadSummary(files) {
     return {
       title: paths[0],
       detail: 'ZIP archive ready',
-      names: [paths[0]],
+      items: [{ label: paths[0], file: files[0] }],
     }
   }
 
@@ -45,17 +45,38 @@ function uploadSummary(files) {
   )
 
   if (folderRoots.length) {
+    const shown = summarizeNames(folderRoots)
     return {
-      title: summarizeNames(folderRoots).join(', '),
+      title: shown.join(', '),
       detail: `${formatCount(files.length, 'file')} selected from ${formatCount(folderRoots.length, 'folder')}`,
-      names: summarizeNames(folderRoots),
+      items: shown.map((name) => ({ label: name, file: null })),
     }
   }
 
+  // Individual file picks — annotate duplicates with #N so the user can
+  // distinguish same-named files from different run folders.
+  const nameCount = {}
+  files.forEach((f) => { nameCount[f.name] = (nameCount[f.name] || 0) + 1 })
+  const allSame = Object.keys(nameCount).length === 1 && Object.values(nameCount)[0] === files.length
+
+  const counter = {}
+  const MAX_ITEMS = 20
+  const shown = files.slice(0, MAX_ITEMS)
+  const extra = files.length - shown.length
+  const items = shown.map((f) => {
+    let label = f.name
+    if (nameCount[f.name] > 1) {
+      counter[f.name] = (counter[f.name] || 0) + 1
+      label = `${f.name} #${counter[f.name]}`
+    }
+    return { label, file: f }
+  })
+  if (extra > 0) items.push({ label: `+ ${extra} more`, file: null })
+
   return {
-    title: summarizeNames(paths).join(', '),
+    title: allSame ? `${files[0].name} ×${files.length}` : summarizeNames(paths).join(', '),
     detail: `${formatCount(files.length, 'file')} ready`,
-    names: summarizeNames(paths),
+    items,
   }
 }
 
@@ -277,15 +298,24 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
                   Clear
                 </button>
               </div>
-              {selectedUpload.names.length > 1 && (
+              {selectedUpload.items.length > 1 && (
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {selectedUpload.names.map((name, index) => (
+                  {selectedUpload.items.map((item, index) => (
                     <span
-                      key={`${name}-${index}`}
-                      className="inline-block max-w-full truncate rounded-full border border-border bg-surface px-3 py-1 text-xs font-medium text-ink-2"
-                      title={name}
+                      key={index}
+                      className={[
+                        'inline-block max-w-full truncate rounded-full border border-border bg-surface px-3 py-1 text-xs font-medium text-ink-2 transition-colors',
+                        item.file ? 'cursor-pointer hover:border-accent hover:text-accent select-none' : '',
+                      ].join(' ')}
+                      title={item.file ? `Double-click to open: ${item.label}` : item.label}
+                      onDoubleClick={() => {
+                        if (!item.file) return
+                        const url = URL.createObjectURL(item.file)
+                        window.open(url, '_blank')
+                        setTimeout(() => URL.revokeObjectURL(url), 30000)
+                      }}
                     >
-                      {name}
+                      {item.label}
                     </span>
                   ))}
                 </div>
