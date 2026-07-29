@@ -19,26 +19,7 @@ const FEATURES = [
   {
     icon: '🔒',
     title: 'Private by design',
-    body: 'Credentials, IPs, hostnames, usernames, MAC addresses, and serials are redacted before analysis. Passing units never trigger an AI call.',
-  },
-]
-
-const UPDATES = [
-  {
-    title: 'FTRunner-primary preprocessing',
-    body: 'ftrunnerlog01.txt is the source of truth for identity, steps, duration, result, and failure fields. SIMS .itf files are no longer used as the authority.',
-  },
-  {
-    title: 'Redacted product artifacts',
-    body: 'Each batch writes one redacted JSON artifact per product in the job work area. Manager metrics use compact PASS records; failed records keep the details needed for diagnosis.',
-  },
-  {
-    title: 'Failure evidence from DebugLog',
-    body: 'For failed PAN, HST, Aguila, and related flows, Co-Trace safely searches nested zip archives for DebugLog.txt and extracts a bounded excerpt around the FTRunner failure signal.',
-  },
-  {
-    title: 'APSE abort detection',
-    body: 'APSE runs with no done block now use a dynamic per-product and OPID threshold based only on explicit PASS durations. Very short aborts are marked FAIL while genuine no-done-block runs remain PASS.',
+    body: 'Credentials, IPs, hostnames, usernames, and MAC addresses are scrubbed from stored artifacts and from text sent to the AI. Serial numbers are retained in stored data for yield math but are scrubbed before any AI call. Passing units never trigger an AI call.',
   },
 ]
 
@@ -69,16 +50,6 @@ export default function About() {
           into actionable evidence for engineers and yield trends for managers.
         </p>
       </Card>
-
-      <h2 className="font-display text-2xl font-bold text-ink mb-4">Current updates</h2>
-      <div className="grid gap-4 mb-8">
-        {UPDATES.map((item) => (
-          <Card key={item.title} className="p-5">
-            <h3 className="font-display font-bold text-ink">{item.title}</h3>
-            <p className="mt-1 text-sm text-muted leading-relaxed">{item.body}</p>
-          </Card>
-        ))}
-      </div>
 
       <h2 className="font-display text-2xl font-bold text-ink mb-4">What it does</h2>
       <div className="grid gap-6 sm:grid-cols-2 mb-8">
