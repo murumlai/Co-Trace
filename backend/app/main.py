@@ -20,6 +20,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from . import aggregator
 from .auth import get_auth, require_user
@@ -363,7 +364,7 @@ async def knowledge_upload(
     except OSError as exc:
         raise HTTPException(400, f"Could not store document: {exc}") from exc
     log.info("Product doc uploaded: %s (%s bytes).", os.path.basename(dest), size)
-    manifest = _rebuild_knowledge(ingestion, retriever)
+    manifest = await run_in_threadpool(_build_uploaded_document_knowledge, ingestion, retriever, dest)
     return {"filename": os.path.basename(dest), "manifest": manifest}
 
 
@@ -413,6 +414,19 @@ def knowledge_delete_pack(user: str = Depends(require_user),  # noqa: ARG001
 def _rebuild_knowledge(ingestion: Any, retriever: Any) -> dict | None:
     try:
         manifest = ingestion.rebuild()
+    except ProductKnowledgeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    retriever.invalidate()
+    return manifest.model_dump()
+
+
+def _build_uploaded_document_knowledge(ingestion: Any, retriever: Any, path: str) -> dict | None:
+    doc = parsing.describe_document(path, source_root=settings.PRODUCT_KNOWLEDGE_DOCS_DIR)
+    try:
+        if hasattr(ingestion, "build"):
+            manifest = ingestion.build([doc])
+        else:
+            manifest = ingestion.rebuild()
     except ProductKnowledgeError as exc:
         raise HTTPException(503, str(exc)) from exc
     retriever.invalidate()
