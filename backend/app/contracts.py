@@ -15,9 +15,8 @@ from collections.abc import Callable, Iterable
 from typing import Any, Protocol
 
 # Forward references avoid circular imports; callers import the concrete types.
+from .knowledge.models import KnowledgeContext
 from .models import LlmAnalysisResult, UnitRecord
-
-
 # ---------------------------------------------------------------------------
 # Type aliases re-exported for convenience
 # ---------------------------------------------------------------------------
@@ -157,6 +156,12 @@ class AnalysisCache(Protocol):
         context: str,
         context_source: str,
         signature: str,
+        product_code: str | None = None,
+        op_id: str | None = None,
+        failing_step: str | None = None,
+        knowledge_hash: str | None = None,
+        knowledge_sections: str | None = None,
+        knowledge_categories: str | None = None,
     ) -> str:
         """Derive a deterministic cache key from the analysis inputs."""
         ...
@@ -206,5 +211,27 @@ class PayloadCleaner(Protocol):
 
         Returns the names of removed items. Must be a no-op when cleanup is
         disabled via configuration.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Product-knowledge contract
+# ---------------------------------------------------------------------------
+
+class ProductKnowledgeRetriever(Protocol):
+    """Retrieves curated product context for a single failed record.
+
+    The analyzer depends only on this narrow method; the concrete
+    ``LexicalKnowledgeRetriever`` loads the generated pack and reads only the
+    matched curated sections (never whole documents).
+    """
+
+    def retrieve(self, record: UnitRecord) -> KnowledgeContext:
+        """Return curated product context matched by ``record.product_code``.
+
+        Must always return a ``KnowledgeContext`` — including when the feature
+        is disabled, the record has no product code, or no knowledge exists —
+        so callers can branch on ``match_status`` without exception handling.
         """
         ...

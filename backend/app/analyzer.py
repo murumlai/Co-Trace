@@ -7,12 +7,14 @@ unique signature and the result is cached on the job.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import logging
 import re
 from collections.abc import Callable
 
 from . import analysis_cache, llm_client, redaction
 from .job_registry import Job
+from .knowledge.models import KnowledgeContext
 from .models import LlmAnalysisResult, UnitRecord
 
 _WS = re.compile(r"\s+")
@@ -20,7 +22,7 @@ _NUM = re.compile(r"\d+")
 log = logging.getLogger("cotrace.analyzer")
 
 AnalysisReturn = tuple[str, str, str] | LlmAnalysisResult
-AnalyzeFailure = Callable[[str | None, str | None, str], AnalysisReturn]
+AnalyzeFailure = Callable[..., AnalysisReturn]
 AnalysisProgress = Callable[[int, int, str], None]
 
 
@@ -68,11 +70,14 @@ def analyze_job(
     analyze_failure: AnalyzeFailure = llm_client.analyze_with_metrics,
     progress_callback: AnalysisProgress | None = None,
     cache: object | None = None,
+    knowledge_retriever: object | None = None,
 ) -> None:
     """Populate root cause / solution for all failed units, using the cache.
 
     ``cache`` may be any object satisfying the ``AnalysisCache`` protocol.
     When ``None`` the module-level ``DiskAnalysisCache`` default is used.
+    ``knowledge_retriever`` (optional) supplies curated product context; when
+    ``None`` product-aware diagnosis is skipped.
     """
     failed = [rec for rec in job.records if rec.result == "FAIL"]
     total_signatures = len({signature_for(rec) for rec in failed})
@@ -102,6 +107,7 @@ def analyze_job(
             force=False,
             analyze_failure=analyze_failure,
             cache=cache,
+            knowledge_retriever=knowledge_retriever,
             progress_callback=(
                 lambda message: progress_callback(
                     len(completed_signatures),
@@ -148,6 +154,7 @@ def _analyze_unit(
     progress_index: int = 1,
     progress_total: int = 1,
     cache: object | None = None,
+    knowledge_retriever: object | None = None,
 ) -> str:
     from . import analysis_cache as _ac_module  # avoid circular at import time
     _cache: object = cache if cache is not None else _ac_module._default_cache
@@ -156,12 +163,20 @@ def _analyze_unit(
     err_msg, snippet, context_source = _redacted_context(rec)
     rec.redacted_snippet = snippet
     rec.analysis_context_source = context_source
+
+    knowledge = _retrieve_knowledge(rec, knowledge_retriever)
     cache_key = _cache.make_key(
         error_code=rec.error_code,
         error_message=err_msg,
         context=snippet,
         context_source=context_source,
         signature=sig,
+        product_code=rec.product_code,
+        op_id=rec.op_id,
+        failing_step=rec.failing_step,
+        knowledge_hash=knowledge.knowledge_hash if knowledge else None,
+        knowledge_sections=",".join(rec.knowledge_section_ids),
+        knowledge_categories=",".join(rec.knowledge_categories),
     )
     rec.analysis_cache_key = cache_key
 
@@ -197,7 +212,10 @@ def _analyze_unit(
         sig,
         force,
     )
-    analysis_result = _coerce_analysis_result(analyze_failure(rec.error_code, err_msg, snippet))
+    knowledge_prompt = knowledge.context_text if knowledge and knowledge.context_text else None
+    analysis_result = _coerce_analysis_result(
+        _call_analyze(analyze_failure, rec.error_code, err_msg, snippet, knowledge_prompt)
+    )
     root, solution, source = analysis_result.as_tuple()
     job.llm_metrics.merge(analysis_result.metrics)
     job.signature_cache[sig] = (root, solution, source)
@@ -217,10 +235,65 @@ def _analyze_unit(
             "unit_id": rec.unit_id,
             "product_code": rec.product_code,
             "failing_step": rec.failing_step,
+            "op_id": rec.op_id,
+            "knowledge_hash": rec.knowledge_hash,
+            "knowledge_match_status": rec.knowledge_match_status,
+            "knowledge_section_ids": ",".join(rec.knowledge_section_ids),
+            "knowledge_categories": ",".join(rec.knowledge_categories),
         },
     )
     log.info("Analysis result for unit %s came from %s.", rec.unit_id, source)
     return source
+
+
+def _retrieve_knowledge(
+    rec: UnitRecord, knowledge_retriever: object | None
+) -> KnowledgeContext | None:
+    """Retrieve curated product context and persist its metadata on ``rec``."""
+    if knowledge_retriever is None:
+        return None
+    try:
+        knowledge = knowledge_retriever.retrieve(rec)
+    except Exception:  # noqa: BLE001 - knowledge retrieval must never break analysis
+        log.exception("Product-knowledge retrieval failed for unit %s.", rec.unit_id)
+        return None
+    rec.knowledge_used = bool(knowledge.matched)
+    rec.knowledge_hash = knowledge.knowledge_hash or None
+    rec.knowledge_match_status = knowledge.match_status
+    rec.knowledge_section_ids = list(knowledge.matched_section_ids)
+    rec.knowledge_categories = list(knowledge.matched_categories)
+    return knowledge
+
+
+def _call_analyze(
+    analyze_failure: AnalyzeFailure,
+    error_code: str | None,
+    error_message: str | None,
+    snippet: str,
+    knowledge_context: str | None,
+) -> AnalysisReturn:
+    """Call ``analyze_failure``, passing curated product context only to
+    callables that accept it. Legacy 3-argument stubs are called unchanged."""
+    if knowledge_context and _accepts_knowledge_arg(analyze_failure):
+        return analyze_failure(error_code, error_message, snippet, knowledge_context)
+    return analyze_failure(error_code, error_message, snippet)
+
+
+def _accepts_knowledge_arg(fn: AnalyzeFailure) -> bool:
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return False
+    positional = 0
+    for param in sig.parameters.values():
+        if param.kind is inspect.Parameter.VAR_POSITIONAL:
+            return True
+        if param.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            positional += 1
+    return positional >= 4
 
 
 def _coerce_analysis_result(result: AnalysisReturn) -> LlmAnalysisResult:
@@ -234,13 +307,18 @@ def reanalyze_unit(
     job: Job,
     unit_id: str,
     analyze_failure: AnalyzeFailure = llm_client.analyze_with_metrics,
+    knowledge_retriever: object | None = None,
 ) -> UnitRecord | None:
     """Force a fresh per-unit LLM call, bypassing the signature cache."""
     for rec in job.records:
         if rec.unit_id == unit_id:
             if rec.result != "FAIL":
                 return rec
-            _analyze_unit(job, rec, force=True, analyze_failure=analyze_failure)
+            _analyze_unit(
+                job, rec, force=True,
+                analyze_failure=analyze_failure,
+                knowledge_retriever=knowledge_retriever,
+            )
             return rec
     return None
 
@@ -263,9 +341,11 @@ class AnalyzerService:
         self,
         analyze_failure: AnalyzeFailure | None = None,
         cache: object | None = None,
+        knowledge_retriever: object | None = None,
     ) -> None:
         self._analyze_failure: AnalyzeFailure = analyze_failure or llm_client.analyze_with_metrics
         self._cache = cache  # None ⇒ module default inside analyze_job/_analyze_unit
+        self._knowledge_retriever = knowledge_retriever
 
     def analyze_job(
         self,
@@ -278,6 +358,7 @@ class AnalyzerService:
             analyze_failure=self._analyze_failure,
             progress_callback=progress_callback,
             cache=self._cache,
+            knowledge_retriever=self._knowledge_retriever,
         )
 
     def reanalyze_unit(self, job: Job, unit_id: str) -> UnitRecord | None:
@@ -290,6 +371,7 @@ class AnalyzerService:
                     job, rec, force=True,
                     analyze_failure=self._analyze_failure,
                     cache=self._cache,
+                    knowledge_retriever=self._knowledge_retriever,
                 )
                 return rec
         return None

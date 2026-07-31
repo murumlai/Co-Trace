@@ -283,6 +283,27 @@ _STOPWORDS = {
 
 def derive_keywords(section: KnowledgeSection) -> list[str]:
     """Deterministic keyword list from curated fields (never raw doc text)."""
+    ranked = sorted(_tokenize_fields(section).items(), key=lambda kv: (-kv[1], kv[0]))
+    return [tok for tok, _ in ranked[:40]]
+
+
+def keyword_weights(section: KnowledgeSection) -> dict[str, float]:
+    """Token -> weight map for the retrieval index (top 40 curated tokens)."""
+    ranked = sorted(_tokenize_fields(section).items(), key=lambda kv: (-kv[1], kv[0]))
+    return {tok: float(count) for tok, count in ranked[:40]}
+
+
+def tokenize(text: str) -> set[str]:
+    """Query-side tokenizer, matching the index tokenizer's rules."""
+    out: set[str] = set()
+    for match in _TOKEN_RE.finditer((text or "").lower()):
+        tok = match.group(0)
+        if tok not in _STOPWORDS:
+            out.add(tok)
+    return out
+
+
+def _tokenize_fields(section: KnowledgeSection) -> dict[str, int]:
     parts: list[str] = [section.summary, section.heading or ""]
     for kf in section.known_failures:
         parts.extend(
@@ -299,5 +320,4 @@ def derive_keywords(section: KnowledgeSection) -> list[str]:
             if tok in _STOPWORDS:
                 continue
             tokens[tok] = tokens.get(tok, 0) + 1
-    ranked = sorted(tokens.items(), key=lambda kv: (-kv[1], kv[0]))
-    return [tok for tok, _ in ranked[:40]]
+    return tokens

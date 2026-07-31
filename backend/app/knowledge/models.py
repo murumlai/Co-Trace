@@ -193,6 +193,8 @@ class RetrievalMatch(BaseModel):
     summary: str = ""
     score: float = 0.0
     known_failures: list[KnownFailureEntry] = Field(default_factory=list)
+    acronyms: list[AcronymDefinition] = Field(default_factory=list)
+    limits: list[LimitSpecRecord] = Field(default_factory=list)
     source_filename: str = ""
 
 

@@ -63,6 +63,13 @@ class UnitRecord(BaseModel):
     analysis_context_source: Optional[str] = None  # "debug_excerpt" | "ftrunner_snippet" | "error_message"
     analysis_cache_key: Optional[str] = None
 
+    # Product-aware diagnosis metadata (populated during failure analysis)
+    knowledge_used: bool = False
+    knowledge_hash: Optional[str] = None
+    knowledge_match_status: Optional[str] = None
+    knowledge_section_ids: list[str] = Field(default_factory=list)
+    knowledge_categories: list[str] = Field(default_factory=list)
+
 
 class LlmModelMetrics(BaseModel):
     model: Optional[str] = None
