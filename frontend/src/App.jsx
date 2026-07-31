@@ -5,6 +5,7 @@ import Login from './pages/Login'
 import Home from './pages/Home'
 import Engineer from './pages/Engineer'
 import Manager from './pages/Manager'
+import Knowledge from './pages/Knowledge'
 import About from './pages/About'
 import { debugLog, log } from './logger'
 
@@ -12,6 +13,7 @@ const TABS = [
   ['home', 'Home'],
   ['engineer', 'Engineer'],
   ['manager', 'Manager'],
+  ['knowledge', 'Knowledge'],
   ['about', 'About'],
 ]
 
@@ -298,6 +300,7 @@ function Shell() {
         )}
         {tab === 'engineer' && <Engineer jobId={jobId} />}
         {tab === 'manager' && <Manager jobId={jobId} />}
+        {tab === 'knowledge' && <Knowledge />}
         {tab === 'about' && <About />}
       </main>
     </div>

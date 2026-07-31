@@ -31,6 +31,13 @@ class ProductKnowledgeError(RuntimeError):
     """Raised when knowledge ingestion cannot proceed (e.g. no LLM backend)."""
 
 
+def is_llm_backend_available() -> bool:
+    """True when an LLM backend is available for ingestion summarization."""
+    from .. import copilot_client  # noqa: PLC0415
+
+    return copilot_client.is_available()
+
+
 # (system_prompt, user_prompt, model) -> raw model content
 ChatFn = Callable[[str, str], str]
 

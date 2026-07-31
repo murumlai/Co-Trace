@@ -67,4 +67,15 @@ export const api = {
   clearAnalysisCache: (cacheKey) =>
     request(`/api/cache/analysis/${cacheKey}`, { method: 'DELETE' }),
   clearJobCache: (jobId) => request(`/api/jobs/${jobId}/cache`, { method: 'DELETE' }),
+  // Product-aware diagnosis: knowledge pack management.
+  knowledge: () => request('/api/knowledge'),
+  knowledgeScan: () => request('/api/knowledge/scan'),
+  knowledgeSections: (product) =>
+    request(`/api/knowledge/sections${product ? `?product=${encodeURIComponent(product)}` : ''}`),
+  knowledgeRebuild: () => request('/api/knowledge/rebuild', { method: 'POST' }),
+  knowledgeUpload: (formData, options = {}) =>
+    request('/api/knowledge/upload', { method: 'POST', body: formData, ...options }),
+  knowledgeDeleteDocument: (docId) =>
+    request(`/api/knowledge/documents/${docId}`, { method: 'DELETE' }),
+  knowledgeDeletePack: () => request('/api/knowledge', { method: 'DELETE' }),
 }

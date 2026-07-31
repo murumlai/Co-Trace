@@ -409,6 +409,36 @@ function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearing
   )
 }
 
+const KNOWLEDGE_CATEGORY_LABEL = {
+  debug_learning: 'debug learning',
+  hld: 'HLD',
+  product_overview: 'product overview',
+  uncategorized: 'uncategorized',
+}
+
+function KnowledgeBadge({ attempt }) {
+  const status = attempt.knowledge_match_status
+  if (!status || status === 'disabled') return null
+  const categories = attempt.knowledge_categories || []
+  const sectionCount = (attempt.knowledge_section_ids || []).length
+  if (status === 'matched' && attempt.knowledge_used) {
+    const cats = categories.map((c) => KNOWLEDGE_CATEGORY_LABEL[c] || c).join(', ')
+    return (
+      <div className="mb-3 text-xs text-teal">
+        <span className="font-semibold">◆ Product knowledge used:</span>{' '}
+        {cats || 'matched'} · {sectionCount} section{sectionCount === 1 ? '' : 's'}
+      </div>
+    )
+  }
+  const message = {
+    no_match: 'Product knowledge: no matching section for this failure',
+    no_product_knowledge: 'No product knowledge for this product code',
+    no_product_code: 'No product code — product knowledge not applied',
+  }[status]
+  if (!message) return null
+  return <div className="mb-3 text-xs text-muted">◇ {message}</div>
+}
+
 function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache }) {
   const canClearCache =
     attempt.analysis_cache_key && ['llm', 'local-cache'].includes(attempt.analysis_source)
@@ -437,6 +467,8 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
           {attempt.error_message || ''}
         </p>
       )}
+
+      <KnowledgeBadge attempt={attempt} />
 
       <div className="text-xs uppercase tracking-wide text-muted mb-1">
         Root cause

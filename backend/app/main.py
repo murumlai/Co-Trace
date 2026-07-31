@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import time
 import uuid
@@ -23,7 +24,17 @@ from fastapi.staticfiles import StaticFiles
 from . import aggregator
 from .auth import get_auth, require_user
 from .config import settings
-from .dependencies import get_analysis_cache, get_analyzer_service, get_orchestrator, get_registry
+from .dependencies import (
+    get_analysis_cache,
+    get_analyzer_service,
+    get_knowledge_ingestion,
+    get_knowledge_retriever,
+    get_knowledge_store,
+    get_orchestrator,
+    get_registry,
+)
+from .knowledge import parsing
+from .knowledge.summarizer import ProductKnowledgeError, is_llm_backend_available
 from .logging_config import setup_backend_logging, write_frontend_log
 from .models import FrontendLogRequest, LoginRequest, LoginResponse
 from .record_views import group_units_by_serial
@@ -252,6 +263,160 @@ def list_analysis_cache(user: str = Depends(require_user),
 def clear_analysis_cache(cache_key: str, user: str = Depends(require_user),
                          cache: Any = Depends(get_analysis_cache)) -> dict:  # noqa: ARG001
     return {"cache_key": cache_key, "deleted": cache.delete_entry(cache_key)}
+
+
+# --------------------------------------------------------------------------
+# Product-aware diagnosis: knowledge pack management
+# --------------------------------------------------------------------------
+_ALLOWED_DOC_EXTS = {".pdf", ".docx"}
+
+
+def _sanitize_filename(name: str) -> str:
+    base = os.path.basename((name or "").replace("\\", "/"))
+    cleaned = re.sub(r"[^A-Za-z0-9._ -]", "_", base).strip()
+    return cleaned or "document"
+
+
+def _knowledge_status(store: Any) -> dict:
+    manifest = store.load_manifest()
+    return {
+        "enabled": settings.PRODUCT_KNOWLEDGE_ENABLED,
+        "llm_available": is_llm_backend_available(),
+        "summary_model": settings.PRODUCT_KNOWLEDGE_SUMMARY_MODEL,
+        "source_dirs": settings.PRODUCT_KNOWLEDGE_SOURCE_DIRS,
+        "docs_dir": settings.PRODUCT_KNOWLEDGE_DOCS_DIR,
+        "manifest": manifest.model_dump() if manifest else None,
+    }
+
+
+@app.get("/api/knowledge")
+def knowledge_status(user: str = Depends(require_user),  # noqa: ARG001
+                     store: Any = Depends(get_knowledge_store)) -> dict:
+    return _knowledge_status(store)
+
+
+@app.get("/api/knowledge/scan")
+def knowledge_scan(user: str = Depends(require_user),  # noqa: ARG001
+                   store: Any = Depends(get_knowledge_store)) -> dict:  # noqa: ARG001
+    docs = parsing.scan_source_documents()
+    return {
+        "documents": [
+            {
+                "doc_id": d.doc_id,
+                "filename": d.filename,
+                "product_code": d.product_code,
+                "category": d.category,
+                "source_root": d.source_root,
+                "size_bytes": d.size_bytes,
+                "warnings": d.warnings,
+            }
+            for d in docs
+        ]
+    }
+
+
+@app.get("/api/knowledge/sections")
+def knowledge_sections(product: str | None = None,
+                       user: str = Depends(require_user),  # noqa: ARG001
+                       store: Any = Depends(get_knowledge_store)) -> dict:
+    sections = store.iter_sections()
+    if product:
+        sections = [s for s in sections if (s.product_code or "UNKNOWN") == product]
+    return {"sections": [s.model_dump() for s in sections]}
+
+
+@app.get("/api/knowledge/sections/{section_id}")
+def knowledge_section(section_id: str,
+                      user: str = Depends(require_user),  # noqa: ARG001
+                      store: Any = Depends(get_knowledge_store)) -> dict:
+    for section in store.iter_sections():
+        if section.section_id == section_id:
+            return section.model_dump()
+    raise HTTPException(404, "Section not found")
+
+
+@app.post("/api/knowledge/upload")
+async def knowledge_upload(
+    file: UploadFile = File(...),
+    user: str = Depends(require_user),  # noqa: ARG001
+    ingestion: Any = Depends(get_knowledge_ingestion),
+    retriever: Any = Depends(get_knowledge_retriever),
+) -> dict:
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in _ALLOWED_DOC_EXTS:
+        raise HTTPException(400, f"Unsupported document type: {ext or 'unknown'} (PDF/DOCX only)")
+    os.makedirs(settings.PRODUCT_KNOWLEDGE_DOCS_DIR, exist_ok=True)
+    dest = os.path.join(settings.PRODUCT_KNOWLEDGE_DOCS_DIR, _sanitize_filename(file.filename))
+    size = 0
+    limit = settings.PRODUCT_KNOWLEDGE_UPLOAD_MAX_BYTES
+    try:
+        with open(dest, "wb") as fh:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > limit:
+                    fh.close()
+                    os.remove(dest)
+                    raise HTTPException(400, f"Document exceeds size limit ({limit} bytes)")
+                fh.write(chunk)
+    except HTTPException:
+        raise
+    except OSError as exc:
+        raise HTTPException(400, f"Could not store document: {exc}") from exc
+    log.info("Product doc uploaded: %s (%s bytes).", os.path.basename(dest), size)
+    manifest = _rebuild_knowledge(ingestion, retriever)
+    return {"filename": os.path.basename(dest), "manifest": manifest}
+
+
+@app.post("/api/knowledge/rebuild")
+def knowledge_rebuild(user: str = Depends(require_user),  # noqa: ARG001
+                      ingestion: Any = Depends(get_knowledge_ingestion),
+                      retriever: Any = Depends(get_knowledge_retriever)) -> dict:
+    return {"manifest": _rebuild_knowledge(ingestion, retriever)}
+
+
+@app.delete("/api/knowledge/documents/{doc_id}")
+def knowledge_delete_document(doc_id: str,
+                              user: str = Depends(require_user),  # noqa: ARG001
+                              ingestion: Any = Depends(get_knowledge_ingestion),
+                              retriever: Any = Depends(get_knowledge_retriever)) -> dict:
+    docs_dir = settings.PRODUCT_KNOWLEDGE_DOCS_DIR
+    removed = None
+    if os.path.isdir(docs_dir):
+        for name in os.listdir(docs_dir):
+            path = os.path.join(docs_dir, name)
+            if not os.path.isfile(path):
+                continue
+            if parsing.describe_document(path, source_root=docs_dir).doc_id == doc_id:
+                os.remove(path)
+                removed = name
+                break
+    if removed is None:
+        raise HTTPException(
+            404,
+            "Document not found among uploaded product docs "
+            "(only uploaded docs are deletable).",
+        )
+    log.info("Deleted product doc %s (%s).", doc_id, removed)
+    return {"deleted": removed, "manifest": _rebuild_knowledge(ingestion, retriever)}
+
+
+@app.delete("/api/knowledge")
+def knowledge_delete_pack(user: str = Depends(require_user),  # noqa: ARG001
+                          store: Any = Depends(get_knowledge_store),
+                          retriever: Any = Depends(get_knowledge_retriever)) -> dict:
+    store.delete_pack()
+    retriever.invalidate()
+    log.info("Deleted the entire product-knowledge pack.")
+    return {"ok": True}
+
+
+def _rebuild_knowledge(ingestion: Any, retriever: Any) -> dict | None:
+    try:
+        manifest = ingestion.rebuild()
+    except ProductKnowledgeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    retriever.invalidate()
+    return manifest.model_dump()
 
 
 @app.get("/api/health")
