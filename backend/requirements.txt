@@ -4,6 +4,12 @@ python-multipart>=0.0.9
 httpx>=0.27.2
 pydantic>=2.11.0
 
+# Product-aware diagnosis: parse supporting product docs (PDF/DOCX) at
+# ingestion. PPTX/XLSX/legacy Office support is a planned parser-adapter
+# extension and is intentionally not required here.
+pypdf>=4.2.0
+python-docx>=1.1.2
+
 # Optional: GitHub Copilot SDK provider (LLM_PROVIDER=copilot_sdk).
 # Requires `copilot auth login` on the host and proxy access where applicable.
 github-copilot-sdk==0.2.0

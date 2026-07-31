@@ -11,6 +11,15 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+# Repo root = two levels above this file (backend/app/config.py -> repo root).
+# Product-knowledge artifacts are generated here regardless of the process CWD.
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def _repo_path(*parts: str) -> str:
+    return os.path.join(_REPO_ROOT, *parts)
+
+
 class Settings:
     # --- LLM provider selection ---
     # Routes failed-unit diagnosis. One of: "github_models" | "copilot_sdk" |
@@ -82,6 +91,59 @@ class Settings:
     PREPROCESSED_JSON_FORMAT: str = os.getenv("PREPROCESSED_JSON_FORMAT", "compact")  # compact | legacy
     PREPROCESSED_JSON_PRETTY: bool = _env_flag("PREPROCESSED_JSON_PRETTY", False)
     PREPROCESSED_JSON_GZIP: bool = _env_flag("PREPROCESSED_JSON_GZIP", False)
+
+    # --- Product-aware diagnosis (knowledge pack) ---
+    # When enabled, failed-unit diagnosis retrieves curated product summaries by
+    # PRODUCTCODE and sends only those summaries (never whole documents or raw
+    # extracted text) alongside the bounded redacted failure excerpt.
+    PRODUCT_KNOWLEDGE_ENABLED: bool = _env_flag("PRODUCT_KNOWLEDGE_ENABLED", True)
+    # Repo-root generated artifacts (gitignored; may contain proprietary summaries).
+    PRODUCT_KNOWLEDGE_MANIFEST_FILE: str = os.getenv(
+        "PRODUCT_KNOWLEDGE_MANIFEST_FILE", _repo_path("product_knowledge.json")
+    )
+    PRODUCT_KNOWLEDGE_INDEX_FILE: str = os.getenv(
+        "PRODUCT_KNOWLEDGE_INDEX_FILE", _repo_path("product_knowledge_index.json")
+    )
+    PRODUCT_KNOWLEDGE_SECTIONS_FILE: str = os.getenv(
+        "PRODUCT_KNOWLEDGE_SECTIONS_FILE", _repo_path("product_knowledge_sections.jsonl")
+    )
+    # Source folders scanned for supporting product documents. Both are optional.
+    PRODUCT_KNOWLEDGE_SOURCE_DIRS: list[str] = [
+        p for p in os.getenv(
+            "PRODUCT_KNOWLEDGE_SOURCE_DIRS",
+            os.pathsep.join([_repo_path("Log_Files_Folder"), _repo_path("product_docs")]),
+        ).split(os.pathsep) if p.strip()
+    ]
+    # Curated-docs folder used by the Knowledge UI upload route.
+    PRODUCT_KNOWLEDGE_DOCS_DIR: str = os.getenv(
+        "PRODUCT_KNOWLEDGE_DOCS_DIR", _repo_path("product_docs")
+    )
+    # Filename globs treated as supported source documents.
+    PRODUCT_KNOWLEDGE_SCAN_GLOBS: list[str] = [
+        g for g in os.getenv(
+            "PRODUCT_KNOWLEDGE_SCAN_GLOBS", "*.pdf,*.docx"
+        ).split(",") if g.strip()
+    ]
+    # Retrieval / prompt budgets.
+    PRODUCT_KNOWLEDGE_TOP_K: int = int(os.getenv("PRODUCT_KNOWLEDGE_TOP_K", "4"))
+    PRODUCT_KNOWLEDGE_MAX_CONTEXT_CHARS: int = int(
+        os.getenv("PRODUCT_KNOWLEDGE_MAX_CONTEXT_CHARS", "4000")
+    )
+    # Sectioning bounds for parsed documents (chars).
+    PRODUCT_KNOWLEDGE_SECTION_MAX_CHARS: int = int(
+        os.getenv("PRODUCT_KNOWLEDGE_SECTION_MAX_CHARS", "6000")
+    )
+    PRODUCT_KNOWLEDGE_SECTION_MIN_CHARS: int = int(
+        os.getenv("PRODUCT_KNOWLEDGE_SECTION_MIN_CHARS", "200")
+    )
+    # Upload limits for the Knowledge UI (single-document uploads).
+    PRODUCT_KNOWLEDGE_UPLOAD_MAX_BYTES: int = int(
+        os.getenv("PRODUCT_KNOWLEDGE_UPLOAD_MAX_BYTES", str(50 * 1024 * 1024))
+    )
+    # Ingestion-time summarization model (GPT 5.4-mini per plan).
+    PRODUCT_KNOWLEDGE_SUMMARY_MODEL: str = os.getenv(
+        "PRODUCT_KNOWLEDGE_SUMMARY_MODEL", "gpt-5.4-mini"
+    )
 
     # --- CORS (dev) ---
     CORS_ORIGINS: list[str] = os.getenv(

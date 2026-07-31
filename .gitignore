@@ -23,3 +23,10 @@ frontend_Log.txt
 
 # Raw manufacturing logs / uploaded datasets
 Log_Files_Folder/
+
+# Product-aware diagnosis: generated knowledge pack + curated source docs.
+# These may contain proprietary summarized product information — keep local.
+product_knowledge.json
+product_knowledge_index.json
+product_knowledge_sections.jsonl
+product_docs/
