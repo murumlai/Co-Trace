@@ -71,9 +71,12 @@ def extract_product_code(filename: str) -> str | None:
 def detect_category(filename: str) -> DocumentCategory:
     """Classify a document by filename keywords (case-insensitive)."""
     name = os.path.basename(filename).lower()
+    # Tokenize on non-alphanumerics so `_fa_`/`_rca_` acronyms are found
+    # (underscores are word chars, so \b alone would miss them).
+    tokens = set(re.split(r"[^a-z0-9]+", name))
     if any(kw in name for kw in _DEBUG_LEARNING_KEYWORDS):
         return "debug_learning"
-    if any(re.search(rf"\b{kw}\b", name) for kw in _DEBUG_LEARNING_WORD_KEYWORDS):
+    if any(kw in tokens for kw in _DEBUG_LEARNING_WORD_KEYWORDS):
         return "debug_learning"
     if any(kw in name for kw in _HLD_KEYWORDS):
         return "hld"
@@ -266,9 +269,11 @@ def parse_document(doc: SourceDocument) -> tuple[str, list[ExtractedSection]]:
         for chunk in _chunk_text(text, max_chars):
             bounded.append((heading, chunk))
 
+    # Merge undersized *headingless* chunks forward; never merge away a headed
+    # section (that would lose document structure).
     merged: list[tuple[str | None, str]] = []
     for heading, text in bounded:
-        if merged and len(text) < min_chars:
+        if merged and heading is None and len(text) < min_chars:
             prev_heading, prev_text = merged[-1]
             if len(prev_text) + len(text) <= max_chars:
                 merged[-1] = (prev_heading, f"{prev_text}\n{text}")
