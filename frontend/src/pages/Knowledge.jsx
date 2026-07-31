@@ -70,6 +70,7 @@ export default function Knowledge() {
     setBusy(label)
     setError('')
     setNotice('')
+    setJob(null)
     try {
       await fn()
       await load()
