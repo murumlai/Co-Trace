@@ -105,6 +105,9 @@ cd backend
 
 # Measure preprocessed JSON size
 .\backend\.venv\Scripts\python.exe backend\scripts\measure_preprocessed.py "Log_Files_Folder\All_LogFiles_M95113-001"
+
+# Rebuild the product-knowledge pack from source docs (LLM required)
+.\backend\.venv\Scripts\python.exe backend\scripts\build_product_knowledge.py
 ```
 
 Use `npm run dev:debug` for verbose frontend API/navigation logging. If npm needs the Intel proxy:
@@ -134,6 +137,11 @@ Important environment variables:
 | `UPLOAD_ZIP_MAX_*` | varies | Limits root zip upload file count and uncompressed size. |
 | `ZIP_MAX_*` | varies | Limits nested DebugLog zip traversal size and depth. |
 | `PREPROCESSED_JSON_FORMAT` | `compact` | `compact` or `legacy`; optional gzip via `PREPROCESSED_JSON_GZIP`. |
+| `PRODUCT_KNOWLEDGE_ENABLED` | `1` | Enables product-aware diagnosis (curated summaries in prompts). |
+| `PRODUCT_KNOWLEDGE_SUMMARY_MODEL` | `gpt-5.4-mini` | Model that summarizes product docs at ingestion (LLM required). |
+| `PRODUCT_KNOWLEDGE_SOURCE_DIRS` | `Log_Files_Folder`, `product_docs` | Folders scanned for supporting PDF/DOCX docs (`os.pathsep`-joined). |
+| `PRODUCT_KNOWLEDGE_TOP_K` | `4` | Max curated sections retrieved per failure. |
+| `PRODUCT_KNOWLEDGE_MAX_CONTEXT_CHARS` | `4000` | Char budget for curated summaries sent to the model. |
 | `CORS_ORIGINS` | localhost dev origins | Allowed frontend origins in development. |
 
 Example:
@@ -145,6 +153,60 @@ $env:GITHUB_TOKEN = "<set-at-runtime-only>"
 ```
 
 See [backend/app/config.py](backend/app/config.py) for the full settings list and defaults.
+
+## Product-Aware Diagnosis
+
+Diagnosis can be grounded in proprietary card/product context. Supporting
+documents are preprocessed once into a curated, repo-root knowledge pack;
+runtime diagnosis never loads or sends whole documents — it matches a failed
+record to product knowledge by `PRODUCTCODE`, retrieves a few relevant curated
+summaries, and sends only those alongside the bounded, redacted failure excerpt.
+
+**Document workflow**
+
+- Place PDF/DOCX docs in `product_docs/` or alongside sample logs in
+  `Log_Files_Folder/`, or upload them from the **Knowledge** tab.
+- Filenames drive matching and categorization. The product code is the first
+  filename token when it looks like a code (e.g. `M79060-001`), otherwise the
+  first code found anywhere in the name. A document maps to a single product
+  code in v1.
+- Category is detected from filename keywords:
+  - `debug_learning` — `Debug`, `Support`, `Key Learning`, `Learning`,
+    `Failure`, `Troubleshooting`, `Lesson`, `Known Issue`, `FA`, `RCA`. These
+    receive the strongest retrieval boost (product-specific known failures/fixes).
+  - `hld` — `HLD`, `High Level Design`, `Architecture`.
+  - `product_overview` — `Card`, `Product`, `Overview`, `Board`, `Module`,
+    `Datasheet`, `User Guide`, `Manual`, `Spec`.
+  - `uncategorized` — anything else (lowest priority).
+- v1 extracts PDF and DOCX. PPTX/XLSX/legacy Office are planned parser adapters.
+
+**Ingestion and privacy boundary**
+
+- Sections are summarized at ingestion by `gpt-5.4-mini` (LLM required — a
+  rebuild fails fast if no LLM backend is available). Summaries become active
+  immediately.
+- Generated artifacts live at the repo root and are gitignored because they may
+  contain proprietary summarized content:
+  - `product_knowledge.json` — manifest (products, docs, hashes, category counts).
+  - `product_knowledge_index.json` — retrieval index partitioned by product,
+    with JSONL byte offsets.
+  - `product_knowledge_sections.jsonl` — one curated section-summary per line,
+    byte-offset addressable so runtime reads only matched sections.
+- No raw extracted document text is stored in the generated artifacts — only
+  curated summaries, section metadata, acronyms, limits/specs, and known-failure
+  entries.
+
+**Rebuild and cache invalidation**
+
+- Rebuild from the **Knowledge** tab or with
+  `backend/scripts/build_product_knowledge.py`.
+- Each product's knowledge has a hash. The analysis cache key folds in the
+  product code, knowledge hash, and matched section/category mix, so changing
+  product knowledge automatically invalidates stale diagnoses. The prompt/cache
+  version was bumped so pre-knowledge answers are not reused.
+- The Engineer view shows whether product knowledge was used, which categories
+  matched, and how many sections matched (or that no knowledge exists for the
+  product).
 
 ## Security and Storage
 
@@ -166,6 +228,7 @@ backend/app/
   job_registry.py     Disk-backed job state and TTL cleanup
   analyzer.py         Failure signature dedup, cache, provider routing
   llm_client.py       Offline, GitHub Models, and Copilot providers
+  knowledge/          Product-aware diagnosis (parsing, summarizer, retriever)
   aggregator.py       Manager metrics
   redaction.py        Sensitive-data scrubbing
   upload_storage.py   Upload and root-zip safety
@@ -176,6 +239,7 @@ frontend/src/
   pages/Home.jsx      Upload and progress UI
   pages/Engineer.jsx  Unit diagnostics
   pages/Manager.jsx   Yield analytics
+  pages/Knowledge.jsx Product-knowledge management (upload/rebuild/delete)
   pages/About.jsx     App summary and current behavior
   components/         UI primitives and terminal log viewer
 ```
@@ -198,6 +262,10 @@ Log_Files_Folder/
 backend/.venv/
 frontend/node_modules/
 frontend/dist/
+product_docs/
+product_knowledge.json
+product_knowledge_index.json
+product_knowledge_sections.jsonl
 .env
 ```
 
