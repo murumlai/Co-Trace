@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import shutil
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -20,7 +21,6 @@ from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.concurrency import run_in_threadpool
 
 from . import aggregator
 from .auth import get_auth, require_user
@@ -270,6 +270,9 @@ def clear_analysis_cache(cache_key: str, user: str = Depends(require_user),
 # Product-aware diagnosis: knowledge pack management
 # --------------------------------------------------------------------------
 _ALLOWED_DOC_EXTS = {".pdf", ".docx"}
+_KNOWLEDGE_JOB_LIMIT = 50
+_knowledge_job_lock = threading.Lock()
+_knowledge_jobs: dict[str, dict[str, Any]] = {}
 
 
 def _sanitize_filename(name: str) -> str:
@@ -338,6 +341,7 @@ def knowledge_section(section_id: str,
 
 @app.post("/api/knowledge/upload")
 async def knowledge_upload(
+    background: BackgroundTasks,
     file: UploadFile = File(...),
     user: str = Depends(require_user),  # noqa: ARG001
     ingestion: Any = Depends(get_knowledge_ingestion),
@@ -364,8 +368,17 @@ async def knowledge_upload(
     except OSError as exc:
         raise HTTPException(400, f"Could not store document: {exc}") from exc
     log.info("Product doc uploaded: %s (%s bytes).", os.path.basename(dest), size)
-    manifest = await run_in_threadpool(_build_uploaded_document_knowledge, ingestion, retriever, dest)
-    return {"filename": os.path.basename(dest), "manifest": manifest}
+    job = _create_knowledge_job("upload", os.path.basename(dest))
+    background.add_task(_run_uploaded_document_knowledge_job, job["job_id"], ingestion, retriever, dest)
+    return {"filename": os.path.basename(dest), "job_id": job["job_id"], "job": job}
+
+
+@app.get("/api/knowledge/jobs/{job_id}")
+def knowledge_job(job_id: str, user: str = Depends(require_user)) -> dict:  # noqa: ARG001
+    job = _knowledge_job_snapshot(job_id)
+    if job is None:
+        raise HTTPException(404, "Knowledge job not found")
+    return job
 
 
 @app.post("/api/knowledge/rebuild")
@@ -420,17 +433,97 @@ def _rebuild_knowledge(ingestion: Any, retriever: Any) -> dict | None:
     return manifest.model_dump()
 
 
-def _build_uploaded_document_knowledge(ingestion: Any, retriever: Any, path: str) -> dict | None:
+def _build_uploaded_document_knowledge(
+    ingestion: Any,
+    retriever: Any,
+    path: str,
+    progress: Any | None = None,
+) -> dict | None:
     doc = parsing.describe_document(path, source_root=settings.PRODUCT_KNOWLEDGE_DOCS_DIR)
     try:
         if hasattr(ingestion, "build"):
-            manifest = ingestion.build([doc])
+            manifest = ingestion.build([doc], progress=progress)
         else:
             manifest = ingestion.rebuild()
     except ProductKnowledgeError as exc:
         raise HTTPException(503, str(exc)) from exc
     retriever.invalidate()
     return manifest.model_dump()
+
+
+def _create_knowledge_job(kind: str, filename: str | None = None) -> dict:
+    job = {
+        "job_id": uuid.uuid4().hex,
+        "kind": kind,
+        "filename": filename,
+        "status": "pending",
+        "progress": {"processed": 0, "total": 1},
+        "message": "Queued",
+        "error": None,
+        "manifest": None,
+    }
+    with _knowledge_job_lock:
+        _knowledge_jobs[job["job_id"]] = job
+        while len(_knowledge_jobs) > _KNOWLEDGE_JOB_LIMIT:
+            oldest = next(iter(_knowledge_jobs))
+            _knowledge_jobs.pop(oldest, None)
+    return _copy_knowledge_job(job)
+
+
+def _knowledge_job_snapshot(job_id: str) -> dict | None:
+    with _knowledge_job_lock:
+        job = _knowledge_jobs.get(job_id)
+        return _copy_knowledge_job(job) if job else None
+
+
+def _update_knowledge_job(job_id: str, **updates: Any) -> None:
+    with _knowledge_job_lock:
+        job = _knowledge_jobs.get(job_id)
+        if job is None:
+            return
+        job.update(updates)
+
+
+def _copy_knowledge_job(job: dict[str, Any]) -> dict[str, Any]:
+    copied = dict(job)
+    copied["progress"] = dict(job.get("progress") or {})
+    return copied
+
+
+def _run_uploaded_document_knowledge_job(
+    job_id: str, ingestion: Any, retriever: Any, path: str
+) -> None:
+    filename = os.path.basename(path)
+    _update_knowledge_job(
+        job_id,
+        status="running",
+        progress={"processed": 0, "total": 1},
+        message=f"Preparing {filename}",
+    )
+
+    def progress(processed: int, total: int, message: str) -> None:
+        _update_knowledge_job(
+            job_id,
+            status="running",
+            progress={"processed": processed, "total": max(1, total)},
+            message=message,
+        )
+
+    try:
+        manifest = _build_uploaded_document_knowledge(ingestion, retriever, path, progress=progress)
+    except Exception as exc:  # noqa: BLE001 - surface ingestion failures through job status
+        detail = getattr(exc, "detail", None) or str(exc) or type(exc).__name__
+        log.exception("Knowledge upload job %s failed for %s.", job_id[:8], filename)
+        _update_knowledge_job(job_id, status="error", message=str(detail), error=str(detail))
+        return
+
+    _update_knowledge_job(
+        job_id,
+        status="done",
+        progress={"processed": 1, "total": 1},
+        message=f"Ingested {filename}",
+        manifest=manifest,
+    )
 
 
 @app.get("/api/health")

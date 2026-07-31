@@ -91,7 +91,7 @@ class KnowledgeIngestionService:
             meta.content_hash = content_hash
             if progress:
                 progress(i - 1, total, f"Summarizing {doc.filename} ({len(parsed_sections)} sections)")
-            doc_sections = self._summarize_sections(doc, parsed_sections, warnings, meta)
+            doc_sections = self._summarize_sections(doc, parsed_sections, warnings, meta, progress)
             meta.section_count = len(doc_sections)
             sections.extend(doc_sections)
             doc_metas.append(meta)
@@ -117,9 +117,11 @@ class KnowledgeIngestionService:
         parsed_sections: list,
         warnings: list[str],
         meta: SourceDocumentMeta,
+        progress: IngestionProgress | None = None,
     ) -> list[KnowledgeSection]:
         out: list[KnowledgeSection] = []
-        for section in parsed_sections:
+        total = len(parsed_sections)
+        for i, section in enumerate(parsed_sections, start=1):
             try:
                 curated = self._summarizer.summarize(section, doc.filename)
             except ProductKnowledgeError:
@@ -132,6 +134,8 @@ class KnowledgeIngestionService:
                 continue
             curated.keywords = summarizer_mod.derive_keywords(curated)
             out.append(curated)
+            if progress:
+                progress(i, total, f"Summarized {doc.filename} section {i}/{total}")
         return out
 
     def _build_manifest(

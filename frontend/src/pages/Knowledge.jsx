@@ -33,6 +33,7 @@ export default function Knowledge() {
   const [notice, setNotice] = useState('')
   const [sections, setSections] = useState([])
   const [openProduct, setOpenProduct] = useState(null)
+  const [job, setJob] = useState(null)
   const fileInput = useRef(null)
 
   const load = async () => {
@@ -90,12 +91,48 @@ export default function Knowledge() {
     const file = event.target.files?.[0]
     if (!file) return
     event.target.value = ''
-    runAction('upload', async () => {
+    uploadDocument(file)
+  }
+
+  const uploadDocument = async (file) => {
+    setBusy('upload')
+    setError('')
+    setNotice('')
+    setJob({
+      status: 'running',
+      message: `Uploading ${file.name}`,
+      progress: { processed: 0, total: 1 },
+    })
+    try {
       const form = new FormData()
       form.append('file', file)
-      await api.knowledgeUpload(form)
-      setNotice(`Uploaded and ingested ${file.name}.`)
-    })
+      const started = await api.knowledgeUpload(form)
+      if (started.job) setJob(started.job)
+      await pollKnowledgeJob(started.job_id, `Uploaded and ingested ${file.name}.`)
+    } catch (err) {
+      setError(err.message)
+      setBusy('')
+    }
+  }
+
+  const pollKnowledgeJob = async (jobId, successMessage) => {
+    if (!jobId) return
+    while (true) {
+      const current = await api.knowledgeJob(jobId)
+      setJob(current)
+      if (current.status === 'done') {
+        setNotice(successMessage)
+        await load()
+        setBusy('')
+        return
+      }
+      if (current.status === 'error') {
+        setError(current.error || current.message || 'Knowledge ingestion failed.')
+        setBusy('')
+        return
+      }
+      await new Promise((resolve) => setTimeout(resolve, 700))
+    }
   }
 
   const deleteDocument = (doc) =>
@@ -188,6 +225,8 @@ export default function Knowledge() {
         </Panel>
       )}
 
+      {busy && <KnowledgeProgress busy={busy} job={job} />}
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <StatCard label="Products" value={products.length} />
         <StatCard label="Documents" value={documents.length} />
@@ -230,7 +269,7 @@ export default function Knowledge() {
                     ))}
                   </div>
                 </div>
-                <Button onClick={() => toggleSections(p.product_code)} disabled={!!busy}>
+                <Button onClick={() => toggleSections(p.product_code)}>
                   {openProduct === p.product_code ? 'Hide sections' : 'View sections'}
                 </Button>
               </div>
@@ -298,6 +337,37 @@ export default function Knowledge() {
         </div>
       )}
     </div>
+  )
+}
+
+function KnowledgeProgress({ busy, job }) {
+  const progress = job?.progress || { processed: 0, total: 1 }
+  const total = Math.max(1, progress.total || 1)
+  const processed = Math.max(0, progress.processed || 0)
+  const pct = job?.status === 'done' ? 100 : Math.max(5, Math.min(99, Math.round((processed / total) * 100)))
+  const label = job?.message || (busy === 'rebuild' ? 'Rebuilding knowledge pack' : 'Working')
+  const detail = busy === 'upload'
+    ? 'Parsing the document and summarizing each section with the configured LLM.'
+    : 'This action can take a few minutes on larger document sets.'
+
+  return (
+    <Panel className="p-4 mb-6 border-accent/20 bg-accent/5">
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <div>
+          <p className="text-sm font-semibold text-ink">{label}</p>
+          <p className="text-xs text-muted">{detail}</p>
+        </div>
+        <span className="text-sm font-semibold text-accent">{pct}%</span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-surface-2 border border-border">
+        <div className="h-full rounded-full bg-accent transition-all duration-300" style={{ width: `${pct}%` }} />
+      </div>
+      {total > 1 && (
+        <p className="mt-2 text-xs text-muted">
+          {processed}/{total} sections summarized
+        </p>
+      )}
+    </Panel>
   )
 }
 
