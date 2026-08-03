@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
-import { Badge, Button, Card, Panel } from '../components/ui'
+import { Badge, Button, Card, Input, Panel, SegmentedControl } from '../components/ui'
 import { log } from '../logger'
 
 const CATEGORY_TONE = {
@@ -313,6 +313,8 @@ export default function Knowledge() {
         </div>
       )}
 
+      <AcronymGlossary />
+
       {manifest?.warnings?.length > 0 && (
         <Panel className="p-4 mt-6 border-warning/30 bg-warning/10">
           <p className="text-sm font-semibold text-warning mb-1">
@@ -404,3 +406,328 @@ function SectionPreview({ section }) {
     </div>
   )
 }
+
+const ACRONYM_STATUS_TONE = {
+  approved: 'pass',
+  needs_review: 'warn',
+  rejected: 'muted',
+}
+const ACRONYM_STATUS_LABEL = {
+  approved: 'Approved',
+  needs_review: 'Pending',
+  rejected: 'Rejected',
+}
+
+function acronymStatusBadge(status) {
+  return (
+    <Badge tone={ACRONYM_STATUS_TONE[status] || 'muted'} dot={false}>
+      {ACRONYM_STATUS_LABEL[status] || status}
+    </Badge>
+  )
+}
+
+const ACRONYM_STATUS_FILTERS = [
+  ['', 'All'],
+  ['needs_review', 'Pending'],
+  ['approved', 'Approved'],
+  ['rejected', 'Rejected'],
+]
+
+function AcronymGlossary() {
+  const [entries, setEntries] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [productFilter, setProductFilter] = useState('')
+  const [busy, setBusy] = useState('')
+  const [form, setForm] = useState({ acronym: '', definition: '', product_code: '', status: 'approved' })
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const data = await api.acronyms()
+      setEntries(data.entries || [])
+      setError('')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    load()
+  }, [])
+
+  const filtered = useMemo(() => {
+    const product = productFilter.trim().toLowerCase()
+    return entries.filter((e) => {
+      if (statusFilter && e.status !== statusFilter) return false
+      if (product) {
+        const scope = (e.product_code || 'global').toLowerCase()
+        if (!scope.includes(product) && !e.acronym.toLowerCase().includes(product)) return false
+      }
+      return true
+    })
+  }, [entries, statusFilter, productFilter])
+
+  const counts = useMemo(() => {
+    const c = { approved: 0, needs_review: 0, rejected: 0 }
+    entries.forEach((e) => {
+      c[e.status] = (c[e.status] || 0) + 1
+    })
+    return c
+  }, [entries])
+
+  const apply = async (entry, changes) => {
+    const key = `${entry.acronym}:${entry.product_code || ''}`
+    setBusy(key)
+    setError('')
+    setNotice('')
+    try {
+      await api.upsertAcronym({
+        acronym: entry.acronym,
+        product_code: entry.product_code || null,
+        definition: changes.definition ?? null,
+        status: changes.status,
+      })
+      await load()
+      setNotice(`${entry.acronym} ${changes.status === 'approved' ? 'approved' : 'updated'}.`)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const remove = async (entry) => {
+    const key = `${entry.acronym}:${entry.product_code || ''}`
+    setBusy(key)
+    setError('')
+    setNotice('')
+    try {
+      await api.deleteAcronym(entry.acronym, entry.product_code || undefined)
+      await load()
+      setNotice(`Deleted ${entry.acronym}.`)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const addEntry = async (event) => {
+    event.preventDefault()
+    const acronym = form.acronym.trim()
+    if (!acronym) {
+      setError('Acronym is required.')
+      return
+    }
+    if (form.status === 'approved' && !form.definition.trim()) {
+      setError('A definition is required to approve an acronym.')
+      return
+    }
+    setBusy('add')
+    setError('')
+    setNotice('')
+    try {
+      await api.upsertAcronym({
+        acronym,
+        definition: form.definition.trim() || null,
+        product_code: form.product_code.trim() || null,
+        status: form.status,
+      })
+      setForm({ acronym: '', definition: '', product_code: '', status: 'approved' })
+      await load()
+      setNotice(`Saved ${acronym.toUpperCase()}.`)
+      log('info', 'Acronym saved', { acronym })
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy('')
+    }
+  }
+
+  return (
+    <Card className="mt-8 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div>
+          <h2 className="font-display text-xl font-bold text-ink">Acronym glossary</h2>
+          <p className="mt-1 text-sm text-muted">
+            Approved expansions are injected into every failure diagnosis. Only{' '}
+            <span className="text-ink">approved</span> entries are used by the model — pending
+            acronyms are shown for review and never expanded until you approve them.
+          </p>
+        </div>
+        <div className="flex gap-2 text-xs text-muted">
+          <span>{counts.approved} approved</span>
+          <span>·</span>
+          <span className="text-warning">{counts.needs_review} pending</span>
+          <span>·</span>
+          <span>{counts.rejected} rejected</span>
+        </div>
+      </div>
+
+      {error && (
+        <Panel className="p-3 mb-3 border-danger/30 bg-danger/5">
+          <p className="text-sm text-danger">{error}</p>
+        </Panel>
+      )}
+      {notice && (
+        <Panel className="p-3 mb-3 border-teal/30 bg-teal/5">
+          <p className="text-sm text-teal">{notice}</p>
+        </Panel>
+      )}
+
+      <form onSubmit={addEntry} className="mb-4 grid grid-cols-1 gap-2 md:grid-cols-[110px_1fr_140px_140px_auto]">
+        <Input
+          placeholder="ACRONYM"
+          value={form.acronym}
+          onChange={(e) => setForm({ ...form, acronym: e.target.value })}
+        />
+        <Input
+          placeholder="Definition (required to approve)"
+          value={form.definition}
+          onChange={(e) => setForm({ ...form, definition: e.target.value })}
+        />
+        <Input
+          placeholder="Product (blank = global)"
+          value={form.product_code}
+          onChange={(e) => setForm({ ...form, product_code: e.target.value })}
+        />
+        <select
+          className="w-full bg-surface border border-border rounded-lg px-3 py-2.5 text-sm text-ink focus-ring"
+          value={form.status}
+          onChange={(e) => setForm({ ...form, status: e.target.value })}
+        >
+          <option value="approved">Approved</option>
+          <option value="needs_review">Pending</option>
+          <option value="rejected">Rejected</option>
+        </select>
+        <Button type="submit" variant="primary" disabled={busy === 'add'}>
+          {busy === 'add' ? 'Saving…' : 'Add'}
+        </Button>
+      </form>
+
+      <div className="flex flex-wrap items-center gap-3 mb-3">
+        <SegmentedControl options={ACRONYM_STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} />
+        <Input
+          className="max-w-xs"
+          placeholder="Filter by product or acronym…"
+          value={productFilter}
+          onChange={(e) => setProductFilter(e.target.value)}
+        />
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-muted">Loading acronyms…</p>
+      ) : filtered.length === 0 ? (
+        <p className="text-sm text-muted">
+          No acronyms {entries.length ? 'match the filter' : 'yet'}. Pending entries appear here
+          automatically as new acronyms are observed in failed runs.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-muted border-b border-border">
+                <th className="py-2 pr-3">Acronym</th>
+                <th className="py-2 pr-3">Scope</th>
+                <th className="py-2 pr-3">Status</th>
+                <th className="py-2 pr-3">Definition</th>
+                <th className="py-2 pr-3">Observed</th>
+                <th className="py-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((entry) => (
+                <AcronymRow
+                  key={`${entry.acronym}:${entry.product_code || ''}`}
+                  entry={entry}
+                  busy={busy}
+                  onApply={apply}
+                  onDelete={remove}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function AcronymRow({ entry, busy, onApply, onDelete }) {
+  const [definition, setDefinition] = useState(entry.definition || '')
+  const key = `${entry.acronym}:${entry.product_code || ''}`
+  const rowBusy = busy === key
+  const dirty = (definition || '') !== (entry.definition || '')
+
+  return (
+    <tr className="border-b border-border/60 align-top">
+      <td className="py-2 pr-3 font-mono font-semibold text-ink">{entry.acronym}</td>
+      <td className="py-2 pr-3 text-muted">{entry.product_code || 'global'}</td>
+      <td className="py-2 pr-3">{acronymStatusBadge(entry.status)}</td>
+      <td className="py-2 pr-3 min-w-[200px]">
+        <Input
+          value={definition}
+          onChange={(e) => setDefinition(e.target.value)}
+          placeholder={entry.status === 'needs_review' ? 'Enter an approved definition…' : 'Definition'}
+        />
+      </td>
+      <td className="py-2 pr-3 text-xs text-muted whitespace-nowrap">
+        {entry.observed_count || 0}
+        {entry.observed_in_fields?.length ? ` · ${entry.observed_in_fields.join(', ')}` : ''}
+      </td>
+      <td className="py-2">
+        <div className="flex flex-wrap gap-2 text-xs">
+          {entry.status !== 'approved' && (
+            <button
+              className="text-teal hover:underline focus-ring rounded px-1 disabled:opacity-40"
+              onClick={() => onApply(entry, { status: 'approved', definition })}
+              disabled={rowBusy || !definition.trim()}
+            >
+              Approve
+            </button>
+          )}
+          {entry.status === 'approved' && (
+            <button
+              className="text-accent hover:underline focus-ring rounded px-1 disabled:opacity-40"
+              onClick={() => onApply(entry, { status: 'approved', definition })}
+              disabled={rowBusy || !definition.trim() || !dirty}
+            >
+              Save
+            </button>
+          )}
+          {entry.status !== 'rejected' && (
+            <button
+              className="text-warning hover:underline focus-ring rounded px-1 disabled:opacity-40"
+              onClick={() => onApply(entry, { status: 'rejected', definition })}
+              disabled={rowBusy}
+            >
+              Reject
+            </button>
+          )}
+          {entry.status === 'rejected' && (
+            <button
+              className="text-ink-2 hover:underline focus-ring rounded px-1 disabled:opacity-40"
+              onClick={() => onApply(entry, { status: 'needs_review', definition })}
+              disabled={rowBusy}
+            >
+              Restore
+            </button>
+          )}
+          <button
+            className="text-danger hover:underline focus-ring rounded px-1 disabled:opacity-40"
+            onClick={() => onDelete(entry)}
+            disabled={rowBusy}
+          >
+            Delete
+          </button>
+        </div>
+      </td>
+    </tr>
+  )
+}
+

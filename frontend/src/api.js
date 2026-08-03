@@ -79,4 +79,19 @@ export const api = {
   knowledgeDeleteDocument: (docId) =>
     request(`/api/knowledge/documents/${docId}`, { method: 'DELETE' }),
   knowledgeDeletePack: () => request('/api/knowledge', { method: 'DELETE' }),
+  // Authoritative acronym glossary: review + maintenance.
+  acronyms: (product, status) => {
+    const params = new URLSearchParams()
+    if (product) params.set('product', product)
+    if (status) params.set('status', status)
+    const qs = params.toString()
+    return request(`/api/knowledge/acronyms${qs ? `?${qs}` : ''}`)
+  },
+  upsertAcronym: (payload) =>
+    request('/api/knowledge/acronyms', { method: 'POST', body: payload }),
+  deleteAcronym: (acronym, product) => {
+    const params = new URLSearchParams({ acronym })
+    if (product) params.set('product', product)
+    return request(`/api/knowledge/acronyms?${params.toString()}`, { method: 'DELETE' })
+  },
 }
