@@ -266,7 +266,15 @@ const attemptsLabel = (u) =>
 
 function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache }) {
   return (
-    <TableShell>
+    <TableShell tableClassName="table-fixed min-w-[760px]">
+      <colgroup>
+        <col className="w-[14%]" />
+        <col className="w-[24%]" />
+        <col className="w-[18%]" />
+        <col className="w-[14%]" />
+        <col className="w-[14%]" />
+        <col className="w-[16%]" />
+      </colgroup>
       <thead>
         <tr className="border-b border-border bg-surface-2 text-left text-muted">
           <th className="px-4 py-3 font-medium">Status</th>
@@ -309,14 +317,16 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
               </tr>
               {hasDetails && expanded === u.unit_id && (
                 <tr>
-                  <td colSpan={6} className="bg-surface-2 px-4 pb-5 pt-1">
-                    <UnitDetails
-                      u={u}
-                      reanalyzing={reanalyzing}
-                      onReanalyze={onReanalyze}
-                      clearingCache={clearingCache}
-                      onClearCache={onClearCache}
-                    />
+                  <td colSpan={6} className="max-w-0 overflow-hidden bg-surface-2 px-4 pb-5 pt-1">
+                    <div className="min-w-0 max-w-full overflow-hidden">
+                      <UnitDetails
+                        u={u}
+                        reanalyzing={reanalyzing}
+                        onReanalyze={onReanalyze}
+                        clearingCache={clearingCache}
+                        onClearCache={onClearCache}
+                      />
+                    </div>
                   </td>
                 </tr>
               )}
@@ -446,7 +456,7 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
   const when = attempt.start_time ? attempt.start_time.replace('T', ' ').slice(0, 19) : null
 
   return (
-    <Panel className="p-5">
+    <Panel className="min-w-0 overflow-hidden p-5">
       <div className="flex items-center justify-between gap-3 mb-3">
         <div className="flex items-center gap-2 flex-wrap">
           <Badge tone="fail">FAIL</Badge>
@@ -457,12 +467,14 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
           {when && <span className="text-xs text-muted">· {when}</span>}
         </div>
         {attempt.failing_step && (
-          <span className="text-xs text-muted">step: {attempt.failing_step}</span>
+          <span className="min-w-0 max-w-full text-xs text-muted break-words [overflow-wrap:anywhere]">
+            step: {attempt.failing_step}
+          </span>
         )}
       </div>
 
       {(attempt.error_code || attempt.error_message) && (
-        <p className="text-xs text-muted mb-3">
+        <p className="mb-3 text-xs text-muted whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
           {attempt.error_code ? `${attempt.error_code}: ` : ''}
           {attempt.error_message || ''}
         </p>
@@ -474,10 +486,14 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
         Root cause
         {sourceLabel && <span className="ml-2 lowercase opacity-70">· {sourceLabel}</span>}
       </div>
-      <p className="text-ink">{attempt.root_cause || 'Analyzing…'}</p>
+      <p className="text-ink whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+        {attempt.root_cause || 'Analyzing…'}
+      </p>
 
       <div className="text-xs uppercase tracking-wide text-muted mt-4 mb-1">Suggested solution</div>
-      <p className="text-ink">{attempt.suggested_solution || '—'}</p>
+      <p className="text-ink whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+        {attempt.suggested_solution || '—'}
+      </p>
 
       {showSnippet && (
         <div className="mt-4">

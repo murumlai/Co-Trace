@@ -231,11 +231,11 @@ export function Stat({ label, value, accent = false }) {
 
 // Card-wrapped, horizontally-scrollable table shell. Caller supplies the
 // <thead>/<tbody> as children.
-export function TableShell({ className = '', children }) {
+export function TableShell({ className = '', tableClassName = '', children }) {
   return (
     <Card className={['p-0 overflow-hidden', className].join(' ')}>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm border-collapse">{children}</table>
+        <table className={['w-full text-sm border-collapse', tableClassName].join(' ')}>{children}</table>
       </div>
     </Card>
   )

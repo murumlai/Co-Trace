@@ -73,9 +73,9 @@ export default function TerminalViewer({
   }, [allLines, query])
 
   return (
-    <section className="overflow-hidden rounded-panel border border-term-border bg-term-bg font-mono">
+    <section className="min-w-0 max-w-full overflow-hidden rounded-panel border border-term-border bg-term-bg font-mono">
       {/* Header */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-term-border bg-term-surface px-4 py-2.5">
+      <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-term-border bg-term-surface px-4 py-2.5">
         <div className="flex items-center gap-2">
           <span className="flex gap-1.5" aria-hidden="true">
             <span className="h-2.5 w-2.5 rounded-full bg-term-error/70" />
@@ -84,7 +84,7 @@ export default function TerminalViewer({
           </span>
           <span className="text-xs font-semibold text-term-text">{title}</span>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
           {timestamp && <Chip accent>{timestamp}</Chip>}
           {errorCode && <Chip tone="error">{errorCode}</Chip>}
           {failingStep && <Chip>step: {failingStep}</Chip>}
@@ -120,15 +120,18 @@ export default function TerminalViewer({
           No lines match “{query}”.
         </div>
       ) : (
-        <div className="max-h-96 overflow-auto px-2 py-3">
-          <div>
+        <div className="max-h-96 max-w-full overflow-auto px-2 py-3">
+          <div className="min-w-0">
             {lines.map(({ line, n }) => (
-              <div key={n} className="flex gap-3 px-2 leading-relaxed">
+              <div key={n} className="flex min-w-0 gap-3 px-2 leading-relaxed">
                 <span className="w-10 shrink-0 select-none text-right text-xs text-term-muted/60">
                   {n}
                 </span>
                 <code
-                  className={['text-xs whitespace-pre-wrap break-words', severityClass(line)].join(' ')}
+                  className={[
+                    'min-w-0 flex-1 text-xs whitespace-pre-wrap break-words [overflow-wrap:anywhere]',
+                    severityClass(line),
+                  ].join(' ')}
                 >
                   {line ? highlightMatches(line, query, n) : '\u00A0'}
                 </code>
@@ -148,7 +151,10 @@ function Chip({ children, tone = 'muted', accent = false }) {
       ? 'text-term-error border-term-error/30'
       : 'text-term-muted border-term-border'
   return (
-    <span className={['rounded border px-1.5 py-0.5 text-[11px] font-medium', cls].join(' ')}>
+    <span className={[
+      'max-w-full rounded border px-1.5 py-0.5 text-[11px] font-medium break-words [overflow-wrap:anywhere]',
+      cls,
+    ].join(' ')}>
       {children}
     </span>
   )

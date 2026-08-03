@@ -17,6 +17,23 @@ function isSingleZip(files) {
   return files.length === 1 && relPath(files[0]).toLowerCase().endsWith('.zip')
 }
 
+const FTRUNNER_LOG_NAME = 'ftrunnerlog01.txt'
+
+function folderRootNames(files) {
+  return Array.from(
+    new Set(
+      files
+        .map((file) => relPath(file).replace(/\\/g, '/'))
+        .filter((path) => path.includes('/'))
+        .map((path) => path.split('/')[0]),
+    ),
+  )
+}
+
+function ftrunnerLogCount(files) {
+  return files.filter((file) => relPath(file).toLowerCase().endsWith(FTRUNNER_LOG_NAME)).length
+}
+
 function formatCount(count, singular, plural = `${singular}s`) {
   return `${count} ${count === 1 ? singular : plural}`
 }
@@ -40,9 +57,7 @@ function uploadSummary(files) {
     }
   }
 
-  const folderRoots = Array.from(
-    new Set(paths.filter((path) => path.includes('/')).map((path) => path.split('/')[0])),
-  )
+  const folderRoots = folderRootNames(files)
 
   if (folderRoots.length) {
     const shown = summarizeNames(folderRoots)
@@ -269,7 +284,14 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
   const start = async () => {
     if (!files.length) return
     if (files.length > 1000 && !isSingleZip(files)) {
-      setLocalError(`This upload has ${files.length} files. Upload a .zip archive to avoid the 1000-file browser/API limit.`)
+      const rootNames = folderRootNames(files)
+      const runLogCount = ftrunnerLogCount(files)
+      if (rootNames.length && runLogCount > 1000) {
+        const roots = summarizeNames(rootNames).join(', ')
+        setLocalError(`${roots} contains ${formatNumber(runLogCount)} ftrunnerlog01.txt run logs, which exceeds the 1,000-run folder upload limit. Upload this root folder as a .zip archive instead.`)
+      } else {
+        setLocalError(`This upload has ${formatNumber(files.length)} files, which exceeds the 1,000-file browser/API limit. Upload this batch as a .zip archive instead.`)
+      }
       return
     }
     setLocalError('')
