@@ -145,6 +145,33 @@ class Settings:
         "PRODUCT_KNOWLEDGE_SUMMARY_MODEL", "gpt-5.4-mini"
     )
 
+    # --- Authoritative acronym glossary ---
+    # A repo-local glossary that injects APPROVED acronym expansions into every
+    # diagnosis prompt and records unknown acronyms as pending review instead of
+    # letting the LLM invent full forms. Pending entries are never authoritative.
+    PRODUCT_ACRONYM_GLOSSARY_ENABLED: bool = _env_flag("PRODUCT_ACRONYM_GLOSSARY_ENABLED", True)
+    # Repo-root store (gitignored; may contain proprietary terminology). Commit
+    # only the example/schema (product_acronyms.example.json).
+    PRODUCT_ACRONYM_GLOSSARY_FILE: str = os.getenv(
+        "PRODUCT_ACRONYM_GLOSSARY_FILE", _repo_path("product_acronyms.json")
+    )
+    # Append newly observed, undefined acronyms as needs_review entries.
+    PRODUCT_ACRONYM_UNKNOWN_APPEND_ENABLED: bool = _env_flag(
+        "PRODUCT_ACRONYM_UNKNOWN_APPEND_ENABLED", True
+    )
+    # Cap how many approved expansions are injected into a single prompt.
+    PRODUCT_ACRONYM_MAX_PROMPT_ENTRIES: int = int(
+        os.getenv("PRODUCT_ACRONYM_MAX_PROMPT_ENTRIES", "40")
+    )
+    # Candidate acronym token length bounds (pure-uppercase tokens only).
+    PRODUCT_ACRONYM_MIN_LEN: int = int(os.getenv("PRODUCT_ACRONYM_MIN_LEN", "2"))
+    PRODUCT_ACRONYM_MAX_LEN: int = int(os.getenv("PRODUCT_ACRONYM_MAX_LEN", "6"))
+    # Extra stopwords (comma-separated) folded into the built-in noise filter.
+    PRODUCT_ACRONYM_EXTRA_STOPWORDS: list[str] = [
+        w.strip().upper() for w in os.getenv("PRODUCT_ACRONYM_EXTRA_STOPWORDS", "").split(",")
+        if w.strip()
+    ]
+
     # --- CORS (dev) ---
     CORS_ORIGINS: list[str] = os.getenv(
         "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"

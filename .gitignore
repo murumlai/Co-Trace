@@ -30,3 +30,7 @@ product_knowledge.json
 product_knowledge_index.json
 product_knowledge_sections.jsonl
 product_docs/
+
+# Authoritative acronym glossary — may contain proprietary product terminology.
+# Only the example/schema (product_acronyms.example.json) is committed.
+product_acronyms.json

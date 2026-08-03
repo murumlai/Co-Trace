@@ -21,10 +21,11 @@ from .config import settings
 log = logging.getLogger("cotrace.cache")
 
 _CACHE_SCHEMA_VERSION = 1
-# Bumped to v2 for product-aware diagnosis: keys now fold in the product code,
-# knowledge hash, and matched section/category mix, so old generic answers do
-# not survive once product knowledge is in play.
-_CACHE_PROMPT_VERSION = "analysis-v2"
+# Bumped to v3 for the authoritative acronym glossary: keys now also fold in the
+# approved-glossary hash used for the record, so diagnoses produced before a
+# definition was approved/changed (and any old invented expansions) are not
+# reused. v2 added the product code, knowledge hash, and matched section mix.
+_CACHE_PROMPT_VERSION = "analysis-v3"
 _lock = threading.Lock()
 
 
@@ -41,6 +42,7 @@ def make_key(
     knowledge_hash: str | None = None,
     knowledge_sections: str | None = None,
     knowledge_categories: str | None = None,
+    acronym_glossary_hash: str | None = None,
 ) -> str:
     payload = {
         "schema_version": _CACHE_SCHEMA_VERSION,
@@ -58,6 +60,7 @@ def make_key(
         "knowledge_hash": knowledge_hash or "",
         "knowledge_sections": knowledge_sections or "",
         "knowledge_categories": knowledge_categories or "",
+        "acronym_glossary_hash": acronym_glossary_hash or "",
     }
     text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
@@ -158,6 +161,9 @@ def _safe_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         "knowledge_match_status",
         "knowledge_section_ids",
         "knowledge_categories",
+        "acronym_glossary_hash",
+        "acronyms_used",
+        "unknown_acronyms",
     }
     out: dict[str, Any] = {}
     for key in allowed:
@@ -257,6 +263,7 @@ class DiskAnalysisCache:
         knowledge_hash: str | None = None,
         knowledge_sections: str | None = None,
         knowledge_categories: str | None = None,
+        acronym_glossary_hash: str | None = None,
     ) -> str:
         return make_key(
             error_code=error_code,
@@ -270,6 +277,7 @@ class DiskAnalysisCache:
             knowledge_hash=knowledge_hash,
             knowledge_sections=knowledge_sections,
             knowledge_categories=knowledge_categories,
+            acronym_glossary_hash=acronym_glossary_hash,
         )
 
     def get(self, cache_key: str) -> dict[str, Any] | None:

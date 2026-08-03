@@ -14,6 +14,7 @@ from collections.abc import Callable
 
 from . import analysis_cache, llm_client, redaction
 from .job_registry import Job
+from .knowledge.acronym_glossary import AcronymGlossaryContext
 from .knowledge.models import KnowledgeContext
 from .models import LlmAnalysisResult, UnitRecord
 
@@ -71,13 +72,16 @@ def analyze_job(
     progress_callback: AnalysisProgress | None = None,
     cache: object | None = None,
     knowledge_retriever: object | None = None,
+    acronym_glossary: object | None = None,
 ) -> None:
     """Populate root cause / solution for all failed units, using the cache.
 
     ``cache`` may be any object satisfying the ``AnalysisCache`` protocol.
     When ``None`` the module-level ``DiskAnalysisCache`` default is used.
     ``knowledge_retriever`` (optional) supplies curated product context; when
-    ``None`` product-aware diagnosis is skipped.
+    ``None`` product-aware diagnosis is skipped. ``acronym_glossary`` (optional)
+    supplies authoritative acronym expansions and records unknown acronyms as
+    pending review; when ``None`` glossary injection is skipped.
     """
     failed = [rec for rec in job.records if rec.result == "FAIL"]
     total_signatures = len({signature_for(rec) for rec in failed})
@@ -108,6 +112,7 @@ def analyze_job(
             analyze_failure=analyze_failure,
             cache=cache,
             knowledge_retriever=knowledge_retriever,
+            acronym_glossary=acronym_glossary,
             progress_callback=(
                 lambda message: progress_callback(
                     len(completed_signatures),
@@ -155,6 +160,7 @@ def _analyze_unit(
     progress_total: int = 1,
     cache: object | None = None,
     knowledge_retriever: object | None = None,
+    acronym_glossary: object | None = None,
 ) -> str:
     from . import analysis_cache as _ac_module  # avoid circular at import time
     _cache: object = cache if cache is not None else _ac_module._default_cache
@@ -165,6 +171,7 @@ def _analyze_unit(
     rec.analysis_context_source = context_source
 
     knowledge = _retrieve_knowledge(rec, knowledge_retriever)
+    glossary = _resolve_glossary(rec, acronym_glossary, snippet)
     cache_key = _cache.make_key(
         error_code=rec.error_code,
         error_message=err_msg,
@@ -177,6 +184,7 @@ def _analyze_unit(
         knowledge_hash=knowledge.knowledge_hash if knowledge else None,
         knowledge_sections=",".join(rec.knowledge_section_ids),
         knowledge_categories=",".join(rec.knowledge_categories),
+        acronym_glossary_hash=glossary.glossary_hash if glossary else None,
     )
     rec.analysis_cache_key = cache_key
 
@@ -205,6 +213,7 @@ def _analyze_unit(
     if progress_callback:
         progress_callback(_analysis_progress_message(progress_index, progress_total, "llm"))
 
+    _record_glossary_unknowns(rec, glossary, acronym_glossary)
     log.info(
         "Analyzing unit %s with %s context (signature %s, force=%s).",
         rec.unit_id,
@@ -212,7 +221,7 @@ def _analyze_unit(
         sig,
         force,
     )
-    knowledge_prompt = knowledge.context_text if knowledge and knowledge.context_text else None
+    knowledge_prompt = _compose_knowledge_prompt(knowledge, glossary)
     analysis_result = _coerce_analysis_result(
         _call_analyze(analyze_failure, rec.error_code, err_msg, snippet, knowledge_prompt)
     )
@@ -240,6 +249,9 @@ def _analyze_unit(
             "knowledge_match_status": rec.knowledge_match_status,
             "knowledge_section_ids": ",".join(rec.knowledge_section_ids),
             "knowledge_categories": ",".join(rec.knowledge_categories),
+            "acronym_glossary_hash": rec.acronym_glossary_hash,
+            "acronyms_used": ",".join(rec.acronyms_used),
+            "unknown_acronyms": ",".join(rec.unknown_acronyms),
         },
     )
     log.info("Analysis result for unit %s came from %s.", rec.unit_id, source)
@@ -263,6 +275,55 @@ def _retrieve_knowledge(
     rec.knowledge_section_ids = list(knowledge.matched_section_ids)
     rec.knowledge_categories = list(knowledge.matched_categories)
     return knowledge
+
+
+def _resolve_glossary(
+    rec: UnitRecord, acronym_glossary: object | None, context_text: str
+) -> AcronymGlossaryContext | None:
+    """Resolve approved acronym expansions and persist metadata on ``rec``.
+
+    Read-only: the pending-review queue is written separately, only on a cache
+    miss (see ``_record_glossary_unknowns``).
+    """
+    if acronym_glossary is None:
+        return None
+    try:
+        glossary = acronym_glossary.glossary_for(rec, context_text)
+    except Exception:  # noqa: BLE001 - glossary lookup must never break analysis
+        log.exception("Acronym glossary lookup failed for unit %s.", rec.unit_id)
+        return None
+    rec.acronyms_used = list(glossary.used_acronyms)
+    rec.unknown_acronyms = list(glossary.unknown_acronyms)
+    rec.acronym_glossary_hash = glossary.glossary_hash or None
+    return glossary
+
+
+def _record_glossary_unknowns(
+    rec: UnitRecord, glossary: AcronymGlossaryContext | None, acronym_glossary: object | None
+) -> None:
+    """Persist observed-but-undefined acronyms as pending review (cache-miss only)."""
+    if glossary is None or acronym_glossary is None:
+        return
+    try:
+        acronym_glossary.record_unknowns(rec, glossary)
+    except Exception:  # noqa: BLE001 - recording must never break analysis
+        log.exception("Recording unknown acronyms failed for unit %s.", rec.unit_id)
+
+
+def _compose_knowledge_prompt(
+    knowledge: KnowledgeContext | None, glossary: AcronymGlossaryContext | None
+) -> str | None:
+    """Combine trusted acronym expansions, product knowledge, and the unknown
+    block into one trusted-context payload. Works even when no product knowledge
+    matched, so the glossary is still injected."""
+    parts: list[str] = []
+    if glossary is not None and glossary.trusted_text:
+        parts.append(glossary.trusted_text)
+    if knowledge is not None and knowledge.context_text:
+        parts.append(knowledge.context_text)
+    if glossary is not None and glossary.unknown_text:
+        parts.append(glossary.unknown_text)
+    return "\n\n".join(parts) if parts else None
 
 
 def _call_analyze(
@@ -308,6 +369,7 @@ def reanalyze_unit(
     unit_id: str,
     analyze_failure: AnalyzeFailure = llm_client.analyze_with_metrics,
     knowledge_retriever: object | None = None,
+    acronym_glossary: object | None = None,
 ) -> UnitRecord | None:
     """Force a fresh per-unit LLM call, bypassing the signature cache."""
     for rec in job.records:
@@ -318,6 +380,7 @@ def reanalyze_unit(
                 job, rec, force=True,
                 analyze_failure=analyze_failure,
                 knowledge_retriever=knowledge_retriever,
+                acronym_glossary=acronym_glossary,
             )
             return rec
     return None
@@ -342,10 +405,12 @@ class AnalyzerService:
         analyze_failure: AnalyzeFailure | None = None,
         cache: object | None = None,
         knowledge_retriever: object | None = None,
+        acronym_glossary: object | None = None,
     ) -> None:
         self._analyze_failure: AnalyzeFailure = analyze_failure or llm_client.analyze_with_metrics
         self._cache = cache  # None ⇒ module default inside analyze_job/_analyze_unit
         self._knowledge_retriever = knowledge_retriever
+        self._acronym_glossary = acronym_glossary
 
     def analyze_job(
         self,
@@ -359,6 +424,7 @@ class AnalyzerService:
             progress_callback=progress_callback,
             cache=self._cache,
             knowledge_retriever=self._knowledge_retriever,
+            acronym_glossary=self._acronym_glossary,
         )
 
     def reanalyze_unit(self, job: Job, unit_id: str) -> UnitRecord | None:
@@ -372,6 +438,7 @@ class AnalyzerService:
                     analyze_failure=self._analyze_failure,
                     cache=self._cache,
                     knowledge_retriever=self._knowledge_retriever,
+                    acronym_glossary=self._acronym_glossary,
                 )
                 return rec
         return None

@@ -70,6 +70,11 @@ class UnitRecord(BaseModel):
     knowledge_section_ids: list[str] = Field(default_factory=list)
     knowledge_categories: list[str] = Field(default_factory=list)
 
+    # Acronym-glossary metadata (populated during failure analysis)
+    acronyms_used: list[str] = Field(default_factory=list)
+    unknown_acronyms: list[str] = Field(default_factory=list)
+    acronym_glossary_hash: Optional[str] = None
+
 
 class LlmModelMetrics(BaseModel):
     model: Optional[str] = None
