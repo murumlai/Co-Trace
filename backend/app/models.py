@@ -268,3 +268,13 @@ class FrontendLogRequest(BaseModel):
     level: str = "info"
     message: str
     context: dict = Field(default_factory=dict)
+
+
+class AcronymUpsertRequest(BaseModel):
+    """Create/update a glossary entry from the review UI."""
+
+    acronym: str
+    definition: Optional[str] = None
+    product_code: Optional[str] = None
+    status: Literal["approved", "needs_review", "rejected"] = "approved"
+    notes: Optional[str] = None

@@ -28,6 +28,7 @@ from .config import settings
 from .dependencies import (
     get_analysis_cache,
     get_analyzer_service,
+    get_acronym_glossary_store,
     get_knowledge_ingestion,
     get_knowledge_retriever,
     get_knowledge_store,
@@ -37,7 +38,7 @@ from .dependencies import (
 from .knowledge import parsing
 from .knowledge.summarizer import ProductKnowledgeError, is_llm_backend_available
 from .logging_config import setup_backend_logging, write_frontend_log
-from .models import FrontendLogRequest, LoginRequest, LoginResponse
+from .models import AcronymUpsertRequest, FrontendLogRequest, LoginRequest, LoginResponse
 from .record_views import group_units_by_serial
 from .upload_storage import UploadStorageError, save_uploads
 
@@ -337,6 +338,49 @@ def knowledge_section(section_id: str,
         if section.section_id == section_id:
             return section.model_dump()
     raise HTTPException(404, "Section not found")
+
+
+@app.get("/api/knowledge/acronyms")
+def list_acronyms(product: str | None = None, status: str | None = None,
+                  user: str = Depends(require_user),  # noqa: ARG001
+                  store: Any = Depends(get_acronym_glossary_store)) -> dict:
+    entries = store.list_entries(product_code=product, status=status)
+    return {
+        "enabled": settings.PRODUCT_ACRONYM_GLOSSARY_ENABLED,
+        "unknown_append_enabled": settings.PRODUCT_ACRONYM_UNKNOWN_APPEND_ENABLED,
+        "entries": [e.model_dump() for e in entries],
+    }
+
+
+@app.post("/api/knowledge/acronyms")
+def upsert_acronym(req: AcronymUpsertRequest,
+                   user: str = Depends(require_user),  # noqa: ARG001
+                   store: Any = Depends(get_acronym_glossary_store)) -> dict:
+    acronym = (req.acronym or "").strip()
+    if not acronym:
+        raise HTTPException(400, "acronym is required")
+    if req.status == "approved" and not (req.definition or "").strip():
+        raise HTTPException(400, "definition is required to approve an acronym")
+    entry = store.upsert_entry(
+        acronym=acronym,
+        definition=req.definition,
+        product_code=req.product_code,
+        status=req.status,
+        notes=req.notes,
+        source="manual",
+    )
+    log.info("Acronym glossary upsert: %s (%s) -> %s.", entry.acronym, entry.product_code or "global", entry.status)
+    return entry.model_dump()
+
+
+@app.delete("/api/knowledge/acronyms")
+def delete_acronym(acronym: str, product: str | None = None,
+                   user: str = Depends(require_user),  # noqa: ARG001
+                   store: Any = Depends(get_acronym_glossary_store)) -> dict:
+    if not store.delete_entry(acronym, product):
+        raise HTTPException(404, "Acronym not found")
+    log.info("Deleted acronym glossary entry %s (%s).", acronym.upper(), product or "global")
+    return {"deleted": acronym.upper(), "product_code": product}
 
 
 @app.post("/api/knowledge/upload")
