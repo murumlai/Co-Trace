@@ -200,6 +200,13 @@ def me(user: AuthenticatedUser = Depends(require_user)) -> dict:
     }
 
 
+def _get_owned_job(job_id: str, user: AuthenticatedUser, reg: Any) -> Any:
+    job = reg.get(job_id)
+    if job is None or job.owner_id != user.github_id:
+        raise HTTPException(404, "Job not found")
+    return job
+
+
 # --------------------------------------------------------------------------
 # Upload + jobs
 # --------------------------------------------------------------------------
@@ -240,24 +247,23 @@ async def upload(
         raise HTTPException(400, f"Upload failed: {type(exc).__name__}: {exc}") from exc
     log.info("Stored upload for job %s: %s files, %s zip archives.", job_id[:8], saved.file_count, saved.zip_count)
 
-    reg.create(job_id, workdir)
+    reg.create(job_id, workdir, owner_id=user.github_id, owner_login=user.login)
     background.add_task(orch.run_job, job_id)
     log.info("Upload queued for processing (job %s).", job_id[:8])
     return {"job_id": job_id}
 
 
 @app.get("/api/jobs/{job_id}/status")
-def job_status(job_id: str, user: str = Depends(require_user),
+def job_status(job_id: str, user: AuthenticatedUser = Depends(require_user),
                reg: Any = Depends(get_registry)) -> dict:
-    job = reg.get(job_id)
-    if job is None:
-        raise HTTPException(404, "Job not found")
+    job = _get_owned_job(job_id, user, reg)
     return job.to_status().model_dump()
 
 
 @app.post("/api/jobs/{job_id}/stop")
-def stop_job(job_id: str, user: str = Depends(require_user),  # noqa: ARG001
+def stop_job(job_id: str, user: AuthenticatedUser = Depends(require_user),
              reg: Any = Depends(get_registry)) -> dict:
+    _get_owned_job(job_id, user, reg)
     job = reg.request_cancel(job_id)
     if job is None:
         raise HTTPException(404, "Job not found")
@@ -269,11 +275,9 @@ def stop_job(job_id: str, user: str = Depends(require_user),  # noqa: ARG001
 # Engineer view
 # --------------------------------------------------------------------------
 @app.get("/api/jobs/{job_id}/units")
-def units(job_id: str, user: str = Depends(require_user),
+def units(job_id: str, user: AuthenticatedUser = Depends(require_user),
           reg: Any = Depends(get_registry)) -> dict:
-    job = reg.get(job_id)
-    if job is None:
-        raise HTTPException(404, "Job not found")
+    job = _get_owned_job(job_id, user, reg)
     groups = group_units_by_serial(job.records)
     classification_counts = {"first_pass": 0, "retry_pass": 0, "fail": 0, "unknown": 0}
     for g in groups:
@@ -287,12 +291,10 @@ def units(job_id: str, user: str = Depends(require_user),
 
 
 @app.post("/api/jobs/{job_id}/units/{unit_id}/reanalyze")
-def reanalyze(job_id: str, unit_id: str, user: str = Depends(require_user),
+def reanalyze(job_id: str, unit_id: str, user: AuthenticatedUser = Depends(require_user),
               reg: Any = Depends(get_registry),
               analyzer_svc: Any = Depends(get_analyzer_service)) -> dict:
-    job = reg.get(job_id)
-    if job is None:
-        raise HTTPException(404, "Job not found")
+    job = _get_owned_job(job_id, user, reg)
     rec = analyzer_svc.reanalyze_unit(job, unit_id)
     if rec is None:
         raise HTTPException(404, "Unit not found")
@@ -300,7 +302,7 @@ def reanalyze(job_id: str, unit_id: str, user: str = Depends(require_user),
 
 
 @app.delete("/api/jobs/{job_id}/cache")
-def clear_job_cache(job_id: str, user: str = Depends(require_user),  # noqa: ARG001
+def clear_job_cache(job_id: str, user: AuthenticatedUser = Depends(require_user),
                     reg: Any = Depends(get_registry),
                     cache: Any = Depends(get_analysis_cache)) -> dict:
     """Delete only the analysis cache entries used by this job's records.
@@ -308,9 +310,7 @@ def clear_job_cache(job_id: str, user: str = Depends(require_user),  # noqa: ARG
     Cross-upload cache entries not referenced by the currently loaded job are
     left untouched.
     """
-    job = reg.get(job_id)
-    if job is None:
-        raise HTTPException(404, "Job not found")
+    job = _get_owned_job(job_id, user, reg)
     keys = {rec.analysis_cache_key for rec in job.records if rec.analysis_cache_key}
     deleted = 0
     for key in keys:
@@ -328,11 +328,9 @@ def clear_job_cache(job_id: str, user: str = Depends(require_user),  # noqa: ARG
 # Manager view
 # --------------------------------------------------------------------------
 @app.get("/api/jobs/{job_id}/manager")
-def manager(job_id: str, user: str = Depends(require_user),
+def manager(job_id: str, user: AuthenticatedUser = Depends(require_user),
             reg: Any = Depends(get_registry)) -> dict:
-    job = reg.get(job_id)
-    if job is None:
-        raise HTTPException(404, "Job not found")
+    job = _get_owned_job(job_id, user, reg)
     return aggregator.build_manager_view(job.records)
 
 

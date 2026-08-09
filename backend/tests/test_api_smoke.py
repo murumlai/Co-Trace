@@ -132,3 +132,49 @@ class TestAuthGuards:
         resp = client.post("/api/logout", headers=auth_headers(), follow_redirects=False)
         assert resp.status_code == 200
         assert "session=" in resp.headers["set-cookie"]
+
+
+class TestJobOwnership:
+    @pytest.fixture()
+    def registry_with_owned_job(self, client, tmp_path):
+        from app.dependencies import get_registry
+        from app.job_registry import JobRegistry
+
+        reg = JobRegistry()
+        workdir = tmp_path / "owned-job"
+        workdir.mkdir()
+        reg.create("owned-job", str(workdir), owner_id="42", owner_login="octocat")
+        client.app.dependency_overrides[get_registry] = lambda: reg
+        try:
+            yield reg
+        finally:
+            client.app.dependency_overrides.pop(get_registry, None)
+
+    def test_owner_can_read_job_status(self, client, registry_with_owned_job):
+        resp = client.get(
+            "/api/jobs/owned-job/status",
+            headers=auth_headers(login="octocat", github_id="42"),
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["job_id"] == "owned-job"
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("GET", "/api/jobs/owned-job/status"),
+            ("POST", "/api/jobs/owned-job/stop"),
+            ("GET", "/api/jobs/owned-job/units"),
+            ("POST", "/api/jobs/owned-job/units/u1/reanalyze"),
+            ("DELETE", "/api/jobs/owned-job/cache"),
+            ("GET", "/api/jobs/owned-job/manager"),
+        ],
+    )
+    def test_other_user_cannot_access_job_routes(self, client, registry_with_owned_job, method, path):
+        resp = client.request(
+            method,
+            path,
+            headers=auth_headers(login="hubot", github_id="99"),
+        )
+
+        assert resp.status_code == 404

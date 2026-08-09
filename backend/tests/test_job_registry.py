@@ -59,7 +59,8 @@ class TestJobSave:
         workdir = str(tmp_path / "job1")
         os.makedirs(workdir)
         rec = UnitRecord(unit_id="u1", result="PASS", run_folder="run1")
-        job = Job(job_id="abc123", workdir=workdir, status="done",
+        job = Job(job_id="abc123", owner_id="42", owner_login="octocat",
+                  workdir=workdir, status="done",
                   message="Completed: 1 unit runs", processed=1, total=1,
                   records=[rec])
         job.save()
@@ -69,6 +70,8 @@ class TestJobSave:
             state = json.load(fh)
 
         assert state["job_id"] == "abc123"
+        assert state["owner_id"] == "42"
+        assert state["owner_login"] == "octocat"
         assert state["status"] == "done"
         assert state["processed"] == 1
         assert len(state["records"]) == 1
@@ -98,13 +101,15 @@ class TestLoadFromDisk:
     def test_restores_completed_job(self, tmp_path, monkeypatch, isolated_settings):
         job_id = "completed01"
         workdir = str(tmp_path / "work" / job_id)
-        _make_state_file(workdir, job_id=job_id, status="done")
+        _make_state_file(workdir, job_id=job_id, owner_id="42", owner_login="octocat", status="done")
 
         reg = JobRegistry()
         reg.load_from_disk()
 
         job = reg.get(job_id)
         assert job is not None
+        assert job.owner_id == "42"
+        assert job.owner_login == "octocat"
         assert job.status == "done"
 
     def test_restores_error_job(self, tmp_path, monkeypatch, isolated_settings):
