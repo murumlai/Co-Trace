@@ -100,8 +100,16 @@ def set_entry(
     with _lock:
         data = _load()
         existing = data["entries"].get(cache_key, {})
-        data["entries"][cache_key] = {
-            "cache_key": cache_key,
+        write_key = cache_key
+        canonical_cache_key = existing.get("canonical_cache_key", "")
+        if existing and (existing.get("protected") or existing.get("is_admin_saved")) and created_by_role != "admin":
+            revision = hashlib.sha256(f"{cache_key}:{created_by}:{now}".encode("utf-8")).hexdigest()[:8]
+            write_key = f"{cache_key}:{revision}"
+            canonical_cache_key = cache_key
+            existing = {}
+        data["entries"][write_key] = {
+            "cache_key": write_key,
+            "canonical_cache_key": canonical_cache_key,
             "root_cause": root_cause,
             "suggested_solution": suggested_solution,
             "source": source,
@@ -120,7 +128,7 @@ def set_entry(
             "metadata": _safe_metadata(metadata),
         }
         _save(data)
-    log.info("Saved analysis cache entry %s.", cache_key[:8])
+    log.info("Saved analysis cache entry %s.", write_key[:8])
 
 
 def delete_entry(cache_key: str, *, actor_id: str | None = None, actor_is_admin: bool = False) -> bool:

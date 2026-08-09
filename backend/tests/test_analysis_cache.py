@@ -69,3 +69,29 @@ def test_admin_listing_includes_creator_metadata(isolated_settings):
     assert entry["created_by"] == "42"
     assert entry["created_by_login"] == "42-login"
     assert entry["metadata"]["unit_id"] == "private-unit-id"
+
+
+def test_user_save_does_not_overwrite_admin_protected_entry(isolated_settings):
+    _save_entry("shared-key", created_by="1", role="admin")
+
+    analysis_cache.set_entry(
+        "shared-key",
+        root_cause="user root",
+        suggested_solution="user solution",
+        source="llm",
+        metadata={
+            "created_by": "42",
+            "created_by_login": "octocat",
+            "created_by_role": "user",
+            "product_code": "M79060-001",
+            "signature": "sig",
+        },
+    )
+
+    entries = analysis_cache.list_entries(actor_is_admin=True)
+    protected = next(entry for entry in entries if entry["cache_key"] == "shared-key")
+    revision = next(entry for entry in entries if entry.get("canonical_cache_key") == "shared-key")
+    assert protected["root_cause"] == "root"
+    assert protected["created_by_role"] == "admin"
+    assert revision["root_cause"] == "user root"
+    assert revision["created_by"] == "42"
