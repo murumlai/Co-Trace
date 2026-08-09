@@ -84,6 +84,7 @@ def analyze_job(
     pending review; when ``None`` glossary injection is skipped.
     """
     failed = [rec for rec in job.records if rec.result == "FAIL"]
+    force_refresh = bool(getattr(job, "force_refresh", False))
     total_signatures = len({signature_for(rec) for rec in failed})
     log.info(
         "Analysis started for job %s: %s failed units, %s unique signatures, %s cached signatures.",
@@ -108,7 +109,7 @@ def analyze_job(
         source = _analyze_unit(
             job,
             rec,
-            force=False,
+            force=force_refresh,
             analyze_failure=analyze_failure,
             cache=cache,
             knowledge_retriever=knowledge_retriever,
@@ -237,6 +238,10 @@ def _analyze_unit(
         suggested_solution=solution,
         source=source,
         metadata={
+            "created_by": getattr(job, "owner_id", ""),
+            "created_by_login": getattr(job, "owner_login", ""),
+            "created_by_role": getattr(job, "owner_role", "user"),
+            "protected": getattr(job, "owner_role", "user") == "admin",
             "signature": sig,
             "error_code": rec.error_code,
             "error_message": err_msg,

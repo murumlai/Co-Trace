@@ -28,6 +28,8 @@ class Job:
     job_id: str
     owner_id: str = ""
     owner_login: str = ""
+    owner_role: str = "user"
+    force_refresh: bool = False
     status: JobState = "pending"
     message: str = ""
     processed: int = 0
@@ -77,6 +79,8 @@ def _inline_save(job: Job) -> None:
         "job_id": job.job_id,
         "owner_id": job.owner_id,
         "owner_login": job.owner_login,
+        "owner_role": job.owner_role,
+        "force_refresh": job.force_refresh,
         "status": job.status,
         "message": job.message,
         "processed": job.processed,
@@ -145,6 +149,8 @@ class DiskJobStateStore:
                     job_id=state["job_id"],
                     owner_id=state.get("owner_id", ""),
                     owner_login=state.get("owner_login", ""),
+                    owner_role=state.get("owner_role", "user"),
+                    force_refresh=state.get("force_refresh", False),
                     status=state.get("status", "error"),
                     message=state.get("message", ""),
                     processed=state.get("processed", 0),
@@ -178,9 +184,24 @@ class JobRegistry:
         self._lock = threading.Lock()
         self._store: DiskJobStateStore = store if store is not None else DiskJobStateStore()
 
-    def create(self, job_id: str, workdir: str, owner_id: str = "", owner_login: str = "") -> Job:
+    def create(
+        self,
+        job_id: str,
+        workdir: str,
+        owner_id: str = "",
+        owner_login: str = "",
+        owner_role: str = "user",
+        force_refresh: bool = False,
+    ) -> Job:
         with self._lock:
-            job = Job(job_id=job_id, owner_id=owner_id, owner_login=owner_login, workdir=workdir)
+            job = Job(
+                job_id=job_id,
+                owner_id=owner_id,
+                owner_login=owner_login,
+                owner_role=owner_role,
+                force_refresh=force_refresh,
+                workdir=workdir,
+            )
             job._state_store = self._store
             self._jobs[job_id] = job
             job.save()

@@ -178,3 +178,34 @@ class TestJobOwnership:
         )
 
         assert resp.status_code == 404
+
+
+class TestUploadOptions:
+    def test_upload_records_force_refresh_option(self, client, tmp_path):
+        import io
+        from app.dependencies import get_orchestrator, get_registry
+        from app.job_registry import JobRegistry
+
+        class NoopOrchestrator:
+            def run_job(self, job_id):  # noqa: ARG002
+                return None
+
+        reg = JobRegistry()
+        client.app.dependency_overrides[get_registry] = lambda: reg
+        client.app.dependency_overrides[get_orchestrator] = lambda: NoopOrchestrator()
+        try:
+            resp = client.post(
+                "/api/upload",
+                headers=auth_headers(login="octocat", github_id="42"),
+                files={"files": ("test.txt", io.BytesIO(b"data"), "text/plain")},
+                data={"paths": ["test.txt"], "force_refresh": "true"},
+            )
+        finally:
+            client.app.dependency_overrides.pop(get_registry, None)
+            client.app.dependency_overrides.pop(get_orchestrator, None)
+
+        assert resp.status_code == 200
+        job = reg.get(resp.json()["job_id"])
+        assert job is not None
+        assert job.force_refresh is True
+        assert job.owner_id == "42"

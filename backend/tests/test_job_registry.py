@@ -72,6 +72,7 @@ class TestJobSave:
         assert state["job_id"] == "abc123"
         assert state["owner_id"] == "42"
         assert state["owner_login"] == "octocat"
+        assert state["force_refresh"] is False
         assert state["status"] == "done"
         assert state["processed"] == 1
         assert len(state["records"]) == 1
@@ -101,7 +102,15 @@ class TestLoadFromDisk:
     def test_restores_completed_job(self, tmp_path, monkeypatch, isolated_settings):
         job_id = "completed01"
         workdir = str(tmp_path / "work" / job_id)
-        _make_state_file(workdir, job_id=job_id, owner_id="42", owner_login="octocat", status="done")
+        _make_state_file(
+            workdir,
+            job_id=job_id,
+            owner_id="42",
+            owner_login="octocat",
+            owner_role="admin",
+            force_refresh=True,
+            status="done",
+        )
 
         reg = JobRegistry()
         reg.load_from_disk()
@@ -110,6 +119,8 @@ class TestLoadFromDisk:
         assert job is not None
         assert job.owner_id == "42"
         assert job.owner_login == "octocat"
+        assert job.owner_role == "admin"
+        assert job.force_refresh is True
         assert job.status == "done"
 
     def test_restores_error_job(self, tmp_path, monkeypatch, isolated_settings):

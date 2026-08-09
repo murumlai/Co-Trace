@@ -224,6 +224,7 @@ async def upload(
     background: BackgroundTasks,
     files: list[UploadFile] = File(...),
     paths: list[str] = Form(default=[]),
+    force_refresh: bool = Form(default=False),
     user: AuthenticatedUser = Depends(require_user),
     reg: Any = Depends(get_registry),
     orch: Any = Depends(get_orchestrator),
@@ -247,7 +248,14 @@ async def upload(
         raise HTTPException(400, f"Upload failed: {type(exc).__name__}: {exc}") from exc
     log.info("Stored upload for job %s: %s files, %s zip archives.", job_id[:8], saved.file_count, saved.zip_count)
 
-    reg.create(job_id, workdir, owner_id=user.github_id, owner_login=user.login)
+    job = reg.create(
+        job_id,
+        workdir,
+        owner_id=user.github_id,
+        owner_login=user.login,
+        owner_role="admin" if user.is_admin else "user",
+        force_refresh=force_refresh,
+    )
     background.add_task(orch.run_job, job_id)
     log.info("Upload queued for processing (job %s).", job_id[:8])
     return {"job_id": job_id}
@@ -314,7 +322,7 @@ def clear_job_cache(job_id: str, user: AuthenticatedUser = Depends(require_user)
     keys = {rec.analysis_cache_key for rec in job.records if rec.analysis_cache_key}
     deleted = 0
     for key in keys:
-        if cache.delete_entry(key):
+        if cache.delete_entry(key, actor_id=user.github_id, actor_is_admin=user.is_admin):
             deleted += 1
         rec_matches = [rec for rec in job.records if rec.analysis_cache_key == key]
         for rec in rec_matches:
@@ -341,15 +349,18 @@ async def frontend_log(body: FrontendLogRequest) -> dict:
 
 
 @app.get("/api/cache/analysis")
-def list_analysis_cache(user: str = Depends(require_user),
-                        cache: Any = Depends(get_analysis_cache)) -> dict:  # noqa: ARG001
-    return {"entries": cache.list_entries()}
+def list_analysis_cache(user: AuthenticatedUser = Depends(require_user),
+                        cache: Any = Depends(get_analysis_cache)) -> dict:
+    return {"entries": cache.list_entries(actor_is_admin=user.is_admin)}
 
 
 @app.delete("/api/cache/analysis/{cache_key}")
-def clear_analysis_cache(cache_key: str, user: str = Depends(require_user),
-                         cache: Any = Depends(get_analysis_cache)) -> dict:  # noqa: ARG001
-    return {"cache_key": cache_key, "deleted": cache.delete_entry(cache_key)}
+def clear_analysis_cache(cache_key: str, user: AuthenticatedUser = Depends(require_user),
+                         cache: Any = Depends(get_analysis_cache)) -> dict:
+    return {
+        "cache_key": cache_key,
+        "deleted": cache.delete_entry(cache_key, actor_id=user.github_id, actor_is_admin=user.is_admin),
+    }
 
 
 # --------------------------------------------------------------------------

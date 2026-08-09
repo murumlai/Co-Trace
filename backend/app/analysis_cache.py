@@ -93,6 +93,10 @@ def set_entry(
     if source != "llm":
         return
     now = _now()
+    created_by = str(metadata.get("created_by") or "")[:120]
+    created_by_login = str(metadata.get("created_by_login") or "")[:120]
+    created_by_role = "admin" if str(metadata.get("created_by_role") or "").lower() == "admin" else "user"
+    protected = bool(metadata.get("protected")) or created_by_role == "admin"
     with _lock:
         data = _load()
         existing = data["entries"].get(cache_key, {})
@@ -105,6 +109,11 @@ def set_entry(
             "model_identity": _model_identity(),
             "prompt_version": _CACHE_PROMPT_VERSION,
             "created_at": existing.get("created_at", now),
+            "created_by": existing.get("created_by", created_by),
+            "created_by_login": existing.get("created_by_login", created_by_login),
+            "created_by_role": existing.get("created_by_role", created_by_role),
+            "is_admin_saved": bool(existing.get("is_admin_saved", protected)),
+            "protected": bool(existing.get("protected", protected)),
             "updated_at": now,
             "last_used_at": now,
             "hit_count": int(existing.get("hit_count", 0)),
@@ -114,24 +123,44 @@ def set_entry(
     log.info("Saved analysis cache entry %s.", cache_key[:8])
 
 
-def delete_entry(cache_key: str) -> bool:
+def delete_entry(cache_key: str, *, actor_id: str | None = None, actor_is_admin: bool = False) -> bool:
     with _lock:
         data = _load()
-        existed = cache_key in data["entries"]
-        if existed:
+        entry = data["entries"].get(cache_key)
+        if not entry:
+            return False
+        allowed = actor_is_admin or (
+            actor_id
+            and entry.get("created_by") == actor_id
+            and not entry.get("protected")
+            and not entry.get("is_admin_saved")
+        )
+        if allowed:
             del data["entries"][cache_key]
             _save(data)
-    if existed:
+    if allowed:
         log.info("Deleted analysis cache entry %s.", cache_key[:8])
-    return existed
+    return bool(allowed)
 
 
-def list_entries() -> list[dict[str, Any]]:
+def list_entries(*, actor_is_admin: bool = False) -> list[dict[str, Any]]:
     with _lock:
         data = _load()
-        entries = [dict(entry) for entry in data["entries"].values()]
+        entries = [_visible_entry(entry, actor_is_admin=actor_is_admin) for entry in data["entries"].values()]
     entries.sort(key=lambda item: item.get("last_used_at") or item.get("updated_at") or "", reverse=True)
     return entries
+
+
+def _visible_entry(entry: dict[str, Any], *, actor_is_admin: bool) -> dict[str, Any]:
+    visible = dict(entry)
+    if actor_is_admin:
+        return visible
+    visible.pop("created_by", None)
+    visible.pop("created_by_login", None)
+    metadata = dict(visible.get("metadata") or {})
+    metadata.pop("unit_id", None)
+    visible["metadata"] = metadata
+    return visible
 
 
 def _model_identity() -> dict[str, Any]:
@@ -304,13 +333,13 @@ class DiskAnalysisCache:
 
     # --- Administrative helpers (not in the core AnalysisCache protocol) ---
 
-    def list_entries(self) -> list[dict[str, Any]]:
+    def list_entries(self, *, actor_is_admin: bool = False) -> list[dict[str, Any]]:
         """Return all cache entries, most-recently-used first."""
-        return list_entries()
+        return list_entries(actor_is_admin=actor_is_admin)
 
-    def delete_entry(self, cache_key: str) -> bool:
+    def delete_entry(self, cache_key: str, *, actor_id: str | None = None, actor_is_admin: bool = False) -> bool:
         """Delete a specific cache entry; return True if it existed."""
-        return delete_entry(cache_key)
+        return delete_entry(cache_key, actor_id=actor_id, actor_is_admin=actor_is_admin)
 
 
 # Module-level default instance used when no cache is explicitly injected.

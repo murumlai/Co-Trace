@@ -209,6 +209,25 @@ class TestAnalyzeJobDedup:
         assert calls["n"] == 0
         assert rec.root_cause == "cached root"
 
+    def test_force_refresh_bypasses_persistent_cache(self, monkeypatch):
+        cached_entry = {"root_cause": "cached root", "suggested_solution": "cached sol"}
+        monkeypatch.setattr("app.analysis_cache.get_entry", lambda *a, **kw: cached_entry)
+        monkeypatch.setattr("app.analysis_cache.set_entry", lambda *a, **kw: None)
+
+        calls = {"n": 0}
+
+        def counting_stub(ec, em, snippet):  # noqa: ARG001
+            calls["n"] += 1
+            return "fresh root", "fresh solution", "stub"
+
+        rec = _fail_rec("u1")
+        job = _make_job([rec])
+        job.force_refresh = True
+        analyze_job(job, analyze_failure=counting_stub)
+
+        assert calls["n"] == 1
+        assert rec.root_cause == "fresh root"
+
     def test_analysis_source_set_on_records(self, monkeypatch):
         monkeypatch.setattr("app.analysis_cache.get_entry", lambda *a, **kw: None)
         monkeypatch.setattr("app.analysis_cache.set_entry", lambda *a, **kw: None)

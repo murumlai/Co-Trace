@@ -63,7 +63,7 @@ function Shell() {
     log('info', 'Job ready', { jobId: id, warningCount: jobWarnings.length })
   }
 
-  const startBatch = async (files) => {
+  const startBatch = async (files, options = {}) => {
     const token = runToken.current + 1
     runToken.current = token
     setBatchRunning(true)
@@ -88,6 +88,7 @@ function Shell() {
         const path = file.webkitRelativePath || (isZip ? file.name : `run_${i}/${file.name}`)
         formData.append('paths', path)
       })
+      formData.append('force_refresh', options.forceRefresh ? 'true' : 'false')
       const { job_id } = await api.upload(formData, { signal: controller.signal })
       if (runToken.current !== token) return
       uploadAbort.current = null

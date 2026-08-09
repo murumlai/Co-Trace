@@ -198,6 +198,7 @@ function SummaryMetric({ label, value }) {
 export default function Home({ onStartBatch, onStopBatch, processing, progress, batchError, llmMetrics, files, setFiles }) {
   const [dragging, setDragging] = useState(false)
   const [localError, setLocalError] = useState('')
+  const [forceRefresh, setForceRefresh] = useState(false)
   const folderInput = useRef(null)
   const fileInput = useRef(null)
   const selectedUpload = uploadSummary(files)
@@ -295,7 +296,7 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
       return
     }
     setLocalError('')
-    onStartBatch(files)
+    onStartBatch(files, { forceRefresh })
   }
 
   const pct = progress && progress.total ? Math.round((progress.processed / progress.total) * 100) : 0
@@ -427,7 +428,17 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
           </div>
         )}
 
-        <div className="mt-8 flex justify-center">
+        <div className="mt-8 flex flex-col items-center justify-center gap-4">
+          <label className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink-2">
+            <input
+              type="checkbox"
+              checked={forceRefresh}
+              disabled={processing}
+              onChange={(event) => setForceRefresh(event.target.checked)}
+              className="h-4 w-4 rounded border-border accent-[var(--accent)]"
+            />
+            <span>Run fresh analysis</span>
+          </label>
           <div className="flex flex-wrap justify-center gap-3">
             <Button variant="primary" onClick={start} disabled={!files.length || processing}>
               {processing ? 'Processing…' : 'Process batch'}
