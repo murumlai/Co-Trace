@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import aggregator
-from .auth import AuthenticatedUser, get_auth, require_user
+from .auth import AuthenticatedUser, get_auth, require_admin, require_user
 from .config import settings
 from .dependencies import (
     get_analysis_cache,
@@ -439,7 +439,7 @@ def list_acronyms(product: str | None = None, status: str | None = None,
 
 @app.post("/api/knowledge/acronyms")
 def upsert_acronym(req: AcronymUpsertRequest,
-                   user: str = Depends(require_user),  # noqa: ARG001
+                   user: AuthenticatedUser = Depends(require_admin),  # noqa: ARG001
                    store: Any = Depends(get_acronym_glossary_store)) -> dict:
     acronym = (req.acronym or "").strip()
     if not acronym:
@@ -460,7 +460,7 @@ def upsert_acronym(req: AcronymUpsertRequest,
 
 @app.delete("/api/knowledge/acronyms")
 def delete_acronym(acronym: str, product: str | None = None,
-                   user: str = Depends(require_user),  # noqa: ARG001
+                   user: AuthenticatedUser = Depends(require_admin),  # noqa: ARG001
                    store: Any = Depends(get_acronym_glossary_store)) -> dict:
     if not store.delete_entry(acronym, product):
         raise HTTPException(404, "Acronym not found")
@@ -472,7 +472,7 @@ def delete_acronym(acronym: str, product: str | None = None,
 async def knowledge_upload(
     background: BackgroundTasks,
     file: UploadFile = File(...),
-    user: str = Depends(require_user),  # noqa: ARG001
+    user: AuthenticatedUser = Depends(require_admin),  # noqa: ARG001
     ingestion: Any = Depends(get_knowledge_ingestion),
     retriever: Any = Depends(get_knowledge_retriever),
 ) -> dict:
@@ -511,7 +511,7 @@ def knowledge_job(job_id: str, user: str = Depends(require_user)) -> dict:  # no
 
 
 @app.post("/api/knowledge/rebuild")
-def knowledge_rebuild(user: str = Depends(require_user),  # noqa: ARG001
+def knowledge_rebuild(user: AuthenticatedUser = Depends(require_admin),  # noqa: ARG001
                       ingestion: Any = Depends(get_knowledge_ingestion),
                       retriever: Any = Depends(get_knowledge_retriever)) -> dict:
     return {"manifest": _rebuild_knowledge(ingestion, retriever)}
@@ -519,7 +519,7 @@ def knowledge_rebuild(user: str = Depends(require_user),  # noqa: ARG001
 
 @app.delete("/api/knowledge/documents/{doc_id}")
 def knowledge_delete_document(doc_id: str,
-                              user: str = Depends(require_user),  # noqa: ARG001
+                              user: AuthenticatedUser = Depends(require_admin),  # noqa: ARG001
                               ingestion: Any = Depends(get_knowledge_ingestion),
                               retriever: Any = Depends(get_knowledge_retriever)) -> dict:
     docs_dir = settings.PRODUCT_KNOWLEDGE_DOCS_DIR
@@ -544,7 +544,7 @@ def knowledge_delete_document(doc_id: str,
 
 
 @app.delete("/api/knowledge")
-def knowledge_delete_pack(user: str = Depends(require_user),  # noqa: ARG001
+def knowledge_delete_pack(user: AuthenticatedUser = Depends(require_admin),  # noqa: ARG001
                           store: Any = Depends(get_knowledge_store),
                           retriever: Any = Depends(get_knowledge_retriever)) -> dict:
     store.delete_pack()
