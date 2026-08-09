@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.knowledge.models import KnowledgeManifest, ProductManifestEntry
 from app.knowledge.summarizer import ProductKnowledgeError
+from tests.auth_helpers import auth_headers
 
 
 def _manifest() -> KnowledgeManifest:
@@ -73,20 +74,16 @@ def env(tmp_path):
     fastapi_app.dependency_overrides.clear()
 
 
-def _token(client) -> str:
-    return client.post("/api/login", json={"username": "admin", "password": "admin"}).json()["token"]
-
-
-def _auth(client) -> dict:
-    return {"Authorization": f"Bearer {_token(client)}"}
+def _auth(client) -> dict:  # noqa: ARG001
+    return auth_headers()
 
 
 class TestKnowledgeRoutesAuth:
-    def test_status_without_token_401(self, env):
+    def test_status_without_session_401(self, env):
         client, _ = env
         assert client.get("/api/knowledge").status_code == 401
 
-    def test_rebuild_without_token_401(self, env):
+    def test_rebuild_without_session_401(self, env):
         client, _ = env
         assert client.post("/api/knowledge/rebuild").status_code == 401
 

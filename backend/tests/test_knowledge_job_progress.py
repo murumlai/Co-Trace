@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.knowledge.models import KnowledgeManifest, ProductManifestEntry
+from tests.auth_helpers import auth_headers
 
 
 class StoreStub:
@@ -54,9 +55,8 @@ def client_env(tmp_path):
     fastapi_app.dependency_overrides.clear()
 
 
-def _auth(client) -> dict:
-    token = client.post("/api/login", json={"username": "admin", "password": "admin"}).json()["token"]
-    return {"Authorization": f"Bearer {token}"}
+def _auth(client) -> dict:  # noqa: ARG001
+    return auth_headers()
 
 
 def test_upload_returns_pollable_job_status(client_env):

@@ -4,6 +4,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.auth_helpers import auth_headers
+
 
 @pytest.fixture()
 def env(tmp_path):
@@ -22,17 +24,16 @@ def env(tmp_path):
     fastapi_app.dependency_overrides.clear()
 
 
-def _auth(client) -> dict:
-    token = client.post("/api/login", json={"username": "admin", "password": "admin"}).json()["token"]
-    return {"Authorization": f"Bearer {token}"}
+def _auth(client) -> dict:  # noqa: ARG001
+    return auth_headers()
 
 
 class TestAcronymRoutesAuth:
-    def test_list_without_token_401(self, env):
+    def test_list_without_session_401(self, env):
         client, _ = env
         assert client.get("/api/knowledge/acronyms").status_code == 401
 
-    def test_upsert_without_token_401(self, env):
+    def test_upsert_without_session_401(self, env):
         client, _ = env
         assert client.post("/api/knowledge/acronyms", json={"acronym": "PAN"}).status_code == 401
 
