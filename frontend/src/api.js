@@ -1,26 +1,14 @@
-// Thin API client. Token is kept in localStorage for the placeholder auth.
 import { debugLog, log } from './logger'
 
-const TOKEN_KEY = 'cotrace_token'
-
-export function getToken() {
-  return localStorage.getItem(TOKEN_KEY)
-}
-export function setToken(t) {
-  if (t) localStorage.setItem(TOKEN_KEY, t)
-  else localStorage.removeItem(TOKEN_KEY)
-}
-
-async function request(path, { method = 'GET', body, headers = {}, signal } = {}) {
-  const token = getToken()
+async function request(path, { method = 'GET', body, headers = {}, signal, authOptional = false } = {}) {
   const started = performance.now()
   let res
   try {
     res = await fetch(path, {
       method,
+      credentials: 'include',
       headers: {
         ...(body && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...headers,
       },
       body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
@@ -34,11 +22,9 @@ async function request(path, { method = 'GET', body, headers = {}, signal } = {}
   }
   const durationMs = Math.round(performance.now() - started)
   debugLog('API response', { path, method, status: res.status, durationMs })
-  if (res.status === 401 && path !== '/api/login') {
-    // Stale/expired bearer token (e.g. backend restarted, or the session
-    // TTL lapsed). Clear it and let the app fall back to the login screen
-    // instead of surfacing a raw 401 error mid-action.
-    setToken(null)
+  if (res.status === 401 && !authOptional) {
+    // Let the app fall back to the login screen instead of surfacing a raw 401
+    // error mid-action.
     window.dispatchEvent(new Event('cotrace:unauthorized'))
   }
   if (!res.ok) {
@@ -53,9 +39,8 @@ async function request(path, { method = 'GET', body, headers = {}, signal } = {}
 }
 
 export const api = {
-  login: (username, password) =>
-    request('/api/login', { method: 'POST', body: { username, password } }),
-  me: () => request('/api/me'),
+  me: (options = {}) => request('/api/me', options),
+  logout: () => request('/api/logout', { method: 'POST', authOptional: true }),
   upload: (formData, options = {}) => request('/api/upload', { method: 'POST', body: formData, ...options }),
   status: (jobId) => request(`/api/jobs/${jobId}/status`),
   stop: (jobId) => request(`/api/jobs/${jobId}/stop`, { method: 'POST' }),

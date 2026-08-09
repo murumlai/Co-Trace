@@ -22,7 +22,7 @@ function relPath(file) {
 }
 
 function Shell() {
-  const { isAuthed, username, logout } = useAuth()
+  const { checking, isAuthed, username, logout } = useAuth()
   const [theme, setTheme] = useState(() => localStorage.getItem('cotrace-theme') || 'light')
   const [tab, setTab] = useState('home')
   const [jobId, setJobId] = useState(null)
@@ -43,6 +43,14 @@ function Shell() {
     root.style.colorScheme = theme
     localStorage.setItem('cotrace-theme', theme)
   }, [theme])
+
+  if (checking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-6 py-16 text-muted">
+        Checking session…
+      </div>
+    )
+  }
 
   if (!isAuthed) return <Login />
 
