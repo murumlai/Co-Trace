@@ -40,7 +40,7 @@ from .dependencies import (
 from .knowledge import parsing
 from .knowledge.summarizer import ProductKnowledgeError, is_llm_backend_available
 from .logging_config import setup_backend_logging, write_frontend_log
-from .models import AcronymUpsertRequest, FrontendLogRequest
+from .models import AcronymUpsertRequest, AdminLoginRequest, FrontendLogRequest
 from .record_views import group_units_by_serial
 from .upload_storage import UploadStorageError, save_uploads
 
@@ -185,6 +185,34 @@ def logout(response: Response) -> dict:
         samesite="lax",
     )
     return {"ok": True}
+
+
+@app.post("/api/auth/admin/login")
+def admin_login(body: AdminLoginRequest, response: Response) -> dict:
+    user = get_auth().authenticate_admin(body.username, body.password)
+    token = get_auth().create_session_token(user, auth_method="admin_local")
+    response.set_cookie(
+        settings.SESSION_COOKIE_NAME,
+        token,
+        max_age=settings.SESSION_TTL_S,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite="lax",
+        path="/",
+    )
+    log.info("Admin signed in via local credentials: %s.", user.login)
+    return {
+        "ok": True,
+        "user": {
+            "username": user.login,
+            "login": user.login,
+            "github_id": user.github_id,
+            "is_admin": user.is_admin,
+            "role": "admin",
+            "name": user.name,
+            "avatar_url": user.avatar_url,
+        },
+    }
 
 
 @app.get("/api/me")

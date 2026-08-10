@@ -9,9 +9,12 @@ const AUTH_ERROR_COPY = {
 }
 
 export default function Login() {
-  const { login, sessionExpired, clearSessionNotice } = useAuth()
+  const { login, adminLogin, sessionExpired, clearSessionNotice } = useAuth()
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [showAdmin, setShowAdmin] = useState(false)
+  const [adminUser, setAdminUser] = useState('')
+  const [adminPass, setAdminPass] = useState('')
 
   const oauthError = useMemo(() => {
     const params = new URLSearchParams(window.location.search)
@@ -31,6 +34,19 @@ export default function Login() {
     clearSessionNotice()
     setBusy(true)
     login()
+  }
+
+  const submitAdmin = async (event) => {
+    event.preventDefault()
+    setError('')
+    clearSessionNotice()
+    setBusy(true)
+    try {
+      await adminLogin(adminUser, adminPass)
+    } catch (err) {
+      setError(err.message || 'Admin sign-in failed. Please try again.')
+      setBusy(false)
+    }
   }
 
   return (
@@ -70,6 +86,57 @@ export default function Login() {
           <Button variant="primary" type="button" onClick={submit} disabled={busy} className="w-full">
             {busy ? 'Opening GitHub…' : 'Sign in with GitHub'}
           </Button>
+
+          <div className="flex items-center gap-3 text-xs text-muted">
+            <span className="h-px flex-1 bg-border" />
+            <span>maintenance</span>
+            <span className="h-px flex-1 bg-border" />
+          </div>
+
+          {!showAdmin ? (
+            <Button
+              variant="secondary"
+              type="button"
+              onClick={() => {
+                setError('')
+                setShowAdmin(true)
+              }}
+              disabled={busy}
+              className="w-full"
+            >
+              Sign in as Admin
+            </Button>
+          ) : (
+            <form onSubmit={submitAdmin} className="space-y-3">
+              <input
+                type="text"
+                value={adminUser}
+                onChange={(e) => setAdminUser(e.target.value)}
+                placeholder="Admin username"
+                autoComplete="username"
+                className="w-full rounded-lg border border-border bg-surface px-4 py-2 text-sm text-ink focus-ring"
+              />
+              <input
+                type="password"
+                value={adminPass}
+                onChange={(e) => setAdminPass(e.target.value)}
+                placeholder="Admin password"
+                autoComplete="current-password"
+                className="w-full rounded-lg border border-border bg-surface px-4 py-2 text-sm text-ink focus-ring"
+              />
+              <Button variant="primary" type="submit" disabled={busy} className="w-full">
+                {busy ? 'Signing in…' : 'Sign in'}
+              </Button>
+              <button
+                type="button"
+                onClick={() => setShowAdmin(false)}
+                disabled={busy}
+                className="w-full text-xs text-muted hover:underline focus-ring rounded"
+              >
+                Back to GitHub sign-in
+              </button>
+            </form>
+          )}
         </div>
       </Card>
     </div>

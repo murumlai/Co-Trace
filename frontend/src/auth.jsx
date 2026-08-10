@@ -41,6 +41,13 @@ export function AuthProvider({ children }) {
     window.location.assign('/api/auth/github')
   }
 
+  const adminLogin = async (username, password) => {
+    const res = await api.adminLogin({ username, password })
+    setUser(res.user)
+    setSessionExpired(false)
+    return res.user
+  }
+
   const logout = async () => {
     try {
       await api.logout()
@@ -60,6 +67,7 @@ export function AuthProvider({ children }) {
         user,
         username: user?.username || user?.login || null,
         login,
+        adminLogin,
         logout,
         checking,
         isAuthed: !!user,

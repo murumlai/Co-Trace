@@ -157,6 +157,8 @@ Important environment variables:
 | `JWT_SECRET` | `dev-only-change-me` | Secret used to sign Co-Trace session cookies. Override outside local throwaway runs. |
 | `COOKIE_SECURE` | `0` | Set to `1` when serving over HTTPS in production/IIS. |
 | `GITHUB_ADMIN_USERS` | empty | Comma-separated GitHub usernames allowed to manage knowledge writes and protected cache entries. |
+| `ADMIN_USERNAME` | `admin` | Username for the local maintenance admin login (separate from GitHub). |
+| `ADMIN_PASSWORD` | empty | Password for the local maintenance admin login. Empty disables it, leaving GitHub as the only sign-in. |
 | `HTTP_PROXY` / `HTTPS_PROXY` | empty | Corporate proxy for backend calls to GitHub OAuth endpoints. |
 | `SESSION_TTL_S` | `2592000` | Auth session lifetime, 30 days by default. |
 | `WORK_DIR` | `.cotrace_work` | Per-job uploads, job state, and analysis cache location. |

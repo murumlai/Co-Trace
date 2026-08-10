@@ -18,6 +18,11 @@ Classification = Literal["first_pass", "retry_pass", "fail", "unknown"]
 LlmModelRole = Literal["mini", "reasoning"]
 
 
+class AdminLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
 class StepRecord(BaseModel):
     name: str
     result: Result = "UNKNOWN"

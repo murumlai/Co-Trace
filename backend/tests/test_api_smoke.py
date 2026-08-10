@@ -95,9 +95,53 @@ class TestGitHubOAuthRoutes:
         assert "session=" in resp.headers["set-cookie"]
 
 
-# ---------------------------------------------------------------------------
-# Auth-guarded endpoints require a valid session cookie
-# ---------------------------------------------------------------------------
+class TestAdminLoginRoute:
+    def test_admin_login_success_sets_session_and_is_admin(self, client, monkeypatch):
+        import app.config as cfg
+
+        monkeypatch.setattr(cfg.settings, "ADMIN_USERNAME", "maint")
+        monkeypatch.setattr(cfg.settings, "ADMIN_PASSWORD", "s3cret")
+
+        resp = client.post(
+            "/api/auth/admin/login",
+            json={"username": "maint", "password": "s3cret"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["user"]["is_admin"] is True
+        assert "session=" in resp.headers["set-cookie"]
+
+        # The admin grant must persist across requests (not recomputed away).
+        me = client.get("/api/me")
+        assert me.status_code == 200
+        assert me.json()["is_admin"] is True
+
+    def test_admin_login_wrong_password_401(self, client, monkeypatch):
+        import app.config as cfg
+
+        monkeypatch.setattr(cfg.settings, "ADMIN_USERNAME", "maint")
+        monkeypatch.setattr(cfg.settings, "ADMIN_PASSWORD", "s3cret")
+        client.cookies.clear()
+
+        resp = client.post(
+            "/api/auth/admin/login",
+            json={"username": "maint", "password": "wrong"},
+        )
+        assert resp.status_code == 401
+
+    def test_admin_login_disabled_when_no_password_503(self, client, monkeypatch):
+        import app.config as cfg
+
+        monkeypatch.setattr(cfg.settings, "ADMIN_PASSWORD", "")
+        client.cookies.clear()
+
+        resp = client.post(
+            "/api/auth/admin/login",
+            json={"username": "admin", "password": "anything"},
+        )
+        assert resp.status_code == 503
+
 
 class TestAuthGuards:
     def test_jobs_list_without_session_returns_401(self, client):

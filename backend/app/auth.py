@@ -102,7 +102,7 @@ class GitHubOAuthAuth:
             avatar_url=payload.get("avatar_url"),
         )
 
-    def create_session_token(self, user: AuthenticatedUser) -> str:
+    def create_session_token(self, user: AuthenticatedUser, auth_method: str = "github") -> str:
         now = int(time.time())
         payload = {
             "sub": user.github_id,
@@ -110,10 +110,26 @@ class GitHubOAuthAuth:
             "name": user.name,
             "avatar_url": user.avatar_url,
             "is_admin": user.is_admin,
+            "amr": auth_method,
             "iat": now,
             "exp": now + settings.SESSION_TTL_S,
         }
         return jwt.encode(payload, settings.JWT_SECRET, algorithm="HS256")
+
+    def authenticate_admin(self, username: str, password: str) -> AuthenticatedUser:
+        if not settings.ADMIN_PASSWORD:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Local admin login is not configured")
+        expected_user = settings.ADMIN_USERNAME or "admin"
+        user_ok = secrets.compare_digest(username or "", expected_user)
+        pass_ok = secrets.compare_digest(password or "", settings.ADMIN_PASSWORD)
+        if not (user_ok and pass_ok):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid admin credentials")
+        return AuthenticatedUser(
+            login=expected_user,
+            github_id=f"admin-local:{expected_user}",
+            is_admin=True,
+            name="Administrator",
+        )
 
     def verify_session_token(self, token: str) -> AuthenticatedUser:
         try:
@@ -124,10 +140,14 @@ class GitHubOAuthAuth:
         github_id = str(payload.get("sub") or "").strip()
         if not login or not github_id:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid session")
+        # Local admin sessions carry their own admin grant; GitHub sessions are
+        # re-evaluated against the current admin list on every request.
+        auth_method = str(payload.get("amr") or "github")
+        is_admin = bool(payload.get("is_admin")) if auth_method == "admin_local" else self.is_admin(login)
         return AuthenticatedUser(
             login=login,
             github_id=github_id,
-            is_admin=self.is_admin(login),
+            is_admin=is_admin,
             name=payload.get("name"),
             avatar_url=payload.get("avatar_url"),
         )

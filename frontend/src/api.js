@@ -40,6 +40,8 @@ async function request(path, { method = 'GET', body, headers = {}, signal, authO
 
 export const api = {
   me: (options = {}) => request('/api/me', options),
+  adminLogin: (payload) =>
+    request('/api/auth/admin/login', { method: 'POST', body: payload, authOptional: true }),
   logout: () => request('/api/logout', { method: 'POST', authOptional: true }),
   upload: (formData, options = {}) => request('/api/upload', { method: 'POST', body: formData, ...options }),
   status: (jobId) => request(`/api/jobs/${jobId}/status`),

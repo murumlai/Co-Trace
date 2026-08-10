@@ -68,6 +68,10 @@ class Settings:
     GITHUB_ADMIN_USERS: list[str] = [
         user.strip() for user in os.getenv("GITHUB_ADMIN_USERS", "").split(",") if user.strip()
     ]
+    # Local maintenance admin login (separate from GitHub OAuth). An empty
+    # password disables this path entirely, leaving GitHub as the only login.
+    ADMIN_USERNAME: str = os.getenv("ADMIN_USERNAME", "admin")
+    ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "")
 
     # --- Jobs / storage ---
     WORK_DIR: str = os.getenv("WORK_DIR", os.path.join(os.getcwd(), ".cotrace_work"))
