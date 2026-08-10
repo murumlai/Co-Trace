@@ -1,41 +1,72 @@
 import { createContext, useContext, useEffect, useState } from 'react'
-import { api, getToken, setToken } from './api'
+import { api } from './api'
 
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
-  const [token, setTok] = useState(getToken())
-  const [username, setUsername] = useState(null)
+  const [user, setUser] = useState(null)
+  const [checking, setChecking] = useState(true)
   const [sessionExpired, setSessionExpired] = useState(false)
 
   useEffect(() => {
+    let active = true
+    api.me({ authOptional: true })
+      .then((me) => {
+        if (!active) return
+        setUser(me)
+        setSessionExpired(false)
+      })
+      .catch(() => {
+        if (!active) return
+        setUser(null)
+      })
+      .finally(() => {
+        if (active) setChecking(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
     const onUnauthorized = () => {
-      setTok(null)
-      setUsername(null)
+      setUser(null)
       setSessionExpired(true)
     }
     window.addEventListener('cotrace:unauthorized', onUnauthorized)
     return () => window.removeEventListener('cotrace:unauthorized', onUnauthorized)
   }, [])
 
-  const login = async (u, p) => {
-    const res = await api.login(u, p)
-    setToken(res.token)
-    setTok(res.token)
-    setUsername(res.username)
-    setSessionExpired(false)
+  const login = () => {
+    window.location.assign('/api/auth/github')
   }
 
-  const logout = () => {
-    setToken(null)
-    setTok(null)
-    setUsername(null)
+  const logout = async () => {
+    try {
+      await api.logout()
+    } finally {
+      setUser(null)
+      setSessionExpired(false)
+    }
+  }
+
+  const clearSessionNotice = () => {
     setSessionExpired(false)
   }
 
   return (
     <AuthContext.Provider
-      value={{ token, username, login, logout, isAuthed: !!token, sessionExpired }}
+      value={{
+        user,
+        username: user?.username || user?.login || null,
+        login,
+        logout,
+        checking,
+        isAuthed: !!user,
+        isAdmin: !!user?.is_admin,
+        sessionExpired,
+        clearSessionNotice,
+      }}
     >
       {children}
     </AuthContext.Provider>

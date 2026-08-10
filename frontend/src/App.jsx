@@ -22,7 +22,7 @@ function relPath(file) {
 }
 
 function Shell() {
-  const { isAuthed, username, logout } = useAuth()
+  const { checking, isAuthed, username, logout } = useAuth()
   const [theme, setTheme] = useState(() => localStorage.getItem('cotrace-theme') || 'light')
   const [tab, setTab] = useState('home')
   const [jobId, setJobId] = useState(null)
@@ -44,6 +44,14 @@ function Shell() {
     localStorage.setItem('cotrace-theme', theme)
   }, [theme])
 
+  if (checking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-6 py-16 text-muted">
+        Checking session…
+      </div>
+    )
+  }
+
   if (!isAuthed) return <Login />
 
   const toggleTheme = () => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
@@ -55,7 +63,7 @@ function Shell() {
     log('info', 'Job ready', { jobId: id, warningCount: jobWarnings.length })
   }
 
-  const startBatch = async (files) => {
+  const startBatch = async (files, options = {}) => {
     const token = runToken.current + 1
     runToken.current = token
     setBatchRunning(true)
@@ -80,6 +88,7 @@ function Shell() {
         const path = file.webkitRelativePath || (isZip ? file.name : `run_${i}/${file.name}`)
         formData.append('paths', path)
       })
+      formData.append('force_refresh', options.forceRefresh ? 'true' : 'false')
       const { job_id } = await api.upload(formData, { signal: controller.signal })
       if (runToken.current !== token) return
       uploadAbort.current = null

@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.knowledge.models import KnowledgeManifest, ProductManifestEntry
+from tests.auth_helpers import admin_auth_headers, auth_headers
 
 
 class StoreStub:
@@ -54,16 +55,19 @@ def client_env(tmp_path):
     fastapi_app.dependency_overrides.clear()
 
 
-def _auth(client) -> dict:
-    token = client.post("/api/login", json={"username": "admin", "password": "admin"}).json()["token"]
-    return {"Authorization": f"Bearer {token}"}
+def _auth(client) -> dict:  # noqa: ARG001
+    return auth_headers()
+
+
+def _admin_auth(client) -> dict:  # noqa: ARG001
+    return admin_auth_headers()
 
 
 def test_upload_returns_pollable_job_status(client_env):
     client = client_env
     upload = client.post(
         "/api/knowledge/upload",
-        headers=_auth(client),
+        headers=_admin_auth(client),
         files={"file": ("M79060-001_Debug.pdf", io.BytesIO(b"fake"), "application/pdf")},
     ).json()
 

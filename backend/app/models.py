@@ -254,16 +254,6 @@ class JobStatus(BaseModel):
     llm_metrics: LlmUsageMetrics = Field(default_factory=LlmUsageMetrics)
 
 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-
-class LoginResponse(BaseModel):
-    token: str
-    username: str
-
-
 class FrontendLogRequest(BaseModel):
     level: str = "info"
     message: str

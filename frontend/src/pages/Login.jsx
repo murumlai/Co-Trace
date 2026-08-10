@@ -1,25 +1,36 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../auth'
-import { Button, Card, Input } from '../components/ui'
+import { Button, Card } from '../components/ui'
+
+const AUTH_ERROR_COPY = {
+  state_mismatch: 'The sign-in request expired. Please try again.',
+  missing_code: 'GitHub did not return a sign-in code. Please try again.',
+  oauth_failed: 'GitHub sign-in failed. Please try again.',
+}
 
 export default function Login() {
-  const { login, sessionExpired } = useAuth()
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
+  const { login, sessionExpired, clearSessionNotice } = useAuth()
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const submit = async (e) => {
-    e.preventDefault()
+  const oauthError = useMemo(() => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('auth_error')
+  }, [])
+
+  useEffect(() => {
+    if (!oauthError) return
+    setError(AUTH_ERROR_COPY[oauthError] || 'GitHub sign-in failed. Please try again.')
+    const url = new URL(window.location.href)
+    url.searchParams.delete('auth_error')
+    window.history.replaceState(null, '', url.toString())
+  }, [oauthError])
+
+  const submit = () => {
     setError('')
+    clearSessionNotice()
     setBusy(true)
-    try {
-      await login(username, password)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(false)
-    }
+    login()
   }
 
   return (
@@ -43,33 +54,7 @@ export default function Login() {
           <p className="mt-2 text-muted">Manufacturing Log Dashboard</p>
         </div>
 
-        <form onSubmit={submit} className="mt-10 space-y-5">
-          <div>
-            <label className="block text-sm font-medium text-ink-2 mb-2" htmlFor="u">
-              Username
-            </label>
-            <Input
-              id="u"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="admin"
-              autoComplete="username"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-ink-2 mb-2" htmlFor="p">
-              Password
-            </label>
-            <Input
-              id="p"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••"
-              autoComplete="current-password"
-            />
-          </div>
-
+        <div className="mt-10 space-y-5">
           {error && (
             <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
               {error}
@@ -82,14 +67,10 @@ export default function Login() {
             </div>
           )}
 
-          <Button variant="primary" type="submit" disabled={busy} className="w-full">
-            {busy ? 'Signing in…' : 'Sign in'}
+          <Button variant="primary" type="button" onClick={submit} disabled={busy} className="w-full">
+            {busy ? 'Opening GitHub…' : 'Sign in with GitHub'}
           </Button>
-        </form>
-
-        <p className="mt-6 text-center text-xs text-muted">
-          Placeholder auth — default <span className="font-semibold text-ink-2">admin / admin</span>
-        </p>
+        </div>
       </Card>
     </div>
   )

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.knowledge.models import KnowledgeManifest, ProductManifestEntry
 from app.knowledge.summarizer import ProductKnowledgeError
+from tests.auth_helpers import admin_auth_headers, auth_headers
 
 
 def _manifest() -> KnowledgeManifest:
@@ -73,20 +74,20 @@ def env(tmp_path):
     fastapi_app.dependency_overrides.clear()
 
 
-def _token(client) -> str:
-    return client.post("/api/login", json={"username": "admin", "password": "admin"}).json()["token"]
+def _auth(client) -> dict:  # noqa: ARG001
+    return auth_headers()
 
 
-def _auth(client) -> dict:
-    return {"Authorization": f"Bearer {_token(client)}"}
+def _admin_auth(client) -> dict:  # noqa: ARG001
+    return admin_auth_headers()
 
 
 class TestKnowledgeRoutesAuth:
-    def test_status_without_token_401(self, env):
+    def test_status_without_session_401(self, env):
         client, _ = env
         assert client.get("/api/knowledge").status_code == 401
 
-    def test_rebuild_without_token_401(self, env):
+    def test_rebuild_without_session_401(self, env):
         client, _ = env
         assert client.post("/api/knowledge/rebuild").status_code == 401
 
@@ -114,7 +115,7 @@ class TestKnowledgeRoutes:
 
     def test_rebuild_ok(self, env):
         client, state = env
-        resp = client.post("/api/knowledge/rebuild", headers=_auth(client))
+        resp = client.post("/api/knowledge/rebuild", headers=_admin_auth(client))
         assert resp.status_code == 200
         assert resp.json()["manifest"]["global_hash"] == "g"
         assert state["ingestion"].rebuilt == 1
@@ -122,14 +123,20 @@ class TestKnowledgeRoutes:
     def test_rebuild_without_llm_returns_503(self, env):
         client, state = env
         state["ingestion"].raise_error = True
-        resp = client.post("/api/knowledge/rebuild", headers=_auth(client))
+        resp = client.post("/api/knowledge/rebuild", headers=_admin_auth(client))
         assert resp.status_code == 503
+
+    def test_non_admin_rebuild_forbidden(self, env):
+        client, state = env
+        resp = client.post("/api/knowledge/rebuild", headers=_auth(client))
+        assert resp.status_code == 403
+        assert state["ingestion"].rebuilt == 0
 
     def test_upload_rejects_unsupported_type(self, env):
         client, _ = env
         resp = client.post(
             "/api/knowledge/upload",
-            headers=_auth(client),
+            headers=_admin_auth(client),
             files={"file": ("notes.txt", io.BytesIO(b"data"), "text/plain")},
         )
         assert resp.status_code == 400
@@ -138,7 +145,7 @@ class TestKnowledgeRoutes:
         client, state = env
         resp = client.post(
             "/api/knowledge/upload",
-            headers=_auth(client),
+            headers=_admin_auth(client),
             files={"file": ("M79060-001_Debug.pdf", io.BytesIO(b"%PDF-1.4 fake"), "application/pdf")},
         )
         assert resp.status_code == 200
@@ -149,6 +156,11 @@ class TestKnowledgeRoutes:
 
     def test_delete_pack_ok(self, env):
         client, _ = env
-        resp = client.delete("/api/knowledge", headers=_auth(client))
+        resp = client.delete("/api/knowledge", headers=_admin_auth(client))
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
+
+    def test_non_admin_delete_pack_forbidden(self, env):
+        client, _ = env
+        resp = client.delete("/api/knowledge", headers=_auth(client))
+        assert resp.status_code == 403

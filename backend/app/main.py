@@ -10,20 +10,22 @@ from __future__ import annotations
 import logging
 import os
 import re
+import secrets
 import shutil
 import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import urlencode
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import aggregator
-from .auth import get_auth, require_user
+from .auth import AuthenticatedUser, get_auth, require_admin, require_user
 from .config import settings
 from .dependencies import (
     get_analysis_cache,
@@ -38,7 +40,7 @@ from .dependencies import (
 from .knowledge import parsing
 from .knowledge.summarizer import ProductKnowledgeError, is_llm_backend_available
 from .logging_config import setup_backend_logging, write_frontend_log
-from .models import AcronymUpsertRequest, FrontendLogRequest, LoginRequest, LoginResponse
+from .models import AcronymUpsertRequest, FrontendLogRequest
 from .record_views import group_units_by_serial
 from .upload_storage import UploadStorageError, save_uploads
 
@@ -101,16 +103,108 @@ os.makedirs(settings.WORK_DIR, exist_ok=True)
 # --------------------------------------------------------------------------
 # Auth
 # --------------------------------------------------------------------------
-@app.post("/api/login", response_model=LoginResponse)
-def login(body: LoginRequest) -> LoginResponse:
-    token = get_auth().login(body.username, body.password)
-    log.info("User signed in: %s.", body.username)
-    return LoginResponse(token=token, username=body.username)
+def _frontend_redirect(**params: str) -> str:
+    if not params:
+        return settings.FRONTEND_URL
+    separator = "&" if "?" in settings.FRONTEND_URL else "?"
+    return f"{settings.FRONTEND_URL}{separator}{urlencode(params)}"
+
+
+def _clear_oauth_state_cookie(response: Response) -> None:
+    response.delete_cookie(
+        settings.OAUTH_STATE_COOKIE_NAME,
+        path="/",
+        secure=settings.COOKIE_SECURE,
+        httponly=True,
+        samesite="lax",
+    )
+
+
+@app.get("/api/auth/github")
+def github_login() -> RedirectResponse:
+    auth = get_auth()
+    state = auth.new_state()
+    response = RedirectResponse(auth.authorize_url(state), status_code=302)
+    response.set_cookie(
+        settings.OAUTH_STATE_COOKIE_NAME,
+        state,
+        max_age=settings.OAUTH_STATE_TTL_S,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite="lax",
+        path="/",
+    )
+    return response
+
+
+@app.get("/api/auth/github/callback")
+async def github_callback(
+    code: str | None = None,
+    state: str | None = None,
+    state_cookie: str | None = Cookie(default=None, alias=settings.OAUTH_STATE_COOKIE_NAME),
+) -> RedirectResponse:
+    if not state or not state_cookie or not secrets.compare_digest(state, state_cookie):
+        response = RedirectResponse(_frontend_redirect(auth_error="state_mismatch"), status_code=302)
+        _clear_oauth_state_cookie(response)
+        return response
+    if not code:
+        response = RedirectResponse(_frontend_redirect(auth_error="missing_code"), status_code=302)
+        _clear_oauth_state_cookie(response)
+        return response
+    try:
+        user = await get_auth().authenticate_code(code)
+    except HTTPException as exc:
+        log.warning("GitHub OAuth callback failed: %s.", exc.detail)
+        response = RedirectResponse(_frontend_redirect(auth_error="oauth_failed"), status_code=302)
+        _clear_oauth_state_cookie(response)
+        return response
+
+    token = get_auth().create_session_token(user)
+    response = RedirectResponse(settings.FRONTEND_URL, status_code=302)
+    response.set_cookie(
+        settings.SESSION_COOKIE_NAME,
+        token,
+        max_age=settings.SESSION_TTL_S,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite="lax",
+        path="/",
+    )
+    _clear_oauth_state_cookie(response)
+    log.info("User signed in with GitHub: %s%s.", user.login, " (admin)" if user.is_admin else "")
+    return response
+
+
+@app.post("/api/logout")
+def logout(response: Response) -> dict:
+    response.delete_cookie(
+        settings.SESSION_COOKIE_NAME,
+        path="/",
+        secure=settings.COOKIE_SECURE,
+        httponly=True,
+        samesite="lax",
+    )
+    return {"ok": True}
 
 
 @app.get("/api/me")
-def me(user: str = Depends(require_user)) -> dict:
-    return {"username": user}
+def me(user: AuthenticatedUser = Depends(require_user)) -> dict:
+    return {
+        "username": user.login,
+        "login": user.login,
+        "github_id": user.github_id,
+        "is_admin": user.is_admin,
+        "role": "admin" if user.is_admin else "user",
+        "name": user.name,
+        "avatar_url": user.avatar_url,
+    }
+
+
+def _get_owned_job(job_id: str, user: AuthenticatedUser, reg: Any) -> Any:
+    job = reg.get(job_id)
+    if job is None or job.owner_id != user.github_id:
+        raise HTTPException(404, "Job not found")
+    return job
 
 
 # --------------------------------------------------------------------------
@@ -130,7 +224,8 @@ async def upload(
     background: BackgroundTasks,
     files: list[UploadFile] = File(...),
     paths: list[str] = Form(default=[]),
-    user: str = Depends(require_user),
+    force_refresh: bool = Form(default=False),
+    user: AuthenticatedUser = Depends(require_user),
     reg: Any = Depends(get_registry),
     orch: Any = Depends(get_orchestrator),
 ) -> dict:
@@ -140,7 +235,7 @@ async def upload(
     job_id = uuid.uuid4().hex
     workdir = os.path.join(settings.WORK_DIR, job_id)
     os.makedirs(workdir, exist_ok=True)
-    log.info("Upload started: %s files from %s (job %s).", len(files), user, job_id[:8])
+    log.info("Upload started: %s files from %s (job %s).", len(files), user.login, job_id[:8])
 
     try:
         saved = await save_uploads(files, paths, workdir, job_id[:8])
@@ -153,24 +248,30 @@ async def upload(
         raise HTTPException(400, f"Upload failed: {type(exc).__name__}: {exc}") from exc
     log.info("Stored upload for job %s: %s files, %s zip archives.", job_id[:8], saved.file_count, saved.zip_count)
 
-    reg.create(job_id, workdir)
+    job = reg.create(
+        job_id,
+        workdir,
+        owner_id=user.github_id,
+        owner_login=user.login,
+        owner_role="admin" if user.is_admin else "user",
+        force_refresh=force_refresh,
+    )
     background.add_task(orch.run_job, job_id)
     log.info("Upload queued for processing (job %s).", job_id[:8])
     return {"job_id": job_id}
 
 
 @app.get("/api/jobs/{job_id}/status")
-def job_status(job_id: str, user: str = Depends(require_user),
+def job_status(job_id: str, user: AuthenticatedUser = Depends(require_user),
                reg: Any = Depends(get_registry)) -> dict:
-    job = reg.get(job_id)
-    if job is None:
-        raise HTTPException(404, "Job not found")
+    job = _get_owned_job(job_id, user, reg)
     return job.to_status().model_dump()
 
 
 @app.post("/api/jobs/{job_id}/stop")
-def stop_job(job_id: str, user: str = Depends(require_user),  # noqa: ARG001
+def stop_job(job_id: str, user: AuthenticatedUser = Depends(require_user),
              reg: Any = Depends(get_registry)) -> dict:
+    _get_owned_job(job_id, user, reg)
     job = reg.request_cancel(job_id)
     if job is None:
         raise HTTPException(404, "Job not found")
@@ -182,11 +283,9 @@ def stop_job(job_id: str, user: str = Depends(require_user),  # noqa: ARG001
 # Engineer view
 # --------------------------------------------------------------------------
 @app.get("/api/jobs/{job_id}/units")
-def units(job_id: str, user: str = Depends(require_user),
+def units(job_id: str, user: AuthenticatedUser = Depends(require_user),
           reg: Any = Depends(get_registry)) -> dict:
-    job = reg.get(job_id)
-    if job is None:
-        raise HTTPException(404, "Job not found")
+    job = _get_owned_job(job_id, user, reg)
     groups = group_units_by_serial(job.records)
     classification_counts = {"first_pass": 0, "retry_pass": 0, "fail": 0, "unknown": 0}
     for g in groups:
@@ -200,12 +299,10 @@ def units(job_id: str, user: str = Depends(require_user),
 
 
 @app.post("/api/jobs/{job_id}/units/{unit_id}/reanalyze")
-def reanalyze(job_id: str, unit_id: str, user: str = Depends(require_user),
+def reanalyze(job_id: str, unit_id: str, user: AuthenticatedUser = Depends(require_user),
               reg: Any = Depends(get_registry),
               analyzer_svc: Any = Depends(get_analyzer_service)) -> dict:
-    job = reg.get(job_id)
-    if job is None:
-        raise HTTPException(404, "Job not found")
+    job = _get_owned_job(job_id, user, reg)
     rec = analyzer_svc.reanalyze_unit(job, unit_id)
     if rec is None:
         raise HTTPException(404, "Unit not found")
@@ -213,7 +310,7 @@ def reanalyze(job_id: str, unit_id: str, user: str = Depends(require_user),
 
 
 @app.delete("/api/jobs/{job_id}/cache")
-def clear_job_cache(job_id: str, user: str = Depends(require_user),  # noqa: ARG001
+def clear_job_cache(job_id: str, user: AuthenticatedUser = Depends(require_user),
                     reg: Any = Depends(get_registry),
                     cache: Any = Depends(get_analysis_cache)) -> dict:
     """Delete only the analysis cache entries used by this job's records.
@@ -221,13 +318,11 @@ def clear_job_cache(job_id: str, user: str = Depends(require_user),  # noqa: ARG
     Cross-upload cache entries not referenced by the currently loaded job are
     left untouched.
     """
-    job = reg.get(job_id)
-    if job is None:
-        raise HTTPException(404, "Job not found")
+    job = _get_owned_job(job_id, user, reg)
     keys = {rec.analysis_cache_key for rec in job.records if rec.analysis_cache_key}
     deleted = 0
     for key in keys:
-        if cache.delete_entry(key):
+        if cache.delete_entry(key, actor_id=user.github_id, actor_is_admin=user.is_admin):
             deleted += 1
         rec_matches = [rec for rec in job.records if rec.analysis_cache_key == key]
         for rec in rec_matches:
@@ -241,11 +336,9 @@ def clear_job_cache(job_id: str, user: str = Depends(require_user),  # noqa: ARG
 # Manager view
 # --------------------------------------------------------------------------
 @app.get("/api/jobs/{job_id}/manager")
-def manager(job_id: str, user: str = Depends(require_user),
+def manager(job_id: str, user: AuthenticatedUser = Depends(require_user),
             reg: Any = Depends(get_registry)) -> dict:
-    job = reg.get(job_id)
-    if job is None:
-        raise HTTPException(404, "Job not found")
+    job = _get_owned_job(job_id, user, reg)
     return aggregator.build_manager_view(job.records)
 
 
@@ -256,15 +349,18 @@ async def frontend_log(body: FrontendLogRequest) -> dict:
 
 
 @app.get("/api/cache/analysis")
-def list_analysis_cache(user: str = Depends(require_user),
-                        cache: Any = Depends(get_analysis_cache)) -> dict:  # noqa: ARG001
-    return {"entries": cache.list_entries()}
+def list_analysis_cache(user: AuthenticatedUser = Depends(require_user),
+                        cache: Any = Depends(get_analysis_cache)) -> dict:
+    return {"entries": cache.list_entries(actor_is_admin=user.is_admin)}
 
 
 @app.delete("/api/cache/analysis/{cache_key}")
-def clear_analysis_cache(cache_key: str, user: str = Depends(require_user),
-                         cache: Any = Depends(get_analysis_cache)) -> dict:  # noqa: ARG001
-    return {"cache_key": cache_key, "deleted": cache.delete_entry(cache_key)}
+def clear_analysis_cache(cache_key: str, user: AuthenticatedUser = Depends(require_user),
+                         cache: Any = Depends(get_analysis_cache)) -> dict:
+    return {
+        "cache_key": cache_key,
+        "deleted": cache.delete_entry(cache_key, actor_id=user.github_id, actor_is_admin=user.is_admin),
+    }
 
 
 # --------------------------------------------------------------------------
@@ -354,7 +450,7 @@ def list_acronyms(product: str | None = None, status: str | None = None,
 
 @app.post("/api/knowledge/acronyms")
 def upsert_acronym(req: AcronymUpsertRequest,
-                   user: str = Depends(require_user),  # noqa: ARG001
+                   user: AuthenticatedUser = Depends(require_admin),  # noqa: ARG001
                    store: Any = Depends(get_acronym_glossary_store)) -> dict:
     acronym = (req.acronym or "").strip()
     if not acronym:
@@ -375,7 +471,7 @@ def upsert_acronym(req: AcronymUpsertRequest,
 
 @app.delete("/api/knowledge/acronyms")
 def delete_acronym(acronym: str, product: str | None = None,
-                   user: str = Depends(require_user),  # noqa: ARG001
+                   user: AuthenticatedUser = Depends(require_admin),  # noqa: ARG001
                    store: Any = Depends(get_acronym_glossary_store)) -> dict:
     if not store.delete_entry(acronym, product):
         raise HTTPException(404, "Acronym not found")
@@ -387,7 +483,7 @@ def delete_acronym(acronym: str, product: str | None = None,
 async def knowledge_upload(
     background: BackgroundTasks,
     file: UploadFile = File(...),
-    user: str = Depends(require_user),  # noqa: ARG001
+    user: AuthenticatedUser = Depends(require_admin),  # noqa: ARG001
     ingestion: Any = Depends(get_knowledge_ingestion),
     retriever: Any = Depends(get_knowledge_retriever),
 ) -> dict:
@@ -426,7 +522,7 @@ def knowledge_job(job_id: str, user: str = Depends(require_user)) -> dict:  # no
 
 
 @app.post("/api/knowledge/rebuild")
-def knowledge_rebuild(user: str = Depends(require_user),  # noqa: ARG001
+def knowledge_rebuild(user: AuthenticatedUser = Depends(require_admin),  # noqa: ARG001
                       ingestion: Any = Depends(get_knowledge_ingestion),
                       retriever: Any = Depends(get_knowledge_retriever)) -> dict:
     return {"manifest": _rebuild_knowledge(ingestion, retriever)}
@@ -434,7 +530,7 @@ def knowledge_rebuild(user: str = Depends(require_user),  # noqa: ARG001
 
 @app.delete("/api/knowledge/documents/{doc_id}")
 def knowledge_delete_document(doc_id: str,
-                              user: str = Depends(require_user),  # noqa: ARG001
+                              user: AuthenticatedUser = Depends(require_admin),  # noqa: ARG001
                               ingestion: Any = Depends(get_knowledge_ingestion),
                               retriever: Any = Depends(get_knowledge_retriever)) -> dict:
     docs_dir = settings.PRODUCT_KNOWLEDGE_DOCS_DIR
@@ -459,7 +555,7 @@ def knowledge_delete_document(doc_id: str,
 
 
 @app.delete("/api/knowledge")
-def knowledge_delete_pack(user: str = Depends(require_user),  # noqa: ARG001
+def knowledge_delete_pack(user: AuthenticatedUser = Depends(require_admin),  # noqa: ARG001
                           store: Any = Depends(get_knowledge_store),
                           retriever: Any = Depends(get_knowledge_retriever)) -> dict:
     store.delete_pack()

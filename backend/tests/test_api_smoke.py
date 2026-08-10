@@ -1,12 +1,14 @@
 """Safety-net smoke tests: FastAPI route shapes and auth enforcement.
 
 Uses Starlette TestClient without running the lifespan so registry.load_from_disk
-is not invoked. Tests only route-level contract: health, login, and auth guards.
+is not invoked. Tests only route-level contract: health, OAuth, and auth guards.
 """
 from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
+
+from tests.auth_helpers import auth_headers
 
 # Patch settings before importing main so makedirs uses a safe default.
 # (settings.WORK_DIR is already cwd/.cotrace_work which is harmless, but
@@ -47,53 +49,66 @@ class TestHealthEndpoint:
 
 
 # ---------------------------------------------------------------------------
-# POST /api/login
+# GitHub OAuth routes
 # ---------------------------------------------------------------------------
 
-class TestLoginEndpoint:
-    def test_valid_credentials_return_200(self, client):
-        resp = client.post("/api/login", json={"username": "admin", "password": "admin"})
-        assert resp.status_code == 200
+class TestGitHubOAuthRoutes:
+    def test_authorize_redirects_to_github_and_sets_state_cookie(self, client, monkeypatch):
+        import app.config as cfg
 
-    def test_valid_credentials_return_token(self, client):
-        data = client.post("/api/login",
-                           json={"username": "admin", "password": "admin"}).json()
-        assert "token" in data
-        assert isinstance(data["token"], str)
-        assert len(data["token"]) > 10
+        monkeypatch.setattr(cfg.settings, "GITHUB_CLIENT_ID", "client-id")
+        resp = client.get("/api/auth/github", follow_redirects=False)
 
-    def test_valid_credentials_return_username(self, client):
-        data = client.post("/api/login",
-                           json={"username": "admin", "password": "admin"}).json()
-        assert data.get("username") == "admin"
+        assert resp.status_code == 302
+        assert resp.headers["location"].startswith("https://github.com/login/oauth/authorize?")
+        assert f"{cfg.settings.OAUTH_STATE_COOKIE_NAME}=" in resp.headers["set-cookie"]
 
-    def test_invalid_credentials_return_401(self, client):
-        resp = client.post("/api/login",
-                           json={"username": "admin", "password": "wrongpassword"})
-        assert resp.status_code == 401
+    def test_callback_state_mismatch_redirects_with_error(self, client):
+        resp = client.get(
+            "/api/auth/github/callback?code=abc&state=bad",
+            cookies={"github_oauth_state": "good"},
+            follow_redirects=False,
+        )
 
-    def test_missing_body_returns_error(self, client):
-        resp = client.post("/api/login", json={})
-        assert resp.status_code in (400, 422)
+        assert resp.status_code == 302
+        assert "auth_error=state_mismatch" in resp.headers["location"]
+
+    def test_callback_sets_session_cookie(self, client, monkeypatch):
+        import app.config as cfg
+        from app.auth import AuthenticatedUser, get_auth
+
+        async def fake_authenticate_code(code: str) -> AuthenticatedUser:
+            assert code == "abc"
+            return AuthenticatedUser(login="octocat", github_id="42", is_admin=False)
+
+        monkeypatch.setattr(cfg.settings, "FRONTEND_URL", "http://localhost:5173")
+        monkeypatch.setattr(get_auth(), "authenticate_code", fake_authenticate_code)
+
+        resp = client.get(
+            "/api/auth/github/callback?code=abc&state=state123",
+            cookies={"github_oauth_state": "state123"},
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "http://localhost:5173"
+        assert "session=" in resp.headers["set-cookie"]
 
 
 # ---------------------------------------------------------------------------
-# Auth-guarded endpoints require a valid bearer token
+# Auth-guarded endpoints require a valid session cookie
 # ---------------------------------------------------------------------------
 
 class TestAuthGuards:
-    def _get_token(self, client) -> str:
-        data = client.post("/api/login",
-                           json={"username": "admin", "password": "admin"}).json()
-        return data["token"]
-
-    def test_jobs_list_without_token_returns_401(self, client):
+    def test_jobs_list_without_session_returns_401(self, client):
         """Unauthenticated job status request must be rejected."""
+        client.cookies.clear()
         resp = client.get("/api/jobs/somejobid/status")
         assert resp.status_code == 401
 
-    def test_upload_without_token_returns_401(self, client):
+    def test_upload_without_session_returns_401(self, client):
         import io
+        client.cookies.clear()
         resp = client.post(
             "/api/upload",
             files={"files": ("test.txt", io.BytesIO(b"data"), "text/plain")},
@@ -101,13 +116,96 @@ class TestAuthGuards:
         )
         assert resp.status_code == 401
 
-    def test_me_with_valid_token_returns_username(self, client):
-        token = self._get_token(client)
-        resp = client.get("/api/me", headers={"Authorization": f"Bearer {token}"})
+    def test_me_with_valid_session_returns_user_metadata(self, client):
+        resp = client.get("/api/me", headers=auth_headers(login="octocat", github_id="42", is_admin=False))
         assert resp.status_code == 200
-        assert resp.json().get("username") == "admin"
+        assert resp.json().get("username") == "octocat"
+        assert resp.json().get("github_id") == "42"
+        assert resp.json().get("role") == "user"
 
-    def test_me_with_invalid_token_returns_401(self, client):
-        resp = client.get("/api/me",
-                          headers={"Authorization": "Bearer invalid_token_xxx"})
+    def test_me_with_invalid_session_returns_401(self, client):
+        client.cookies.clear()
+        resp = client.get("/api/me", cookies={"session": "invalid_token_xxx"})
         assert resp.status_code == 401
+
+    def test_logout_clears_session_cookie(self, client):
+        resp = client.post("/api/logout", headers=auth_headers(), follow_redirects=False)
+        assert resp.status_code == 200
+        assert "session=" in resp.headers["set-cookie"]
+
+
+class TestJobOwnership:
+    @pytest.fixture()
+    def registry_with_owned_job(self, client, tmp_path):
+        from app.dependencies import get_registry
+        from app.job_registry import JobRegistry
+
+        reg = JobRegistry()
+        workdir = tmp_path / "owned-job"
+        workdir.mkdir()
+        reg.create("owned-job", str(workdir), owner_id="42", owner_login="octocat")
+        client.app.dependency_overrides[get_registry] = lambda: reg
+        try:
+            yield reg
+        finally:
+            client.app.dependency_overrides.pop(get_registry, None)
+
+    def test_owner_can_read_job_status(self, client, registry_with_owned_job):
+        resp = client.get(
+            "/api/jobs/owned-job/status",
+            headers=auth_headers(login="octocat", github_id="42"),
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["job_id"] == "owned-job"
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("GET", "/api/jobs/owned-job/status"),
+            ("POST", "/api/jobs/owned-job/stop"),
+            ("GET", "/api/jobs/owned-job/units"),
+            ("POST", "/api/jobs/owned-job/units/u1/reanalyze"),
+            ("DELETE", "/api/jobs/owned-job/cache"),
+            ("GET", "/api/jobs/owned-job/manager"),
+        ],
+    )
+    def test_other_user_cannot_access_job_routes(self, client, registry_with_owned_job, method, path):
+        resp = client.request(
+            method,
+            path,
+            headers=auth_headers(login="hubot", github_id="99"),
+        )
+
+        assert resp.status_code == 404
+
+
+class TestUploadOptions:
+    def test_upload_records_force_refresh_option(self, client, tmp_path):
+        import io
+        from app.dependencies import get_orchestrator, get_registry
+        from app.job_registry import JobRegistry
+
+        class NoopOrchestrator:
+            def run_job(self, job_id):  # noqa: ARG002
+                return None
+
+        reg = JobRegistry()
+        client.app.dependency_overrides[get_registry] = lambda: reg
+        client.app.dependency_overrides[get_orchestrator] = lambda: NoopOrchestrator()
+        try:
+            resp = client.post(
+                "/api/upload",
+                headers=auth_headers(login="octocat", github_id="42"),
+                files={"files": ("test.txt", io.BytesIO(b"data"), "text/plain")},
+                data={"paths": ["test.txt"], "force_refresh": "true"},
+            )
+        finally:
+            client.app.dependency_overrides.pop(get_registry, None)
+            client.app.dependency_overrides.pop(get_orchestrator, None)
+
+        assert resp.status_code == 200
+        job = reg.get(resp.json()["job_id"])
+        assert job is not None
+        assert job.force_refresh is True
+        assert job.owner_id == "42"

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
+import { useAuth } from '../auth'
 import { Badge, Button, Card, Input, Panel, SegmentedControl } from '../components/ui'
 import { log } from '../logger'
 
@@ -26,6 +27,7 @@ function categoryBadge(category) {
 }
 
 export default function Knowledge() {
+  const { isAdmin } = useAuth()
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
@@ -182,21 +184,23 @@ export default function Knowledge() {
             diagnosis sends only matched summaries, never whole documents.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <input
-            ref={fileInput}
-            type="file"
-            accept=".pdf,.docx"
-            onChange={upload}
-            className="hidden"
-          />
-          <Button onClick={() => fileInput.current?.click()} disabled={!!busy}>
-            {busy === 'upload' ? 'Uploading…' : 'Upload document'}
-          </Button>
-          <Button variant="primary" onClick={rebuild} disabled={!!busy}>
-            {busy === 'rebuild' ? 'Rebuilding…' : 'Rebuild pack'}
-          </Button>
-        </div>
+        {isAdmin && (
+          <div className="flex flex-wrap gap-2">
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".pdf,.docx"
+              onChange={upload}
+              className="hidden"
+            />
+            <Button onClick={() => fileInput.current?.click()} disabled={!!busy}>
+              {busy === 'upload' ? 'Uploading…' : 'Upload document'}
+            </Button>
+            <Button variant="primary" onClick={rebuild} disabled={!!busy}>
+              {busy === 'rebuild' ? 'Rebuilding…' : 'Rebuild pack'}
+            </Button>
+          </div>
+        )}
       </div>
 
       {!status?.enabled && (
@@ -288,13 +292,15 @@ export default function Knowledge() {
                         <span className="text-warning">· {doc.warnings.length} warning(s)</span>
                       )}
                     </span>
-                    <button
-                      className="text-danger hover:underline focus-ring rounded px-1"
-                      onClick={() => deleteDocument(doc)}
-                      disabled={!!busy}
-                    >
-                      {busy === `del:${doc.doc_id}` ? 'Deleting…' : 'Delete'}
-                    </button>
+                    {isAdmin && (
+                      <button
+                        className="text-danger hover:underline focus-ring rounded px-1"
+                        onClick={() => deleteDocument(doc)}
+                        disabled={!!busy}
+                      >
+                        {busy === `del:${doc.doc_id}` ? 'Deleting…' : 'Delete'}
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -313,7 +319,7 @@ export default function Knowledge() {
         </div>
       )}
 
-      <AcronymGlossary />
+      <AcronymGlossary canEdit={isAdmin} />
 
       {manifest?.warnings?.length > 0 && (
         <Panel className="p-4 mt-6 border-warning/30 bg-warning/10">
@@ -328,7 +334,7 @@ export default function Knowledge() {
         </Panel>
       )}
 
-      {products.length > 0 && (
+      {isAdmin && products.length > 0 && (
         <div className="mt-8">
           <button
             className="text-xs text-danger hover:underline focus-ring rounded px-1"
@@ -433,7 +439,7 @@ const ACRONYM_STATUS_FILTERS = [
   ['rejected', 'Rejected'],
 ]
 
-function AcronymGlossary() {
+function AcronymGlossary({ canEdit }) {
   const [entries, setEntries] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -580,35 +586,37 @@ function AcronymGlossary() {
         </Panel>
       )}
 
-      <form onSubmit={addEntry} className="mb-4 grid grid-cols-1 gap-2 md:grid-cols-[110px_1fr_140px_140px_auto]">
-        <Input
-          placeholder="ACRONYM"
-          value={form.acronym}
-          onChange={(e) => setForm({ ...form, acronym: e.target.value })}
-        />
-        <Input
-          placeholder="Definition (required to approve)"
-          value={form.definition}
-          onChange={(e) => setForm({ ...form, definition: e.target.value })}
-        />
-        <Input
-          placeholder="Product (blank = global)"
-          value={form.product_code}
-          onChange={(e) => setForm({ ...form, product_code: e.target.value })}
-        />
-        <select
-          className="w-full bg-surface border border-border rounded-lg px-3 py-2.5 text-sm text-ink focus-ring"
-          value={form.status}
-          onChange={(e) => setForm({ ...form, status: e.target.value })}
-        >
-          <option value="approved">Approved</option>
-          <option value="needs_review">Pending</option>
-          <option value="rejected">Rejected</option>
-        </select>
-        <Button type="submit" variant="primary" disabled={busy === 'add'}>
-          {busy === 'add' ? 'Saving…' : 'Add'}
-        </Button>
-      </form>
+      {canEdit && (
+        <form onSubmit={addEntry} className="mb-4 grid grid-cols-1 gap-2 md:grid-cols-[110px_1fr_140px_140px_auto]">
+          <Input
+            placeholder="ACRONYM"
+            value={form.acronym}
+            onChange={(e) => setForm({ ...form, acronym: e.target.value })}
+          />
+          <Input
+            placeholder="Definition (required to approve)"
+            value={form.definition}
+            onChange={(e) => setForm({ ...form, definition: e.target.value })}
+          />
+          <Input
+            placeholder="Product (blank = global)"
+            value={form.product_code}
+            onChange={(e) => setForm({ ...form, product_code: e.target.value })}
+          />
+          <select
+            className="w-full bg-surface border border-border rounded-lg px-3 py-2.5 text-sm text-ink focus-ring"
+            value={form.status}
+            onChange={(e) => setForm({ ...form, status: e.target.value })}
+          >
+            <option value="approved">Approved</option>
+            <option value="needs_review">Pending</option>
+            <option value="rejected">Rejected</option>
+          </select>
+          <Button type="submit" variant="primary" disabled={busy === 'add'}>
+            {busy === 'add' ? 'Saving…' : 'Add'}
+          </Button>
+        </form>
+      )}
 
       <div className="flex flex-wrap items-center gap-3 mb-3">
         <SegmentedControl options={ACRONYM_STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} />
@@ -637,7 +645,7 @@ function AcronymGlossary() {
                 <th className="py-2 pr-3">Status</th>
                 <th className="py-2 pr-3">Definition</th>
                 <th className="py-2 pr-3">Observed</th>
-                <th className="py-2">Actions</th>
+                {canEdit && <th className="py-2">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -646,6 +654,7 @@ function AcronymGlossary() {
                   key={`${entry.acronym}:${entry.product_code || ''}`}
                   entry={entry}
                   busy={busy}
+                  canEdit={canEdit}
                   onApply={apply}
                   onDelete={remove}
                 />
@@ -658,7 +667,7 @@ function AcronymGlossary() {
   )
 }
 
-function AcronymRow({ entry, busy, onApply, onDelete }) {
+function AcronymRow({ entry, busy, canEdit, onApply, onDelete }) {
   const [definition, setDefinition] = useState(entry.definition || '')
   const key = `${entry.acronym}:${entry.product_code || ''}`
   const rowBusy = busy === key
@@ -670,63 +679,69 @@ function AcronymRow({ entry, busy, onApply, onDelete }) {
       <td className="py-2 pr-3 text-muted">{entry.product_code || 'global'}</td>
       <td className="py-2 pr-3">{acronymStatusBadge(entry.status)}</td>
       <td className="py-2 pr-3 min-w-[200px]">
-        <Input
-          value={definition}
-          onChange={(e) => setDefinition(e.target.value)}
-          placeholder={entry.status === 'needs_review' ? 'Enter an approved definition…' : 'Definition'}
-        />
+        {canEdit ? (
+          <Input
+            value={definition}
+            onChange={(e) => setDefinition(e.target.value)}
+            placeholder={entry.status === 'needs_review' ? 'Enter an approved definition…' : 'Definition'}
+          />
+        ) : (
+          <span className="text-ink">{entry.definition || '—'}</span>
+        )}
       </td>
       <td className="py-2 pr-3 text-xs text-muted whitespace-nowrap">
         {entry.observed_count || 0}
         {entry.observed_in_fields?.length ? ` · ${entry.observed_in_fields.join(', ')}` : ''}
       </td>
-      <td className="py-2">
-        <div className="flex flex-wrap gap-2 text-xs">
-          {entry.status !== 'approved' && (
+      {canEdit && (
+        <td className="py-2">
+          <div className="flex flex-wrap gap-2 text-xs">
+            {entry.status !== 'approved' && (
+              <button
+                className="text-teal hover:underline focus-ring rounded px-1 disabled:opacity-40"
+                onClick={() => onApply(entry, { status: 'approved', definition })}
+                disabled={rowBusy || !definition.trim()}
+              >
+                Approve
+              </button>
+            )}
+            {entry.status === 'approved' && (
+              <button
+                className="text-accent hover:underline focus-ring rounded px-1 disabled:opacity-40"
+                onClick={() => onApply(entry, { status: 'approved', definition })}
+                disabled={rowBusy || !definition.trim() || !dirty}
+              >
+                Save
+              </button>
+            )}
+            {entry.status !== 'rejected' && (
+              <button
+                className="text-warning hover:underline focus-ring rounded px-1 disabled:opacity-40"
+                onClick={() => onApply(entry, { status: 'rejected', definition })}
+                disabled={rowBusy}
+              >
+                Reject
+              </button>
+            )}
+            {entry.status === 'rejected' && (
+              <button
+                className="text-ink-2 hover:underline focus-ring rounded px-1 disabled:opacity-40"
+                onClick={() => onApply(entry, { status: 'needs_review', definition })}
+                disabled={rowBusy}
+              >
+                Restore
+              </button>
+            )}
             <button
-              className="text-teal hover:underline focus-ring rounded px-1 disabled:opacity-40"
-              onClick={() => onApply(entry, { status: 'approved', definition })}
-              disabled={rowBusy || !definition.trim()}
-            >
-              Approve
-            </button>
-          )}
-          {entry.status === 'approved' && (
-            <button
-              className="text-accent hover:underline focus-ring rounded px-1 disabled:opacity-40"
-              onClick={() => onApply(entry, { status: 'approved', definition })}
-              disabled={rowBusy || !definition.trim() || !dirty}
-            >
-              Save
-            </button>
-          )}
-          {entry.status !== 'rejected' && (
-            <button
-              className="text-warning hover:underline focus-ring rounded px-1 disabled:opacity-40"
-              onClick={() => onApply(entry, { status: 'rejected', definition })}
+              className="text-danger hover:underline focus-ring rounded px-1 disabled:opacity-40"
+              onClick={() => onDelete(entry)}
               disabled={rowBusy}
             >
-              Reject
+              Delete
             </button>
-          )}
-          {entry.status === 'rejected' && (
-            <button
-              className="text-ink-2 hover:underline focus-ring rounded px-1 disabled:opacity-40"
-              onClick={() => onApply(entry, { status: 'needs_review', definition })}
-              disabled={rowBusy}
-            >
-              Restore
-            </button>
-          )}
-          <button
-            className="text-danger hover:underline focus-ring rounded px-1 disabled:opacity-40"
-            onClick={() => onDelete(entry)}
-            disabled={rowBusy}
-          >
-            Delete
-          </button>
-        </div>
-      </td>
+          </div>
+        </td>
+      )}
     </tr>
   )
 }
