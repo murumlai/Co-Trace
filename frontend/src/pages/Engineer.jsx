@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
+import { useAuth } from '../auth'
 import {
   Badge,
   Button,
@@ -21,6 +22,7 @@ const FILTERS = [
 ]
 
 export default function Engineer({ jobId }) {
+  const { isAdmin } = useAuth()
   const [units, setUnits] = useState([])
   const [runCount, setRunCount] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -173,7 +175,7 @@ export default function Engineer({ jobId }) {
     reanalyzing,
     onReanalyze: reanalyze,
     clearingCache,
-    onClearCache: clearCache,
+    onClearCache: isAdmin ? clearCache : undefined,
   }
 
   return (
@@ -223,7 +225,7 @@ export default function Engineer({ jobId }) {
             onClick={clearAllCache}
             disabled={clearingAll || cachedKeyCount === 0}
             title="Delete cached analysis results for the currently loaded folder/file/zip only"
-            className="disabled:opacity-50 disabled:cursor-not-allowed"
+            className={`disabled:opacity-50 disabled:cursor-not-allowed${isAdmin ? '' : ' hidden'}`}
           >
             {clearingAll ? 'Clearing…' : 'Clear cached results'}
             {cachedKeyCount > 0 && <span className="opacity-60">({cachedKeyCount})</span>}
@@ -451,6 +453,7 @@ function KnowledgeBadge({ attempt }) {
 
 function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache }) {
   const canClearCache =
+    !!onClearCache &&
     attempt.analysis_cache_key && ['llm', 'local-cache'].includes(attempt.analysis_source)
   const sourceLabel = attempt.cache_cleared ? 'cache cleared' : attempt.analysis_source
   const when = attempt.start_time ? attempt.start_time.replace('T', ' ').slice(0, 19) : null

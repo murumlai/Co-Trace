@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.auth_helpers import auth_headers
+from tests.auth_helpers import admin_auth_headers, auth_headers
 
 # Patch settings before importing main so makedirs uses a safe default.
 # (settings.WORK_DIR is already cwd/.cotrace_work which is harmless, but
@@ -210,7 +210,6 @@ class TestJobOwnership:
             ("POST", "/api/jobs/owned-job/stop"),
             ("GET", "/api/jobs/owned-job/units"),
             ("POST", "/api/jobs/owned-job/units/u1/reanalyze"),
-            ("DELETE", "/api/jobs/owned-job/cache"),
             ("GET", "/api/jobs/owned-job/manager"),
         ],
     )
@@ -222,6 +221,38 @@ class TestJobOwnership:
         )
 
         assert resp.status_code == 404
+
+    def test_non_admin_owner_cannot_clear_job_cache(self, client, registry_with_owned_job):
+        resp = client.delete(
+            "/api/jobs/owned-job/cache",
+            headers=auth_headers(login="octocat", github_id="42"),
+        )
+        assert resp.status_code == 403
+
+    def test_admin_owner_can_clear_job_cache(self, client, registry_with_owned_job, monkeypatch):
+        import app.config as cfg
+
+        monkeypatch.setattr(cfg.settings, "GITHUB_ADMIN_USERS", ["octocat"])
+        resp = client.delete(
+            "/api/jobs/owned-job/cache",
+            headers=auth_headers(login="octocat", github_id="42", is_admin=True),
+        )
+        assert resp.status_code == 200
+
+
+class TestAnalysisCacheDeletionAdminOnly:
+    def test_non_admin_cannot_delete_analysis_cache(self, client):
+        client.cookies.clear()
+        resp = client.delete(
+            "/api/cache/analysis/somekey",
+            headers=auth_headers(login="octocat", github_id="42"),
+        )
+        assert resp.status_code == 403
+
+    def test_admin_can_delete_analysis_cache(self, client):
+        client.cookies.clear()
+        resp = client.delete("/api/cache/analysis/somekey", headers=admin_auth_headers())
+        assert resp.status_code == 200
 
 
 class TestUploadOptions:

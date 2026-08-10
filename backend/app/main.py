@@ -338,7 +338,7 @@ def reanalyze(job_id: str, unit_id: str, user: AuthenticatedUser = Depends(requi
 
 
 @app.delete("/api/jobs/{job_id}/cache")
-def clear_job_cache(job_id: str, user: AuthenticatedUser = Depends(require_user),
+def clear_job_cache(job_id: str, user: AuthenticatedUser = Depends(require_admin),
                     reg: Any = Depends(get_registry),
                     cache: Any = Depends(get_analysis_cache)) -> dict:
     """Delete only the analysis cache entries used by this job's records.
@@ -383,7 +383,7 @@ def list_analysis_cache(user: AuthenticatedUser = Depends(require_user),
 
 
 @app.delete("/api/cache/analysis/{cache_key}")
-def clear_analysis_cache(cache_key: str, user: AuthenticatedUser = Depends(require_user),
+def clear_analysis_cache(cache_key: str, user: AuthenticatedUser = Depends(require_admin),
                          cache: Any = Depends(get_analysis_cache)) -> dict:
     return {
         "cache_key": cache_key,
