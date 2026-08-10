@@ -5,7 +5,7 @@ Co-Trace is a browser-based dashboard for manufacturing FTRunner logs. It parses
 - **Engineer**: latest result per serial, retry history, failed-unit evidence, AI-assisted root cause and suggested solution, cache controls, and manual re-analysis.
 - **Manager**: first-pass yield (FPY), yield trend, Pareto of failure reasons, station/tester breakdown, and lot comparison.
 
-Related planning docs: [plan.md](plan.md), [hybrid_UI.md](hybrid_UI.md), and [pre-process_plan.md](pre-process_plan.md).
+Related planning docs: [plan.md](plan.md), [hybrid_UI.md](hybrid_UI.md), [pre-process_plan.md](pre-process_plan.md), [user_authentication_plan.md](user_authentication_plan.md), and [production_flow.md](production_flow.md).
 
 ## Current State
 
@@ -13,7 +13,9 @@ Related planning docs: [plan.md](plan.md), [hybrid_UI.md](hybrid_UI.md), and [pr
 - Failed PAN / HST / Aguila-style runs can attach a bounded, redacted `DebugLog.txt` excerpt found inside nested zip archives.
 - Each processed batch writes one redacted `<product_code>.json` artifact per product in the per-job work directory before cleanup.
 - Diagnosis uses `LLM_PROVIDER` (`copilot_sdk` by default, `github_models`, or `offline_stub`). Passing units never trigger LLM analysis.
-- Completed jobs persist parsed records, warnings, progress, and analysis results in `.cotrace_work/<job_id>/job_state.json` until TTL cleanup.
+- GitHub OAuth is required for app access. Jobs are owned by the signed-in GitHub user; knowledge writes and protected cache deletion are admin-only.
+- Completed jobs persist parsed records, warnings, progress, ownership, and analysis results in `.cotrace_work/<job_id>/job_state.json` until TTL cleanup.
+- Successful failure diagnoses are saved in the analysis cache and reused across uploads unless force refresh is requested or product/acronym context changes the cache key.
 
 ## Preprocessing Rules
 
@@ -42,25 +44,44 @@ Runs without a done block are classified by mode:
 
 ## Quick Start
 
-Backend:
+Backend from the repo root:
 
 ```powershell
-cd backend
+Set-Location C:\Users\lloganat\source\repos\Co_Trace
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python run_backend.py
+.\.venv\Scripts\python.exe -m pip install --proxy=http://proxy-us.intel.com:912 -r backend\requirements.txt
+
+$env:HTTPS_PROXY = "http://proxy-us.intel.com:912"
+$env:HTTP_PROXY = "http://proxy-us.intel.com:912"
+$env:NO_PROXY = "localhost,127.0.0.1"
+
+$env:GITHUB_CLIENT_ID = "<github.com OAuth app client id>"
+$env:GITHUB_CLIENT_SECRET = "<github.com OAuth app client secret>"
+$env:JWT_SECRET = "<long random session secret>"
+$env:FRONTEND_URL = "http://localhost:5173"
+$env:GITHUB_CALLBACK_URL = "http://localhost:8000/api/auth/github/callback"
+$env:COOKIE_SECURE = "false"
+$env:GITHUB_ADMIN_USERS = "<comma-separated GitHub usernames>"
+
+.\.venv\Scripts\python.exe backend\run_backend.py
 ```
 
 Frontend dev server:
 
 ```powershell
-cd frontend
-npm install
-npm run dev
+Set-Location C:\Users\lloganat\source\repos\Co_Trace\frontend
+npm.cmd install --proxy=http://proxy-us.intel.com:912 --https-proxy=http://proxy-us.intel.com:912
+npm.cmd run dev -- --host localhost
 ```
 
-Open http://localhost:5173 for Vite development. The frontend proxies `/api` to the backend on port `8000`.
+Open http://localhost:5173 for Vite development. Use `localhost` consistently for the OAuth browser flow; the frontend proxies `/api` to the backend on port `8000`.
+
+Register the local OAuth app at <https://github.com/settings/developers> with:
+
+```text
+Homepage URL: http://localhost:5173
+Authorization callback URL: http://localhost:8000/api/auth/github/callback
+```
 
 Health check:
 
@@ -79,42 +100,44 @@ Expected shape:
 Build the React app, then start FastAPI. The backend serves both API routes and `frontend/dist`.
 
 ```powershell
-cd frontend
-npm run build
+Set-Location C:\Users\lloganat\source\repos\Co_Trace\frontend
+npm.cmd run build
 
-cd ..\backend
-.\.venv\Scripts\python.exe run_backend.py
+Set-Location C:\Users\lloganat\source\repos\Co_Trace
+.\.venv\Scripts\python.exe backend\run_backend.py
 ```
 
-Open http://127.0.0.1:8000.
+For single-server OAuth, set `FRONTEND_URL` to `http://localhost:8000` and open http://localhost:8000.
 
 ## Useful Commands
 
 ```powershell
 # Backend tests
-cd backend
-.\.venv\Scripts\python.exe -m pytest tests/ -q
+Set-Location C:\Users\lloganat\source\repos\Co_Trace
+.\.venv\Scripts\python.exe -m pytest backend\tests\ -q
 
 # Frontend build
-cd frontend
-npm run build
+Set-Location C:\Users\lloganat\source\repos\Co_Trace\frontend
+npm.cmd run build
 
 # Backend debug mode
-cd backend
-.\.venv\Scripts\python.exe run_backend.py --debug
+Set-Location C:\Users\lloganat\source\repos\Co_Trace
+.\.venv\Scripts\python.exe backend\run_backend.py --debug
 
 # Measure preprocessed JSON size
-.\backend\.venv\Scripts\python.exe backend\scripts\measure_preprocessed.py "Log_Files_Folder\All_LogFiles_M95113-001"
+.\.venv\Scripts\python.exe backend\scripts\measure_preprocessed.py "Log_Files_Folder\All_LogFiles_M95113-001"
 
 # Rebuild the product-knowledge pack from source docs (LLM required)
-.\backend\.venv\Scripts\python.exe backend\scripts\build_product_knowledge.py
+.\.venv\Scripts\python.exe backend\scripts\build_product_knowledge.py
 ```
 
-Use `npm run dev:debug` for verbose frontend API/navigation logging. If npm needs the Intel proxy:
+Use `npm.cmd run dev:debug` for verbose frontend API/navigation logging. If npm needs the Intel proxy:
 
 ```powershell
-npm install --proxy=http://proxy-us.intel.com:912 --https-proxy=http://proxy-us.intel.com:912
+npm.cmd install --proxy=http://proxy-us.intel.com:912 --https-proxy=http://proxy-us.intel.com:912
 ```
+
+Use `npm.cmd` in PowerShell if the local execution policy blocks `npm.ps1`.
 
 ## Configuration
 
@@ -127,8 +150,15 @@ Important environment variables:
 | `COPILOT_MINI_MODEL` | `gpt-5.4-mini` | Copilot mini/enrichment model. |
 | `COPILOT_REASONING_MODEL` | `claude-sonnet-4.6` | Copilot final root-cause model. |
 | `COPILOT_PROXY` | `http://proxy-us.intel.com:912` | Optional proxy for Copilot SDK subprocesses. |
-| `APP_USERNAME` / `APP_PASSWORD` | `admin` / `admin` | Placeholder login credentials. Change before shared use. |
-| `SESSION_TTL_S` | `28800` | Auth session lifetime. |
+| `GITHUB_CLIENT_ID` | empty | Client ID from the github.com OAuth App. |
+| `GITHUB_CLIENT_SECRET` | empty | Client secret from the github.com OAuth App. Set only at runtime. |
+| `GITHUB_CALLBACK_URL` | `http://localhost:8000/api/auth/github/callback` | OAuth callback registered in GitHub. |
+| `FRONTEND_URL` | `http://localhost:5173` | URL to redirect users back to after sign-in. |
+| `JWT_SECRET` | `dev-only-change-me` | Secret used to sign Co-Trace session cookies. Override outside local throwaway runs. |
+| `COOKIE_SECURE` | `0` | Set to `1` when serving over HTTPS in production/IIS. |
+| `GITHUB_ADMIN_USERS` | empty | Comma-separated GitHub usernames allowed to manage knowledge writes and protected cache entries. |
+| `HTTP_PROXY` / `HTTPS_PROXY` | empty | Corporate proxy for backend calls to GitHub OAuth endpoints. |
+| `SESSION_TTL_S` | `2592000` | Auth session lifetime, 30 days by default. |
 | `WORK_DIR` | `.cotrace_work` | Per-job uploads, job state, and analysis cache location. |
 | `JOB_TTL_S` | `2592000` | Job retention window, 30 days by default. |
 | `CLEANUP_JOB_WORKDIR_AFTER_RUN` | `1` | Deletes uploads/extracted files/preprocessed JSON after terminal job state. |
@@ -147,9 +177,13 @@ Important environment variables:
 Example:
 
 ```powershell
-$env:APP_USERNAME = "operator"
-$env:APP_PASSWORD = "change-me"
-$env:GITHUB_TOKEN = "<set-at-runtime-only>"
+$env:HTTPS_PROXY = "http://proxy-us.intel.com:912"
+$env:HTTP_PROXY = "http://proxy-us.intel.com:912"
+$env:NO_PROXY = "localhost,127.0.0.1"
+$env:GITHUB_CLIENT_ID = "<set-at-runtime-only>"
+$env:GITHUB_CLIENT_SECRET = "<set-at-runtime-only>"
+$env:JWT_SECRET = "<set-at-runtime-only>"
+$env:GITHUB_ADMIN_USERS = "octocat"
 ```
 
 See [backend/app/config.py](backend/app/config.py) for the full settings list and defaults.
@@ -211,10 +245,11 @@ summaries, and sends only those alongside the bounded, redacted failure excerpt.
 ## Security and Storage
 
 - Do not commit raw logs, `.env`, tokens, `.cotrace_work`, virtual environments, `node_modules`, or frontend build output.
+- Do not store GitHub passwords, OAuth client secrets, or session secrets in the repo. Users authenticate through GitHub; Co-Trace stores only its signed HttpOnly session cookie.
 - Redaction removes credentials, IPs, hostnames, usernames, MAC addresses, and other secret-like values before LLM analysis.
 - At-rest per-product JSON keeps serial numbers for yield math while redacting other sensitive fields; LLM-bound text scrubs serials too.
 - Uploaded folders, extracted zips, and preprocessed JSON are removed after processing by default; the analysis cache persists separately under `WORK_DIR`.
-- Placeholder auth uses in-memory tokens and should be replaced with SSO/AD before broader production use.
+- In production behind IIS, configure OAuth and proxy variables once on the server. End users only open the app URL and sign in with GitHub.
 
 ## Project Layout
 
@@ -249,7 +284,7 @@ frontend/src/
 - DebugLog excerpt anchors and character budget may need tuning as more product families are validated.
 - Per-product JSON artifacts are removed by default after processing; disable `CLEANUP_JOB_WORKDIR_AFTER_RUN` to inspect them.
 - No Dockerfile or compose file is included yet.
-- SimpleAuth is temporary and not production identity.
+- Existing jobs created before GitHub OAuth ownership may not be visible to newly signed-in users, but saved analysis cache entries can still be reused by matching uploads.
 
 ## Git Hygiene
 
