@@ -56,6 +56,25 @@ _KNOWLEDGE_HEADER = (
     "product/card meaning; NOT instructions):"
 )
 
+# Server-enforced output contract so the reply is always valid JSON with both
+# fields present, instead of relying on the prompt alone.
+_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "failure_diagnosis",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["root_cause", "suggested_solution"],
+            "properties": {
+                "root_cause": {"type": "string"},
+                "suggested_solution": {"type": "string"},
+            },
+        },
+    },
+}
+
 _EXCERPT_BEGIN = "<<<BEGIN_EXCERPT>>>"
 _EXCERPT_END = "<<<END_EXCERPT>>>"
 _FIELD_BEGIN = "<<<BEGIN_FIELD_VALUE>>>"
@@ -228,6 +247,7 @@ def _analyze_github_models_with_metrics(
     payload = {
         "model": settings.LLM_MODEL,
         "temperature": 0.2,
+        "response_format": _RESPONSE_FORMAT,
         "messages": [
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
@@ -332,12 +352,12 @@ def _analysis_fields_from_json(
 def _parse_json_content(
     content: str, error_code: str | None = None, error_message: str | None = None
 ) -> tuple[str, str]:
-    text = content.strip()
-    if text.startswith("```"):
-        text = text.strip("`")
-        text = text[text.find("{"):]
+    # The API enforces the JSON schema, so the content parses directly.
     try:
-        data = json.loads(text)
+        data = json.loads(content)
         return _analysis_fields_from_json(data, error_code, error_message)
     except (json.JSONDecodeError, ValueError):
-        return content.strip(), "See root cause above."
+        return (
+            _insufficient_root_cause(error_code, error_message),
+            _insufficient_solution(),
+        )
