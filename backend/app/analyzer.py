@@ -66,6 +66,29 @@ def _redacted_context(record: UnitRecord) -> tuple[str, str, str]:
     return err_msg, snippet, source
 
 
+def _insufficient_root_cause(error_code: str | None, error_message: str | None) -> str:
+    code = (error_code or "UNKNOWN").strip() or "UNKNOWN"
+    message = (error_message or "").strip()
+    if message:
+        return (
+            f"The supplied evidence shows failure code '{code}' with message "
+            f"'{message[:160]}', but it does not contain enough product-specific "
+            "or log evidence to identify a single root cause."
+        )
+    return (
+        f"The supplied evidence shows failure code '{code}', but it does not "
+        "contain enough product-specific or log evidence to identify a single root cause."
+    )
+
+
+def _insufficient_solution() -> str:
+    return (
+        "Review the failing step's full DebugLog/FTRunner context, verify DUT seating, "
+        "fixture connections, and station calibration/configuration, then re-run or "
+        "reanalyze with more failure evidence."
+    )
+
+
 def analyze_job(
     job: Job,
     analyze_failure: AnalyzeFailure = llm_client.analyze_with_metrics,
@@ -201,8 +224,8 @@ def _analyze_unit(
     if not force:
         cached_entry = _cache.get(cache_key)
         if cached_entry:
-            root = str(cached_entry.get("root_cause") or "No root cause returned.")
-            solution = str(cached_entry.get("suggested_solution") or "No solution returned.")
+            root = str(cached_entry.get("root_cause") or "").strip() or _insufficient_root_cause(rec.error_code, err_msg)
+            solution = str(cached_entry.get("suggested_solution") or "").strip() or _insufficient_solution()
             job.signature_cache[sig] = (root, solution, "local-cache")
             rec.root_cause = root
             rec.suggested_solution = solution

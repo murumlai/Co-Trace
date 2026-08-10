@@ -209,6 +209,27 @@ class TestAnalyzeJobDedup:
         assert calls["n"] == 0
         assert rec.root_cause == "cached root"
 
+    def test_empty_persistent_cache_hit_gets_actionable_fallback(self, monkeypatch):
+        cached_entry = {"root_cause": "", "suggested_solution": ""}
+        monkeypatch.setattr("app.analysis_cache.get_entry", lambda *a, **kw: cached_entry)
+        monkeypatch.setattr("app.analysis_cache.set_entry", lambda *a, **kw: None)
+
+        calls = {"n": 0}
+
+        def counting_stub(ec, em, snippet):  # noqa: ANN001, ARG001
+            calls["n"] += 1
+            return "root", "solution", "stub"
+
+        rec = _fail_rec("u1", "E123", "Voltage droop")
+        job = _make_job([rec])
+        analyze_job(job, analyze_failure=counting_stub)
+
+        assert calls["n"] == 0
+        assert "No root cause returned" not in rec.root_cause
+        assert "failure code 'E123'" in rec.root_cause
+        assert "Voltage droop" in rec.root_cause
+        assert "reanalyze with more failure evidence" in rec.suggested_solution
+
     def test_force_refresh_bypasses_persistent_cache(self, monkeypatch):
         cached_entry = {"root_cause": "cached root", "suggested_solution": "cached sol"}
         monkeypatch.setattr("app.analysis_cache.get_entry", lambda *a, **kw: cached_entry)
