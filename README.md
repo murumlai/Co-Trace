@@ -1,21 +1,19 @@
 # Co-Trace
 
-Co-Trace is a browser-based dashboard for manufacturing FTRunner logs. It parses uploaded log folders, files, or root-level zip archives and presents two focused views:
+Co-Trace is a browser-based dashboard for manufacturing FTRunner logs. It parses uploaded log folders, files, or root-level zip archives and presents two views:
 
-- **Engineer**: latest result per serial, retry history, failed-unit evidence, AI-assisted root cause and suggested solution, cache controls, and manual re-analysis.
-- **Manager**: first-pass yield (FPY), yield trend, Pareto of failure reasons, station/tester breakdown, and lot comparison.
+- **Engineer**: latest result per serial, retry history, failed-unit evidence, AI root cause/solution, and re-analysis.
+- **Manager**: first-pass yield, yield trend, failure-reason Pareto, station/tester breakdown, and lot comparison.
 
 Related planning docs: [plan.md](plan.md), [hybrid_UI.md](hybrid_UI.md), [pre-process_plan.md](pre-process_plan.md), [user_authentication_plan.md](user_authentication_plan.md), and [production_flow.md](production_flow.md).
 
 ## Current State
 
-- `ftrunnerlog01.txt` is the source of truth for identity, step timing, PASS/FAIL, `ErrorMsg`, and `Errorcode`. SIMS `.itf` files are no longer authoritative.
-- Failed PAN / HST / Aguila-style runs can attach a bounded, redacted `DebugLog.txt` excerpt found inside nested zip archives.
-- Each processed batch writes one redacted `<product_code>.json` artifact per product in the per-job work directory before cleanup.
-- Diagnosis uses `LLM_PROVIDER` (`copilot_sdk` by default, `github_models`, or `offline_stub`). Passing units never trigger LLM analysis.
-- GitHub OAuth is required for app access. Jobs are owned by the signed-in GitHub user; knowledge writes and protected cache deletion are admin-only.
-- Completed jobs persist parsed records, warnings, progress, ownership, and analysis results in `.cotrace_work/<job_id>/job_state.json` until TTL cleanup.
-- Successful failure diagnoses are saved in the analysis cache and reused across uploads unless force refresh is requested or product/acronym context changes the cache key.
+- `ftrunnerlog01.txt` is the source of truth for identity, timing, PASS/FAIL, `ErrorMsg`, `Errorcode` (SIMS `.itf` no longer authoritative).
+- Failed runs may attach a bounded, redacted `DebugLog.txt` excerpt from nested zips; each batch writes one redacted `<product_code>.json` per product before cleanup.
+- Diagnosis uses `LLM_PROVIDER` (`copilot_sdk` default, `github_models`, `offline_stub`); passing units never call the LLM.
+- GitHub OAuth is required; jobs are owned by the signer, and knowledge/cache deletes are admin-only. A local `ADMIN_USERNAME`/`ADMIN_PASSWORD` sign-in also grants admin for maintenance.
+- Successful diagnoses are cached and reused across uploads unless force-refreshed or the product/acronym context changes the cache key.
 
 ## Preprocessing Rules
 
@@ -30,17 +28,7 @@ Log_Files_Folder/
       optional zip containing Sequencer N/DebugLog.txt
 ```
 
-The parser extracts:
-
-- `scan file content:` metadata: serial, product code, OP ID, station, host, test-program name/version.
-- Per-step blocks: `******<name> test start/end.******`, tolerant PASS/FAIL text, and step duration.
-- `done file content:` result data: `Result`, `EndTime`, `ErrorMsg`, `Errorcode`.
-- Missing-log folders as UI warnings when they contain neither `ftrunnerlog01.txt` nor a reachable `DebugLog.txt`.
-
-Runs without a done block are classified by mode:
-
-- **TestApp**: no done block + no ERR line = implicit PASS (K77469-400 pattern).
-- **APSE**: no done block uses a two-pass threshold. The pre-scan averages explicit PASS `Total Test time(s)` per `(product_code, op_id)`. If a no-done-block APSE run is below `max(5 s, avg * 5%)`, it is marked FAIL as a FTRunner abort; otherwise it remains PASS. Products/OPIDs with no explicit PASS reference use the 5 s floor.
+The parser reads scan metadata (serial, product code, OP ID, station, host, program), per-step PASS/FAIL and durations, and the done-block result. Folders with no `ftrunnerlog01.txt` or reachable `DebugLog.txt` surface as UI warnings. Runs without a done block are classified by mode: **TestApp** treats no-done + no-ERR as PASS; **APSE** marks a no-done run FAIL when its time is below `max(5 s, avg_pass_time * 5%)` for that `(product_code, op_id)`.
 
 ## Quick Start
 
@@ -176,82 +164,24 @@ Important environment variables:
 | `PRODUCT_KNOWLEDGE_MAX_CONTEXT_CHARS` | `4000` | Char budget for curated summaries sent to the model. |
 | `CORS_ORIGINS` | localhost dev origins | Allowed frontend origins in development. |
 
-Example:
-
-```powershell
-$env:HTTPS_PROXY = "http://proxy-us.intel.com:912"
-$env:HTTP_PROXY = "http://proxy-us.intel.com:912"
-$env:NO_PROXY = "localhost,127.0.0.1"
-$env:GITHUB_CLIENT_ID = "<set-at-runtime-only>"
-$env:GITHUB_CLIENT_SECRET = "<set-at-runtime-only>"
-$env:JWT_SECRET = "<set-at-runtime-only>"
-$env:GITHUB_ADMIN_USERS = "octocat"
-```
-
-See [backend/app/config.py](backend/app/config.py) for the full settings list and defaults.
+Set secrets at runtime only. See [backend/app/config.py](backend/app/config.py) for the full settings list and defaults.
 
 ## Product-Aware Diagnosis
 
-Diagnosis can be grounded in proprietary card/product context. Supporting
-documents are preprocessed once into a curated, repo-root knowledge pack;
-runtime diagnosis never loads or sends whole documents — it matches a failed
-record to product knowledge by `PRODUCTCODE`, retrieves a few relevant curated
-summaries, and sends only those alongside the bounded, redacted failure excerpt.
+Diagnosis can be grounded in curated product context. Supporting PDF/DOCX docs are
+ingested once into a repo-root knowledge pack; at runtime only a few matched
+summaries (never whole documents) are sent alongside the redacted failure excerpt.
 
-**Document workflow**
-
-- Place PDF/DOCX docs in `product_docs/` or alongside sample logs in
-  `Log_Files_Folder/`, or upload them from the **Knowledge** tab.
-- Filenames drive matching and categorization. The product code is the first
-  filename token when it looks like a code (e.g. `M79060-001`), otherwise the
-  first code found anywhere in the name. A document maps to a single product
-  code in v1.
-- Category is detected from filename keywords:
-  - `debug_learning` — `Debug`, `Support`, `Key Learning`, `Learning`,
-    `Failure`, `Troubleshooting`, `Lesson`, `Known Issue`, `FA`, `RCA`. These
-    receive the strongest retrieval boost (product-specific known failures/fixes).
-  - `hld` — `HLD`, `High Level Design`, `Architecture`.
-  - `product_overview` — `Card`, `Product`, `Overview`, `Board`, `Module`,
-    `Datasheet`, `User Guide`, `Manual`, `Spec`.
-  - `uncategorized` — anything else (lowest priority).
-- v1 extracts PDF and DOCX. PPTX/XLSX/legacy Office are planned parser adapters.
-
-**Ingestion and privacy boundary**
-
-- Sections are summarized at ingestion by `gpt-5.4-mini` (LLM required — a
-  rebuild fails fast if no LLM backend is available). Summaries become active
-  immediately.
-- Generated artifacts live at the repo root and are gitignored because they may
-  contain proprietary summarized content:
-  - `product_knowledge.json` — manifest (products, docs, hashes, category counts).
-  - `product_knowledge_index.json` — retrieval index partitioned by product,
-    with JSONL byte offsets.
-  - `product_knowledge_sections.jsonl` — one curated section-summary per line,
-    byte-offset addressable so runtime reads only matched sections.
-- No raw extracted document text is stored in the generated artifacts — only
-  curated summaries, section metadata, acronyms, limits/specs, and known-failure
-  entries.
-
-**Rebuild and cache invalidation**
-
-- Rebuild from the **Knowledge** tab or with
-  `backend/scripts/build_product_knowledge.py`.
-- Each product's knowledge has a hash. The analysis cache key folds in the
-  product code, knowledge hash, and matched section/category mix, so changing
-  product knowledge automatically invalidates stale diagnoses. The prompt/cache
-  version was bumped so pre-knowledge answers are not reused.
-- The Engineer view shows whether product knowledge was used, which categories
-  matched, and how many sections matched (or that no knowledge exists for the
-  product).
+- **Add docs**: drop them in `product_docs/` or `Log_Files_Folder/`, or upload from the **Knowledge** tab (admin). The product code and category are derived from the filename.
+- **Ingestion**: sections are summarized by `gpt-5.4-mini` (LLM required). Generated artifacts (`product_knowledge*.json`, `*_sections.jsonl`) live at the repo root, are gitignored, and store only curated summaries — never raw document text.
+- **Rebuild/invalidation**: rebuild from the Knowledge tab or `backend/scripts/build_product_knowledge.py`. The cache key folds in the product/knowledge hash, so changing knowledge invalidates stale diagnoses. The Engineer view shows whether/which product knowledge matched.
 
 ## Security and Storage
 
-- Do not commit raw logs, `.env`, tokens, `.cotrace_work`, virtual environments, `node_modules`, or frontend build output.
-- Do not store GitHub passwords, OAuth client secrets, or session secrets in the repo. Users authenticate through GitHub; Co-Trace stores only its signed HttpOnly session cookie.
-- Redaction removes credentials, IPs, hostnames, usernames, MAC addresses, and other secret-like values before LLM analysis.
-- At-rest per-product JSON keeps serial numbers for yield math while redacting other sensitive fields; LLM-bound text scrubs serials too.
-- Uploaded folders, extracted zips, and preprocessed JSON are removed after processing by default; the analysis cache persists separately under `WORK_DIR`.
-- In production behind IIS, configure OAuth and proxy variables once on the server. End users only open the app URL and sign in with GitHub.
+- Never commit raw logs, `.env`, tokens, `.cotrace_work`, virtualenvs, `node_modules`, build output, or any GitHub/OAuth/session secrets.
+- Redaction scrubs credentials, IPs, hostnames, usernames, MACs, and serials before LLM analysis; users authenticate via GitHub and Co-Trace stores only its signed HttpOnly session cookie.
+- Uploads, extracted zips, and preprocessed JSON are removed after processing by default; the analysis cache persists under `WORK_DIR`.
+- In production behind IIS, set OAuth and proxy variables once on the server; users just open the app URL and sign in.
 
 ## Project Layout
 
