@@ -164,3 +164,49 @@ class TestKnowledgeRoutes:
         client, _ = env
         resp = client.delete("/api/knowledge", headers=_auth(client))
         assert resp.status_code == 403
+
+
+class TestKnowledgeDeleteDocument:
+    def _seed_doc(self, tmp_path) -> tuple[str, str]:
+        from app.knowledge import parsing
+
+        docs_dir = tmp_path / "product_docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        path = docs_dir / "M79060-001_Debug.pdf"
+        path.write_bytes(b"%PDF-1.4 fake")
+        return str(path), parsing.make_doc_id("M79060-001", path.name)
+
+    def test_admin_deletes_indexed_document(self, env, tmp_path):
+        client, state = env
+        path, doc_id = self._seed_doc(tmp_path)
+        resp = client.delete(f"/api/knowledge/documents/{doc_id}", headers=_admin_auth(client))
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] == "M79060-001_Debug.pdf"
+        assert not __import__("os").path.exists(path)
+        assert state["ingestion"].rebuilt == 1
+
+    def test_admin_deletes_document_from_source_dir(self, env, tmp_path):
+        client, _ = env
+        from app.knowledge import parsing
+
+        src_dir = tmp_path / "empty_src"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        path = src_dir / "M13983-700_Card.pdf"
+        path.write_bytes(b"%PDF-1.4 fake")
+        doc_id = parsing.make_doc_id("M13983-700", path.name)
+        resp = client.delete(f"/api/knowledge/documents/{doc_id}", headers=_admin_auth(client))
+        assert resp.status_code == 200
+        assert not path.exists()
+
+    def test_non_admin_delete_document_forbidden(self, env, tmp_path):
+        client, _ = env
+        path, doc_id = self._seed_doc(tmp_path)
+        resp = client.delete(f"/api/knowledge/documents/{doc_id}", headers=_auth(client))
+        assert resp.status_code == 403
+        assert __import__("os").path.exists(path)
+
+    def test_delete_unknown_document_returns_404(self, env):
+        client, _ = env
+        resp = client.delete("/api/knowledge/documents/deadbeef", headers=_admin_auth(client))
+        assert resp.status_code == 404
+

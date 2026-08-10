@@ -533,25 +533,30 @@ def knowledge_delete_document(doc_id: str,
                               user: AuthenticatedUser = Depends(require_admin),  # noqa: ARG001
                               ingestion: Any = Depends(get_knowledge_ingestion),
                               retriever: Any = Depends(get_knowledge_retriever)) -> dict:
-    docs_dir = settings.PRODUCT_KNOWLEDGE_DOCS_DIR
-    removed = None
-    if os.path.isdir(docs_dir):
-        for name in os.listdir(docs_dir):
-            path = os.path.join(docs_dir, name)
-            if not os.path.isfile(path):
-                continue
-            if parsing.describe_document(path, source_root=docs_dir).doc_id == doc_id:
-                os.remove(path)
-                removed = name
-                break
-    if removed is None:
-        raise HTTPException(
-            404,
-            "Document not found among uploaded product docs "
-            "(only uploaded docs are deletable).",
-        )
-    log.info("Deleted product doc %s (%s).", doc_id, removed)
-    return {"deleted": removed, "manifest": _rebuild_knowledge(ingestion, retriever)}
+    search_dirs = [*settings.PRODUCT_KNOWLEDGE_SOURCE_DIRS, settings.PRODUCT_KNOWLEDGE_DOCS_DIR]
+    allowed_roots = [
+        os.path.normcase(os.path.abspath(root))
+        for root in search_dirs
+        if root and os.path.isdir(root)
+    ]
+    target = next(
+        (doc for doc in parsing.scan_source_documents(source_dirs=search_dirs)
+         if doc.doc_id == doc_id),
+        None,
+    )
+    if target is None:
+        raise HTTPException(404, "Document not found in the product-knowledge sources.")
+    doc_path = os.path.abspath(target.path)
+    if not any(
+        os.path.normcase(doc_path).startswith(root + os.sep) for root in allowed_roots
+    ):
+        raise HTTPException(403, "Document is outside the allowed knowledge directories.")
+    try:
+        os.remove(doc_path)
+    except OSError as exc:
+        raise HTTPException(500, f"Could not delete document: {type(exc).__name__}") from exc
+    log.info("Deleted product doc %s (%s).", doc_id, target.filename)
+    return {"deleted": target.filename, "manifest": _rebuild_knowledge(ingestion, retriever)}
 
 
 @app.delete("/api/knowledge")
