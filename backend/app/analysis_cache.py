@@ -21,11 +21,9 @@ from .config import settings
 log = logging.getLogger("cotrace.cache")
 
 _CACHE_SCHEMA_VERSION = 1
-# Bumped to v3 for the authoritative acronym glossary: keys now also fold in the
-# approved-glossary hash used for the record, so diagnoses produced before a
-# definition was approved/changed (and any old invented expansions) are not
-# reused. v2 added the product code, knowledge hash, and matched section mix.
-_CACHE_PROMPT_VERSION = "analysis-v3"
+# Bumped to v4 so product-knowledge fallback repairs do not reuse earlier
+# insufficient Copilot responses for matching RFC/debug-learning sections.
+_CACHE_PROMPT_VERSION = "analysis-v4"
 _lock = threading.Lock()
 
 
