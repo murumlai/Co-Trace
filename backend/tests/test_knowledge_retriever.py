@@ -14,6 +14,7 @@ from app.knowledge.models import (
     KnownFailureEntry,
     LimitSpecRecord,
     ProductManifestEntry,
+    RfcReference,
     SectionIndexEntry,
 )
 from app.knowledge.retriever import LexicalKnowledgeRetriever
@@ -161,3 +162,150 @@ class TestRetriever:
         retriever = LexicalKnowledgeRetriever(store)
         ctx = retriever.retrieve(_rec("M79060-001", error_message="voltage droop"))
         assert ctx.knowledge_hash == "h_M79060-001"
+
+
+def _rfc_sections() -> list[KnowledgeSection]:
+    """RFC sections keyed under the bare family code N32828."""
+    return [
+        KnowledgeSection(
+            section_id="R-s000",
+            doc_id="R",
+            product_code=None,        # bare family workbook (no revision)
+            product_family_code="N32828",
+            category="rfc_knowledge",
+            heading="RFC Table \u2014 POWER_TEST_01",
+            summary="POWER_TEST_01 failure covered by RFC-1234",
+            known_failures=[
+                KnownFailureEntry(
+                    failing_step="POWER_TEST_01",
+                    rfc_references=[
+                        RfcReference(
+                            rfc_id="RFC-1234",
+                            notes="Replace cap C12",
+                            failed_test_name="POWER_TEST_01",
+                            error_message_or_finding="12V droop",
+                        )
+                    ],
+                )
+            ],
+            source_filename="N32828_RFC.xlsx",
+        ),
+    ]
+
+
+def _write_rfc(store, sections):
+    """Write an RFC-only pack keyed under UNKNOWN (product_code=None -> 'UNKNOWN')."""
+    by_product: dict[str, list[SectionIndexEntry]] = {}
+    for s in sections:
+        key = s.product_code or "UNKNOWN"
+        entry = SectionIndexEntry(
+            section_id=s.section_id,
+            product_code=s.product_code,
+            product_family_code=s.product_family_code,
+            category=s.category,
+            heading=s.heading,
+            priority=CATEGORY_PRIORITY[s.category],
+            token_weights=summarizer_mod.keyword_weights(s),
+        )
+        by_product.setdefault(key, []).append(entry)
+    index = KnowledgeIndex(by_product=by_product)
+    manifest = KnowledgeManifest(
+        products=[
+            ProductManifestEntry(product_code=code, section_count=len(v), knowledge_hash=f"h_{code}")
+            for code, v in by_product.items()
+        ],
+        global_hash="g_rfc",
+    )
+    store.write_pack(manifest, index, sections)
+
+
+class TestRfcRetriever:
+    def test_rfc_section_boosted_above_debug_learning(self, tmp_path):
+        store = _store(tmp_path)
+        # Mix debug_learning and rfc_knowledge for the same product.
+        debug_section = KnowledgeSection(
+            section_id="DL-s000",
+            doc_id="DL",
+            product_code="N32828-201",
+            category="debug_learning",
+            heading="Power Faults",
+            summary="POWER_TEST_01 voltage droop known failure",
+            known_failures=[KnownFailureEntry(failing_step="POWER_TEST_01", symptom="12V droop")],
+            source_filename="N32828-201_Debug.pdf",
+        )
+        rfc_section = KnowledgeSection(
+            section_id="RFC-s000",
+            doc_id="RFC",
+            product_code="N32828-201",
+            product_family_code="N32828",
+            category="rfc_knowledge",
+            heading="RFC Table \u2014 POWER_TEST_01",
+            summary="POWER_TEST_01 RFC-1234 guidance",
+            known_failures=[
+                KnownFailureEntry(
+                    failing_step="POWER_TEST_01",
+                    rfc_references=[RfcReference(rfc_id="RFC-1234", failed_test_name="POWER_TEST_01")],
+                )
+            ],
+            source_filename="N32828-201_RFC.xlsx",
+        )
+        _write(store, [debug_section, rfc_section])
+        retriever = LexicalKnowledgeRetriever(store)
+        ctx = retriever.retrieve(_rec("N32828-201", failing_step="POWER_TEST_01"))
+        assert ctx.matched
+        # RFC knowledge should appear first (higher boost).
+        assert ctx.matches[0].category == "rfc_knowledge"
+
+    def test_family_code_fallback_finds_rfc_for_revision(self, tmp_path):
+        """N32828-201 (revisioned) retrieves RFC sections from N32828 family workbook."""
+        store = _store(tmp_path)
+        _write_rfc(store, _rfc_sections())
+        retriever = LexicalKnowledgeRetriever(store)
+        # Asking for a revisioned code that has no exact entry
+        ctx = retriever.retrieve(_rec("N32828-201", failing_step="POWER_TEST_01"))
+        assert ctx.match_status == "matched"
+        assert any(m.category == "rfc_knowledge" for m in ctx.matches)
+
+    def test_family_code_fallback_all_revisions(self, tmp_path):
+        """N32828-101 and N32828-501 also resolve RFC sections."""
+        store = _store(tmp_path)
+        _write_rfc(store, _rfc_sections())
+        retriever = LexicalKnowledgeRetriever(store)
+        for code in ("N32828-101", "N32828-501"):
+            ctx = retriever.retrieve(_rec(code, failing_step="POWER_TEST_01"))
+            assert any(m.category == "rfc_knowledge" for m in ctx.matches), (
+                f"No RFC match for {code}"
+            )
+
+    def test_format_match_includes_rfc_ids(self, tmp_path):
+        """Formatted context must expose RFC IDs and notes for LLM prompts."""
+        from app.knowledge.retriever import _format_match
+        from app.knowledge.models import RetrievalMatch
+
+        match = RetrievalMatch(
+            section_id="R-s000",
+            doc_id="R",
+            product_code=None,
+            product_family_code="N32828",
+            category="rfc_knowledge",
+            heading="RFC Table \u2014 POWER_TEST_01",
+            summary="Power failure RFC guidance",
+            known_failures=[
+                KnownFailureEntry(
+                    failing_step="POWER_TEST_01",
+                    rfc_references=[
+                        RfcReference(
+                            rfc_id="RFC-1234",
+                            notes="Replace cap C12",
+                            failed_test_name="POWER_TEST_01",
+                            error_message_or_finding="12V droop",
+                        )
+                    ],
+                )
+            ],
+            score=1.0,
+            source_filename="N32828_RFC.xlsx",
+        )
+        formatted = _format_match(match)
+        assert "RFC-1234" in formatted
+        assert "Replace cap C12" in formatted
