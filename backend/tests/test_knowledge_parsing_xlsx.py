@@ -152,6 +152,26 @@ class TestXlsxRfcParsing:
         assert "RFC-002" in text
         assert "RFC-003" in text
 
+    def test_numbered_rfc_columns_are_processed(self, tmp_path):
+        path = _make_rfc_xlsx(
+            tmp_path / "N32828-201_RFC_.xlsx",
+            [[
+                "12V Standby, 3.3 and PWR_OK Test",
+                "12V Standby, 3.3 and PWR_OK Test Failed",
+                "Make sure cables at LTIB is connected",
+                "Make sure Ambery is configured correctly",
+                "Check if card is detected as Microchip device",
+            ]],
+            header=["Failed Test Name / Error Name", "Error Message/ Bin / Issue / Findings", "RFC 1", "RFC2", "RFC3"],
+        )
+        _, sections = parsing.parse_document(parsing.describe_document(path))
+        assert len(sections) == 1
+        text = sections[0].text
+        assert "12V Standby" in text
+        assert "Make sure cables" in text
+        assert "Make sure Ambery" in text
+        assert "Microchip device" in text
+
     def test_multi_rfc_newline_separator(self, tmp_path):
         path = _make_rfc_xlsx(
             tmp_path / "N32828_RFC.xlsx",
