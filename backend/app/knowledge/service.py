@@ -82,6 +82,8 @@ class KnowledgeIngestionService:
             except Exception as exc:  # noqa: BLE001 - one bad doc must not kill the build
                 msg = f"{doc.filename}: parse failed ({type(exc).__name__}: {exc})."
                 log.warning(msg)
+                if total == 1:
+                    raise ProductKnowledgeError(msg) from exc
                 meta.warnings.append(msg)
                 warnings.append(msg)
                 doc_metas.append(meta)
