@@ -60,7 +60,7 @@ graph TB
 
         subgraph KnowledgeSub["knowledge/ subsystem"]
             KService["service.py<br/>ingestion orchestrator"]
-            KParsing["parsing.py<br/>PDF/DOCX parse"]
+            KParsing["parsing.py<br/>PDF/DOCX/XLSX parse"]
             KSummarizer["summarizer.py<br/>LLM curation"]
             KRetriever["retriever.py<br/>lexical retrieval"]
             KStorage["storage.py<br/>pack read/write"]
@@ -80,7 +80,7 @@ graph TB
         GitHub["GitHub OAuth"]
         Models_API["GitHub Models API"]
         CopilotSDK["GitHub Copilot SDK"]
-        Docs["Product Docs<br/>(PDF/DOCX)"]
+        Docs["Product Docs<br/>(PDF/DOCX/XLSX)"]
     end
 
     %% Frontend wiring
@@ -303,7 +303,7 @@ erDiagram
     }
 
     KnowledgeManifest {
-        int schema_version
+        int schema_version "2 (rfc_knowledge added)"
         string generated_at
         string summary_model
         string global_hash
@@ -320,7 +320,8 @@ erDiagram
         string doc_id PK
         string filename
         string product_code FK
-        enum category "hld|debug_learning|product_overview|uncategorized"
+        string product_family_code FK "base code for RFC family match"
+        enum category "hld|debug_learning|product_overview|rfc_knowledge|uncategorized"
         string content_hash
         int section_count
     }
@@ -329,7 +330,8 @@ erDiagram
         string section_id PK
         string doc_id FK
         string product_code FK
-        enum category
+        string product_family_code FK "base code for RFC family match"
+        enum category "hld|debug_learning|product_overview|rfc_knowledge|uncategorized"
         string heading
         string summary "curated, no raw text"
         list keywords
@@ -339,8 +341,9 @@ erDiagram
     SectionIndexEntry {
         string section_id PK
         string product_code FK
+        string product_family_code FK "base code for RFC family match"
         enum category
-        int priority
+        int priority "rfc_knowledge=4 > debug_learning=3 > hld=2 > product_overview=1"
         map token_weights
         int byte_offset
         int byte_length
@@ -352,6 +355,14 @@ erDiagram
         string failing_step
         string root_cause
         string corrective_action
+        list rfc_references "RfcReference[]"
+    }
+
+    RfcReference {
+        string rfc_id
+        string notes
+        string failed_test_name
+        string error_message_or_finding
     }
 
     AcronymDefinition {
