@@ -183,6 +183,114 @@ class TestAnalyzerKnowledgeIntegration:
         assert "power supply to card is turned on" in rec.suggested_solution
         assert "See root cause above" not in rec.suggested_solution
 
+    def test_exact_rfc_match_replaces_copilot_error_stub_solution(self):
+        rec = UnitRecord(
+            unit_id="u1",
+            result="FAIL",
+            product_code="N32828-201",
+            error_code="FFFFFFFF",
+            error_message="INFO  - Disaster : Reading 20V failed!",
+            failing_step="20V Test",
+            run_folder="u1",
+        )
+        ctx = KnowledgeContext(
+            product_code="N32828-201",
+            knowledge_hash="h-rfc",
+            match_status="matched",
+            matched=True,
+            matched_section_ids=["20de193411b1-s005"],
+            matched_categories=["rfc_knowledge"],
+            context_text="RFC context",
+            matches=[
+                RetrievalMatch(
+                    section_id="20de193411b1-s005",
+                    doc_id="20de193411b1",
+                    product_code="N32828-201",
+                    category="rfc_knowledge",
+                    heading="Functional Test RFC \u2014 20V Test",
+                    known_failures=[
+                        KnownFailureEntry(
+                            symptom="Disaster : Reading 20V failed!",
+                            log_signature="Disaster : Reading 20V failed!",
+                            failing_step="20V Test",
+                            corrective_action="Make sure the power supply to card is turned on.",
+                            rfc_references=[
+                                RfcReference(
+                                    rfc_id="RFC 1",
+                                    notes="Make sure the power supply to card is turned on",
+                                    failed_test_name="20V Test",
+                                    error_message_or_finding="Disaster : Reading 20V failed!",
+                                )
+                            ],
+                        )
+                    ],
+                )
+            ],
+        )
+
+        def analyze(ec, em, snippet, knowledge_context=None):  # noqa: ANN001, ARG001
+            return (
+                "Offline heuristic: the run failed with 'FFFFFFFF'. The reported condition was: INFO  - Disaster : Reading 20V failed!.",
+                "Verify the failing step's fixture/connection and DUT seating. (Copilot error: RuntimeError)",
+                "stub",
+            )
+
+        job = _job([rec])
+        analyze_job(job, analyze_failure=analyze, cache=NoopCache(), knowledge_retriever=FakeRetriever(ctx))
+
+        assert "exact rfc_knowledge match" in rec.root_cause
+        assert rec.suggested_solution == "Make sure the power supply to card is turned on."
+
+    def test_exact_rfc_match_repairs_signature_cache_hit(self):
+        rec = UnitRecord(
+            unit_id="u1",
+            result="FAIL",
+            product_code="N32828-201",
+            error_code="FFFFFFFF",
+            error_message="INFO  - Disaster : Reading 20V failed!",
+            failing_step="20V Test",
+            run_folder="u1",
+        )
+        ctx = KnowledgeContext(
+            product_code="N32828-201",
+            knowledge_hash="h-rfc",
+            match_status="matched",
+            matched=True,
+            matched_section_ids=["20de193411b1-s005"],
+            matched_categories=["rfc_knowledge"],
+            matches=[
+                RetrievalMatch(
+                    section_id="20de193411b1-s005",
+                    doc_id="20de193411b1",
+                    product_code="N32828-201",
+                    category="rfc_knowledge",
+                    known_failures=[
+                        KnownFailureEntry(
+                            symptom="Disaster : Reading 20V failed!",
+                            log_signature="Disaster : Reading 20V failed!",
+                            failing_step="20V Test",
+                            corrective_action="Make sure the power supply to card is turned on.",
+                        )
+                    ],
+                )
+            ],
+        )
+        job = _job([rec])
+        job.signature_cache["d5fd1811bfec80be"] = (
+            "The supplied evidence shows failure code 'FFFFFFFF' with message 'INFO  - Disaster : Reading 20V failed!', but it does not contain enough product-specific or log evidence to identify a single root cause.",
+            "See root cause above.",
+            "cached",
+        )
+
+        def analyze(ec, em, snippet, knowledge_context=None):  # noqa: ANN001, ARG001
+            raise AssertionError("LLM should not be called on signature cache hit")
+
+        analyze_job(job, analyze_failure=analyze, cache=NoopCache(), knowledge_retriever=FakeRetriever(ctx))
+
+        assert rec.analysis_source == "cached"
+        assert "exact rfc_knowledge match" in rec.root_cause
+        assert rec.suggested_solution == "Make sure the power supply to card is turned on."
+
 
 class TestCacheKnowledgeInvalidation:
     def test_key_differs_by_knowledge_hash(self):
