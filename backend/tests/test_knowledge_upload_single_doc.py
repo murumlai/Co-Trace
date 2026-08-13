@@ -91,3 +91,25 @@ def test_upload_builds_only_the_uploaded_document_and_runs_off_event_loop(client
     assert ingestion.docs[0].product_code == "N32828-201"
     assert ingestion.saw_running_loop is False
     assert retriever.invalidated is True
+
+
+def test_upload_xlsx_accepted_and_saved(client_env, tmp_path):
+    client, ingestion, _ = client_env
+    resp = client.post(
+        "/api/knowledge/upload",
+        headers=_auth(client),
+        files={"file": ("N32828_RFC.xlsx", io.BytesIO(b"PK fake xlsx"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["filename"] == "N32828_RFC.xlsx"
+
+
+def test_upload_unsupported_extension_returns_400(client_env):
+    client, _, _ = client_env
+    resp = client.post(
+        "/api/knowledge/upload",
+        headers=_auth(client),
+        files={"file": ("readme.md", io.BytesIO(b"# hi"), "text/markdown")},
+    )
+    assert resp.status_code == 400
+    assert "XLSX" in resp.json()["detail"]
