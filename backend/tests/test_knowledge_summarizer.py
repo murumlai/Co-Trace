@@ -77,6 +77,91 @@ class TestLlmSectionSummarizer:
         assert section.summary  # falls back to trimmed content
 
 
+class TestRfcSummarizerOutput:
+    def test_rfc_references_coerced_from_known_failures(self):
+        payload = {
+            "summary": "POWER_TEST_01 fails; see RFC-1234.",
+            "known_failures": [
+                {
+                    "symptom": "12V droop",
+                    "failing_step": "POWER_TEST_01",
+                    "rfc_references": [
+                        {
+                            "rfc_id": "RFC-1234",
+                            "notes": "Replace cap C12",
+                            "failed_test_name": "POWER_TEST_01",
+                            "error_message_or_finding": "12V droop at load",
+                        }
+                    ],
+                }
+            ],
+            "acronyms": [],
+            "limits": [],
+            "product_aliases": [],
+            "confidence": "high",
+        }
+
+        def fake_chat(system_prompt, user_prompt):  # noqa: ARG001
+            return json.dumps(payload)
+
+        rfc_section = ExtractedSection(
+            section_id="rfc-s000",
+            doc_id="rfc1",
+            product_code="N32828-201",
+            category="rfc_knowledge",
+            heading="RFC Table \u2014 POWER_TEST_01",
+            order=0,
+            text="failed_test_name: POWER_TEST_01\nrfcs: RFC-1234",
+        )
+        summarizer = LlmSectionSummarizer(chat=fake_chat, model="fake-mini")
+        section = summarizer.summarize(rfc_section, "N32828_RFC.xlsx")
+        assert section.known_failures
+        kf = section.known_failures[0]
+        assert kf.rfc_references
+        ref = kf.rfc_references[0]
+        assert ref.rfc_id == "RFC-1234"
+        assert ref.notes == "Replace cap C12"
+        assert ref.failed_test_name == "POWER_TEST_01"
+
+    def test_rfc_tokens_indexed_as_keywords(self):
+        payload = {
+            "summary": "USB_ENUM_FAIL covered by RFC-0001.",
+            "known_failures": [
+                {
+                    "symptom": "USB not detected",
+                    "failing_step": "USB_ENUM_FAIL",
+                    "rfc_references": [
+                        {"rfc_id": "RFC-0001", "notes": "reseat connector", "failed_test_name": "USB_ENUM_FAIL"}
+                    ],
+                }
+            ],
+            "acronyms": [],
+            "limits": [],
+            "product_aliases": [],
+            "confidence": "medium",
+        }
+
+        def fake_chat(system_prompt, user_prompt):  # noqa: ARG001
+            return json.dumps(payload)
+
+        rfc_section = ExtractedSection(
+            section_id="rfc-s001",
+            doc_id="rfc2",
+            product_code="N32828",
+            category="rfc_knowledge",
+            heading="RFC Table",
+            order=0,
+            text="failed_test_name: USB_ENUM_FAIL\nrfcs: RFC-0001",
+        )
+        section = LlmSectionSummarizer(chat=fake_chat).summarize(rfc_section, "N32828_RFC.xlsx")
+        kws = derive_keywords(section)
+        weights = keyword_weights(section)
+        # RFC ID tokens should be present
+        assert any("RFC" in k.upper() or "rfc" in k for k in kws)
+        assert any("USB" in k.upper() for k in kws)
+        assert any(w > 0 for w in weights.values())
+
+
 class TestKeywords:
     def test_derive_keywords_deterministic(self):
         def fake_chat(system_prompt, user_prompt):  # noqa: ARG001
