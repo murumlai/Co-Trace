@@ -78,6 +78,34 @@ class TestLlmSectionSummarizer:
 
 
 class TestRfcSummarizerOutput:
+    def test_rfc_empty_model_output_falls_back_to_structured_row_summary(self):
+        rfc_section = ExtractedSection(
+            section_id="rfc-s-fallback",
+            doc_id="rfc-fallback",
+            product_code="N32828-201",
+            category="rfc_knowledge",
+            heading="Functional Test RFC \u2014 12V Standby, 3.3 and PWR_OK Test",
+            order=0,
+            text=(
+                "failed_test_name: 12V Standby, 3.3 and PWR_OK Test\n"
+                "error_message_or_finding: 12V Standby, 3.3 and PWR_OK Test Failed\n"
+                "rfc_entries:\n"
+                "- RFC 1: Make sure cables at LTIB is connected\n"
+                "- RFC 2: Make sure Ambery is configured correctly"
+            ),
+        )
+
+        section = LlmSectionSummarizer(chat=lambda _system, _user: "").summarize(
+            rfc_section, "N32828-201_RFC_.xlsx"
+        )
+
+        assert section.summary_model == "structured-rfc-parser"
+        assert "12V Standby" in section.summary
+        assert section.known_failures
+        refs = section.known_failures[0].rfc_references
+        assert [r.rfc_id for r in refs] == ["RFC 1", "RFC 2"]
+        assert refs[0].notes == "Make sure cables at LTIB is connected"
+
     def test_rfc_references_coerced_from_known_failures(self):
         payload = {
             "summary": "POWER_TEST_01 fails; see RFC-1234.",
