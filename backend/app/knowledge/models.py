@@ -16,11 +16,12 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-DocumentCategory = Literal["hld", "debug_learning", "product_overview", "uncategorized"]
+DocumentCategory = Literal["hld", "debug_learning", "product_overview", "rfc_knowledge", "uncategorized"]
 
-# Higher number == retrieved first when scores tie. Debug-learning sections
-# encode product-specific known failures/fixes, so they outrank HLD/overview.
+# Higher number == retrieved first when scores tie. RFC knowledge directly maps
+# failure signatures to RFC guidance, so it ranks above debug_learning.
 CATEGORY_PRIORITY: dict[str, int] = {
+    "rfc_knowledge": 4,
     "debug_learning": 3,
     "hld": 2,
     "product_overview": 1,
@@ -31,6 +32,15 @@ CATEGORY_PRIORITY: dict[str, int] = {
 # ---------------------------------------------------------------------------
 # Curated sub-records (safe to persist)
 # ---------------------------------------------------------------------------
+
+class RfcReference(BaseModel):
+    """One RFC ID and associated notes from an RFC workbook row."""
+
+    rfc_id: str
+    notes: Optional[str] = None
+    failed_test_name: Optional[str] = None
+    error_message_or_finding: Optional[str] = None
+
 
 class KnownFailureEntry(BaseModel):
     """One known symptom -> root cause -> fix learned from a debug-support doc."""
@@ -43,6 +53,7 @@ class KnownFailureEntry(BaseModel):
     station_check: Optional[str] = None
     confidence: Optional[str] = None
     applies_to: Optional[str] = None
+    rfc_references: list["RfcReference"] = Field(default_factory=list)
 
 
 class AcronymDefinition(BaseModel):
@@ -68,6 +79,7 @@ class SourceDocument(BaseModel):
     path: str
     filename: str
     product_code: Optional[str] = None
+    product_family_code: Optional[str] = None
     category: DocumentCategory = "uncategorized"
     content_hash: str = ""
     size_bytes: int = 0
@@ -101,6 +113,7 @@ class KnowledgeSection(BaseModel):
     section_id: str
     doc_id: str
     product_code: Optional[str] = None
+    product_family_code: Optional[str] = None
     category: DocumentCategory = "uncategorized"
     heading: Optional[str] = None
     order: int = 0
@@ -123,6 +136,7 @@ class SourceDocumentMeta(BaseModel):
     doc_id: str
     filename: str
     product_code: Optional[str] = None
+    product_family_code: Optional[str] = None
     category: DocumentCategory = "uncategorized"
     content_hash: str = ""
     size_bytes: int = 0
@@ -165,6 +179,7 @@ class KnowledgeManifest(BaseModel):
 class SectionIndexEntry(BaseModel):
     section_id: str
     product_code: Optional[str] = None
+    product_family_code: Optional[str] = None
     category: DocumentCategory = "uncategorized"
     heading: Optional[str] = None
     priority: int = 0
@@ -188,6 +203,7 @@ class RetrievalMatch(BaseModel):
     section_id: str
     doc_id: str
     product_code: Optional[str] = None
+    product_family_code: Optional[str] = None
     category: DocumentCategory = "uncategorized"
     heading: Optional[str] = None
     summary: str = ""
