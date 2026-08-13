@@ -214,6 +214,8 @@ def _analyze_unit(
 
     if not force and sig in job.signature_cache:
         root, solution, _src = job.signature_cache[sig]
+        root, solution = _apply_exact_knowledge_fallback(rec, knowledge, root, solution)
+        job.signature_cache[sig] = (root, solution, _src)
         rec.root_cause = root
         rec.suggested_solution = solution
         rec.analysis_source = "local-cache" if _src == "local-cache" else "cached"
@@ -226,6 +228,7 @@ def _analyze_unit(
         if cached_entry:
             root = str(cached_entry.get("root_cause") or "").strip() or _insufficient_root_cause(rec.error_code, err_msg)
             solution = str(cached_entry.get("suggested_solution") or "").strip() or _insufficient_solution()
+            root, solution = _apply_exact_knowledge_fallback(rec, knowledge, root, solution)
             job.signature_cache[sig] = (root, solution, "local-cache")
             rec.root_cause = root
             rec.suggested_solution = solution
@@ -424,8 +427,11 @@ def _analysis_needs_knowledge_fallback(rec: UnitRecord, root: str, solution: str
     return (
         "does not contain enough product-specific" in root_norm
         or "insufficient" in root_norm
+        or root_norm.startswith("offline heuristic:")
         or solution_norm in ("see root cause above.", "see root cause above")
         or solution_norm == _normalize_msg(_insufficient_solution())
+        or "copilot error:" in solution_norm
+        or "set github_token to enable ai diagnosis" in solution_norm
     )
 
 
