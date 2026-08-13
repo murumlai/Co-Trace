@@ -189,7 +189,7 @@ export default function Knowledge() {
             <input
               ref={fileInput}
               type="file"
-              accept=".pdf,.docx"
+              accept=".pdf,.docx,.xlsx"
               onChange={upload}
               className="hidden"
             />
@@ -251,7 +251,7 @@ export default function Knowledge() {
 
       {products.length === 0 ? (
         <Card className="p-10 text-center text-muted">
-          No product knowledge yet. Upload a PDF/DOCX product doc or place files in a source folder,
+          No product knowledge yet. Upload a PDF/DOCX product doc or an XLSX RFC workbook, or place files in a source folder,
           then rebuild.
         </Card>
       ) : (
