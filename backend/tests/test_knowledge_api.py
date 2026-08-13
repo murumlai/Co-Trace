@@ -160,7 +160,27 @@ class TestKnowledgeRoutes:
         saved = tmp_path / "product_docs" / "M79060-001_Debug.pdf"
         assert saved.exists()
 
-    def test_delete_pack_ok(self, env):
+    def test_upload_xlsx_accepted(self, env, tmp_path):
+        client, state = env
+        resp = client.post(
+            "/api/knowledge/upload",
+            headers=_admin_auth(client),
+            files={"file": ("N32828_RFC.xlsx", io.BytesIO(b"PK fake xlsx"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["filename"] == "N32828_RFC.xlsx"
+        saved = tmp_path / "product_docs" / "N32828_RFC.xlsx"
+        assert saved.exists()
+
+    def test_upload_rejects_txt(self, env):
+        client, _ = env
+        resp = client.post(
+            "/api/knowledge/upload",
+            headers=_admin_auth(client),
+            files={"file": ("notes.txt", io.BytesIO(b"data"), "text/plain")},
+        )
+        assert resp.status_code == 400
+        assert "XLSX" in resp.json()["detail"]
         client, _ = env
         resp = client.delete("/api/knowledge", headers=_admin_auth(client))
         assert resp.status_code == 200
