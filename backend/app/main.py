@@ -394,7 +394,7 @@ def clear_analysis_cache(cache_key: str, user: AuthenticatedUser = Depends(requi
 # --------------------------------------------------------------------------
 # Product-aware diagnosis: knowledge pack management
 # --------------------------------------------------------------------------
-_ALLOWED_DOC_EXTS = {".pdf", ".docx"}
+_ALLOWED_DOC_EXTS = {".pdf", ".docx", ".xlsx"}
 _KNOWLEDGE_JOB_LIMIT = 50
 _knowledge_job_lock = threading.Lock()
 _knowledge_jobs: dict[str, dict[str, Any]] = {}
@@ -517,7 +517,7 @@ async def knowledge_upload(
 ) -> dict:
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in _ALLOWED_DOC_EXTS:
-        raise HTTPException(400, f"Unsupported document type: {ext or 'unknown'} (PDF/DOCX only)")
+        raise HTTPException(400, f"Unsupported document type: {ext or 'unknown'} (PDF/DOCX/XLSX only)")
     os.makedirs(settings.PRODUCT_KNOWLEDGE_DOCS_DIR, exist_ok=True)
     dest = os.path.join(settings.PRODUCT_KNOWLEDGE_DOCS_DIR, _sanitize_filename(file.filename))
     size = 0
