@@ -9,6 +9,7 @@ Category-specific prompts extract:
 * ``hld``             -> architecture, subsystems, interfaces, acronyms, limits.
 * ``debug_learning``  -> symptom, log signals, failing step, root cause, fix.
 * ``product_overview``-> purpose, component glossary, aliases, interfaces.
+* ``rfc_knowledge``   -> failed test/error name, error message/bin/findings, RFC IDs/notes.
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ from .models import (
     KnowledgeSection,
     KnownFailureEntry,
     LimitSpecRecord,
+    RfcReference,
 )
 
 
@@ -103,6 +105,25 @@ _SYSTEM_BY_CATEGORY: dict[str, str] = {
     "product_overview": _OVERVIEW_SYSTEM,
     "uncategorized": _OVERVIEW_SYSTEM,
 }
+
+_RFC_SYSTEM = (
+    "You are an RFC workbook summarizer for a manufacturing test-diagnosis "
+    "knowledge base. Each section encodes one row: a failed test/error name, "
+    "optional error message/bin/issue/findings, and one or more RFC IDs with "
+    "notes. Extract them precisely.\n" + _COMMON_RULES + "\n"
+    "JSON schema: {\"summary\": string (<=80 words, failed test, RFC IDs, "
+    "key guidance), \"known_failures\": [{\"symptom\": string|null, "
+    "\"log_signature\": string|null, \"failing_step\": string|null, "
+    "\"root_cause\": string|null, \"corrective_action\": string|null, "
+    "\"confidence\": \"low\"|\"medium\"|\"high\"|null, \"applies_to\": "
+    "string|null, \"rfc_references\": [{\"rfc_id\": string, \"notes\": "
+    "string|null, \"failed_test_name\": string|null, "
+    "\"error_message_or_finding\": string|null}]}], "
+    "\"acronyms\": [], \"limits\": [], \"product_aliases\": [], "
+    "\"confidence\": \"low\"|\"medium\"|\"high\"}"
+)
+
+_SYSTEM_BY_CATEGORY["rfc_knowledge"] = _RFC_SYSTEM
 
 
 def _system_prompt(category: DocumentCategory) -> str:
@@ -242,10 +263,32 @@ def _coerce_failures(value: object) -> list[KnownFailureEntry]:
             station_check=_opt_str(item.get("station_check")),
             confidence=_opt_str(item.get("confidence")),
             applies_to=_opt_str(item.get("applies_to")),
+            rfc_references=_coerce_rfc_references(item.get("rfc_references")),
         )
-        if any(entry.model_dump().values()):
+        if any(v for v in entry.model_dump().values() if v):
             out.append(entry)
     return out[:20]
+
+
+def _coerce_rfc_references(value: object) -> list[RfcReference]:
+    if not isinstance(value, list):
+        return []
+    out: list[RfcReference] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        rfc_id = _opt_str(item.get("rfc_id"))
+        if not rfc_id:
+            continue
+        out.append(
+            RfcReference(
+                rfc_id=rfc_id[:80],
+                notes=_opt_str(item.get("notes")),
+                failed_test_name=_opt_str(item.get("failed_test_name")),
+                error_message_or_finding=_opt_str(item.get("error_message_or_finding")),
+            )
+        )
+    return out[:40]
 
 
 def _coerce_acronyms(value: object) -> list[AcronymDefinition]:
@@ -331,6 +374,14 @@ def _tokenize_fields(section: KnowledgeSection) -> dict[str, int]:
             v for v in (kf.symptom, kf.log_signature, kf.failing_step,
                         kf.root_cause, kf.applies_to) if v
         )
+        for ref in kf.rfc_references:
+            parts.append(ref.rfc_id)
+            if ref.notes:
+                parts.append(ref.notes)
+            if ref.failed_test_name:
+                parts.append(ref.failed_test_name)
+            if ref.error_message_or_finding:
+                parts.append(ref.error_message_or_finding)
     parts.extend(a.acronym for a in section.acronyms)
     parts.extend(limit.name for limit in section.limits)
     parts.extend(section.product_aliases)
