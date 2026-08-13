@@ -5,12 +5,18 @@ Filename conventions (verified against real sample docs):
 * ``M79060-001_Debug Support Document Key Learning.pdf`` -> ``debug_learning``
 * ``M13983-700_Sedona USB Test Card.pdf``               -> ``product_overview``
 * ``N32828-201_MPDU_20V_PDB1_HLD_Rev05.docx``           -> ``hld``
+* ``N32828_RFC.xlsx``                                   -> ``rfc_knowledge``
+* ``N32828-201_RFC.xlsx``                               -> ``rfc_knowledge``
 
 Product code = the first filename token when it looks like a product code,
 otherwise the first product-code match anywhere in the filename.
 
-PDF and DOCX are supported in v1. PPTX/XLSX/legacy Office formats are planned
-parser-adapter extension points and intentionally not implemented here.
+Product-family code = the base code (letters + digits, no revision suffix)
+extracted from the filename; used for family-level fallback when a revisioned
+product has no exact RFC workbook.
+
+PDF, DOCX, and XLSX (RFC workbooks) are supported. PPTX/legacy Office formats
+are planned parser-adapter extension points and intentionally not implemented.
 """
 from __future__ import annotations
 
@@ -20,12 +26,17 @@ import os
 import re
 
 from ..config import settings
-from .models import DocumentCategory, ExtractedSection, SourceDocument
+from .models import DocumentCategory, ExtractedSection, RfcReference, SourceDocument
 
 # Product codes: 1-2 letters, 4-6 digits, dash, 2-4 digits (e.g. M79060-001).
 _PRODUCT_CODE_RE = re.compile(r"[A-Z]{1,2}[0-9]{4,6}-[0-9]{2,4}")
+# Product-family code: just the base letters+digits without the revision suffix.
+_PRODUCT_FAMILY_RE = re.compile(r"[A-Z]{1,2}[0-9]{4,6}")
 
-# Ordered by precedence: debug_learning > hld > product_overview.
+# RFC workbook keyword used to classify .xlsx files.
+_RFC_KEYWORDS = ("rfc",)
+
+# Ordered by precedence: rfc_knowledge > debug_learning > hld > product_overview.
 # Short acronyms (FA, RCA) are matched with word boundaries to avoid over-match.
 _DEBUG_LEARNING_KEYWORDS = (
     "debug",
@@ -68,9 +79,36 @@ def extract_product_code(filename: str) -> str | None:
     return anywhere.group(0) if anywhere else None
 
 
+def extract_product_family_code(filename: str) -> str | None:
+    """Return the base product-family code (no revision suffix) for ``filename``.
+
+    E.g. ``N32828-201_RFC.xlsx`` -> ``N32828``, ``N32828_RFC.xlsx`` -> ``N32828``.
+    A revisioned product code's family is its base; if no revisioned code is
+    found the family is derived directly from the bare family pattern.
+    """
+    stem = os.path.splitext(os.path.basename(filename))[0]
+    # Prefer the base part of a full revisioned product code.
+    full = _PRODUCT_CODE_RE.search(stem)
+    if full:
+        base = full.group(0).split("-")[0]
+        m = _PRODUCT_FAMILY_RE.fullmatch(base)
+        return m.group(0) if m else None
+    # Fall back to a bare family code (letters+digits, no dash).
+    first_token = re.split(r"[_\s]+", stem, maxsplit=1)[0]
+    m = _PRODUCT_FAMILY_RE.fullmatch(first_token)
+    if m:
+        return m.group(0)
+    anywhere = _PRODUCT_FAMILY_RE.search(stem)
+    return anywhere.group(0) if anywhere else None
+
+
 def detect_category(filename: str) -> DocumentCategory:
     """Classify a document by filename keywords (case-insensitive)."""
     name = os.path.basename(filename).lower()
+    ext = os.path.splitext(name)[1]
+    # XLSX files containing 'rfc' are RFC workbooks.
+    if ext == ".xlsx" and any(kw in name for kw in _RFC_KEYWORDS):
+        return "rfc_knowledge"
     # Tokenize on non-alphanumerics so `_fa_`/`_rca_` acronyms are found
     # (underscores are word chars, so \b alone would miss them).
     tokens = set(re.split(r"[^a-z0-9]+", name))
@@ -105,6 +143,9 @@ def scan_source_documents(
             for path in glob.glob(os.path.join(root, "**", pattern), recursive=True):
                 if not os.path.isfile(path):
                     continue
+                # Skip Office lock/temp files (e.g. ~$20VMPDUPDB1_RFC_.xlsx).
+                if os.path.basename(path).startswith("~$"):
+                    continue
                 doc = describe_document(path, source_root=root)
                 # First discovery wins (stable across overlapping source dirs).
                 seen.setdefault(doc.doc_id, doc)
@@ -114,6 +155,7 @@ def scan_source_documents(
 def describe_document(path: str, source_root: str = "") -> SourceDocument:
     filename = os.path.basename(path)
     product_code = extract_product_code(filename)
+    product_family_code = extract_product_family_code(filename)
     category = detect_category(filename)
     try:
         size_bytes = os.path.getsize(path)
@@ -124,11 +166,17 @@ def describe_document(path: str, source_root: str = "") -> SourceDocument:
         path=os.path.abspath(path),
         filename=filename,
         product_code=product_code,
+        product_family_code=product_family_code,
         category=category,
         size_bytes=size_bytes,
         source_root=source_root,
     )
-    if product_code is None:
+    if category == "rfc_knowledge" and product_family_code is None:
+        doc.warnings.append(
+            "RFC workbook filename contains no product code or product-family code; "
+            "skipping ingestion."
+        )
+    elif product_code is None:
         doc.warnings.append("No product code found in filename.")
     return doc
 
@@ -235,13 +283,132 @@ def _sections_from_headed_lines(
     return sections
 
 
+# ---------------------------------------------------------------------------
+# RFC XLSX extraction
+# ---------------------------------------------------------------------------
+
+# Column name variants accepted (case-insensitive, whitespace-normalised).
+_RFC_COL_TEST = re.compile(r"failed.?test.?name|error.?name")
+_RFC_COL_MSG = re.compile(r"error.?message|bin|issue|findings")
+_RFC_COL_RFC = re.compile(r"^rfcs?$")
+
+# Separators for multiple RFC IDs inside one cell.
+_RFC_ID_SEP = re.compile(r"[\n,;/\\\u2022\u25CF\u25E6]+")
+
+
+def _normalize_col(name: object) -> str:
+    return re.sub(r"\s+", " ", str(name or "").strip().lower())
+
+
+def _find_header_row(ws) -> tuple[int, dict[str, int]] | None:  # type: ignore[return]
+    """Scan up to 20 rows for a header row; return (row_idx, col_map)."""
+    for row_idx, row in enumerate(ws.iter_rows(max_row=20, values_only=True)):
+        col_map: dict[str, int] = {}
+        for col_idx, cell in enumerate(row):
+            norm = _normalize_col(cell)
+            if _RFC_COL_TEST.search(norm):
+                col_map["test"] = col_idx
+            elif _RFC_COL_MSG.search(norm):
+                col_map["msg"] = col_idx
+            elif _RFC_COL_RFC.fullmatch(norm):
+                col_map["rfc"] = col_idx
+        if "test" in col_map and "rfc" in col_map:
+            return row_idx, col_map
+    return None
+
+
+def _split_rfc_ids(cell_value: object) -> list[str]:
+    """Split a cell value into individual RFC IDs, stripping empty parts."""
+    raw = str(cell_value or "").strip()
+    if not raw:
+        return []
+    return [p.strip() for p in _RFC_ID_SEP.split(raw) if p.strip()]
+
+
+def _extract_xlsx_rfc_sections(
+    path: str, product_code: str | None, product_family_code: str | None, doc_id: str
+) -> tuple[str, list[ExtractedSection]]:
+    """Parse an RFC workbook into one ExtractedSection per data row."""
+    import hashlib as _hashlib
+
+    from openpyxl import load_workbook  # noqa: PLC0415
+
+    wb = load_workbook(path, read_only=True, data_only=True)
+    all_text_parts: list[str] = []
+    sections: list[ExtractedSection] = []
+    order = 0
+
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        # Skip hidden sheets.
+        if getattr(ws, "sheet_state", "visible") not in ("visible", None):
+            continue
+        result = _find_header_row(ws)
+        if result is None:
+            continue
+        header_row_idx, col_map = result
+
+        for row_idx, row in enumerate(ws.iter_rows(values_only=True)):
+            if row_idx <= header_row_idx:
+                continue
+            test_val = row[col_map["test"]] if len(row) > col_map["test"] else None
+            msg_val = row[col_map["msg"]] if ("msg" in col_map and len(row) > col_map["msg"]) else None
+            rfc_val = row[col_map["rfc"]] if len(row) > col_map["rfc"] else None
+
+            test_str = str(test_val or "").strip()
+            msg_str = str(msg_val or "").strip() if msg_val is not None else ""
+            rfc_ids = _split_rfc_ids(rfc_val)
+
+            if not test_str or not rfc_ids:
+                continue
+
+            # Build stable human-readable text for the summarizer.
+            parts = [f"failed_test_name: {test_str}"]
+            if msg_str:
+                parts.append(f"error_message_or_finding: {msg_str}")
+            parts.append(f"rfcs: {', '.join(rfc_ids)}")
+            text = "\n".join(parts)
+            heading = f"{sheet_name} — {test_str}"
+            all_text_parts.append(text)
+
+            sections.append(
+                ExtractedSection(
+                    section_id=f"{doc_id}-s{order:03d}",
+                    doc_id=doc_id,
+                    product_code=product_code,
+                    category="rfc_knowledge",
+                    heading=heading,
+                    order=order,
+                    text=text,
+                )
+            )
+            order += 1
+
+    wb.close()
+    full_text = "\n".join(all_text_parts)
+    if not full_text:
+        raise ValueError("No RFC rows extracted from workbook.")
+    content_hash = _hashlib.sha256(full_text.encode("utf-8")).hexdigest()[:16]
+    return content_hash, sections
+
+
 def parse_document(doc: SourceDocument) -> tuple[str, list[ExtractedSection]]:
     """Parse ``doc`` into bounded sections.
 
     Returns ``(content_hash, sections)``. Raises ``ValueError`` for unsupported
     extensions and when no text can be extracted.
     """
+    # RFC workbooks with no product-family code cannot be usefully indexed.
+    if doc.category == "rfc_knowledge" and doc.product_family_code is None:
+        raise ValueError(
+            f"{doc.filename}: RFC workbook filename contains no product code or "
+            "product-family code; cannot ingest."
+        )
     ext = os.path.splitext(doc.filename)[1].lower()
+    if ext == ".xlsx":
+        return _extract_xlsx_rfc_sections(
+            doc.path, doc.product_code, doc.product_family_code, doc.doc_id
+        )
     if ext == ".pdf":
         raw_lines = _extract_pdf_lines(doc.path)
         headed = [(_is_heading_line(ln), ln.strip()) for ln in raw_lines if ln.strip()]
