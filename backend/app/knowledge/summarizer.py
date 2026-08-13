@@ -187,6 +187,8 @@ class LlmSectionSummarizer:
         parsed = _parse_summary_json(content)
         warnings: list[str] = []
         if not parsed.get("summary"):
+            if section.category == "rfc_knowledge":
+                return _summarize_structured_rfc_section(section, source_filename)
             warnings.append("Empty or unparseable summary from model.")
         return KnowledgeSection(
             section_id=section.section_id,
@@ -331,6 +333,93 @@ def _opt_str(value: object) -> str | None:
         return None
     s = str(value).strip()
     return s or None
+
+
+def _summarize_structured_rfc_section(
+    section: ExtractedSection, source_filename: str
+) -> KnowledgeSection:
+    failed_test, finding, entries = _parse_structured_rfc_text(section.text)
+    refs: list[RfcReference] = []
+    actions: list[str] = []
+    for idx, entry in enumerate(entries, start=1):
+        rfc_id, notes = _split_rfc_entry(entry, idx)
+        refs.append(
+            RfcReference(
+                rfc_id=rfc_id,
+                notes=notes,
+                failed_test_name=failed_test,
+                error_message_or_finding=finding,
+            )
+        )
+        actions.append(notes or rfc_id)
+    summary_parts = [failed_test or section.heading or "RFC workbook row"]
+    if finding:
+        summary_parts.append(finding)
+    if actions:
+        summary_parts.append("; ".join(actions[:3]))
+    summary = ": ".join(p for p in summary_parts if p)[:600]
+    known_failures = []
+    if failed_test or finding or refs:
+        known_failures.append(
+            KnownFailureEntry(
+                symptom=finding,
+                log_signature=finding,
+                failing_step=failed_test,
+                corrective_action="; ".join(actions)[:600] if actions else None,
+                confidence="high",
+                rfc_references=refs,
+            )
+        )
+    return KnowledgeSection(
+        section_id=section.section_id,
+        doc_id=section.doc_id,
+        product_code=section.product_code,
+        category=section.category,
+        heading=section.heading,
+        order=section.order,
+        summary=summary,
+        known_failures=known_failures,
+        source_filename=source_filename,
+        summary_model="structured-rfc-parser",
+    )
+
+
+def _parse_structured_rfc_text(text: str) -> tuple[str | None, str | None, list[str]]:
+    failed_test: str | None = None
+    finding: str | None = None
+    entries: list[str] = []
+    in_entries = False
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("failed_test_name:"):
+            failed_test = line.split(":", 1)[1].strip() or None
+            in_entries = False
+        elif line.startswith("error_message_or_finding:"):
+            finding = line.split(":", 1)[1].strip() or None
+            in_entries = False
+        elif line.startswith("rfc_entries:"):
+            in_entries = True
+        elif line.startswith("rfcs:"):
+            entries.extend(p.strip() for p in line.split(":", 1)[1].split(",") if p.strip())
+            in_entries = False
+        elif in_entries and line.startswith("- "):
+            entries.append(line[2:].strip())
+    return failed_test, finding, entries
+
+
+_RFC_ENTRY_RE = re.compile(r"^(RFC\s*\d+|RFC[-_ ]?[A-Za-z0-9]+)\s*:?\s*(.*)$", re.IGNORECASE)
+
+
+def _split_rfc_entry(entry: str, ordinal: int) -> tuple[str, str | None]:
+    text = (entry or "").strip()
+    match = _RFC_ENTRY_RE.match(text)
+    if match:
+        rfc_id = re.sub(r"\s+", " ", match.group(1).strip().upper())
+        notes = match.group(2).strip() or None
+        return rfc_id[:80], notes
+    return f"RFC {ordinal}", text or None
 
 
 # ---------------------------------------------------------------------------
