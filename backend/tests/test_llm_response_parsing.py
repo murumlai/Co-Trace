@@ -43,3 +43,11 @@ def test_github_models_malformed_content_returns_actionable_fallback():
 
     assert "failure code 'E123'" in root
     assert "reanalyze with more failure evidence" in solution
+
+
+def test_copilot_malformed_content_returns_actionable_fallback_solution():
+    root, solution = copilot_client._parse_json_content("", "FFFFFFFF", "Reading 20V failed")
+
+    assert "failure code 'FFFFFFFF'" in root
+    assert "See root cause above" not in solution
+    assert "reanalyze with more failure evidence" in solution
