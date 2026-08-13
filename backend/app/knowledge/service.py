@@ -29,7 +29,7 @@ log = logging.getLogger("cotrace.knowledge")
 
 IngestionProgress = Callable[[int, int, str], None]
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 
 class KnowledgeIngestionService:
@@ -69,6 +69,7 @@ class KnowledgeIngestionService:
                 doc_id=doc.doc_id,
                 filename=doc.filename,
                 product_code=doc.product_code,
+                product_family_code=doc.product_family_code,
                 category=doc.category,
                 size_bytes=doc.size_bytes,
                 source_root=doc.source_root,
@@ -154,6 +155,7 @@ class KnowledgeIngestionService:
                 meta.warnings.append(msg)
                 continue
             curated.keywords = summarizer_mod.derive_keywords(curated)
+            curated.product_family_code = doc.product_family_code
             out.append(curated)
             if progress:
                 progress(i, total, f"Summarized {doc.filename} section {i}/{total}")
@@ -214,6 +216,7 @@ class KnowledgeIngestionService:
                 SectionIndexEntry(
                     section_id=section.section_id,
                     product_code=section.product_code,
+                    product_family_code=section.product_family_code,
                     category=section.category,
                     heading=section.heading,
                     priority=CATEGORY_PRIORITY.get(section.category, 0),
