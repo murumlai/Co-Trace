@@ -6,7 +6,7 @@ from typing import Any
 from app.analysis_cache import DiskAnalysisCache
 from app.analyzer import analyze_job
 from app.job_registry import Job
-from app.knowledge.models import KnowledgeContext
+from app.knowledge.models import KnowledgeContext, KnownFailureEntry, RetrievalMatch, RfcReference
 from app.models import UnitRecord
 
 
@@ -112,6 +112,76 @@ class TestAnalyzerKnowledgeIntegration:
         analyze_job(job, analyze_failure=analyze, cache=NoopCache())
         assert job.records[0].knowledge_used is False
         assert job.records[0].knowledge_hash is None
+
+    def test_exact_rfc_match_replaces_insufficient_llm_solution(self):
+        rec = UnitRecord(
+            unit_id="u1",
+            result="FAIL",
+            product_code="N32828-201",
+            error_code="FFFFFFFF",
+            error_message="INFO  - Disaster : Reading 20V failed!",
+            failing_step="20V Test",
+            run_folder="u1",
+        )
+        ctx = KnowledgeContext(
+            product_code="N32828-201",
+            knowledge_hash="h-rfc",
+            match_status="matched",
+            matched=True,
+            matched_section_ids=["20de193411b1-s005"],
+            matched_categories=["rfc_knowledge"],
+            context_text="RFC context",
+            matches=[
+                RetrievalMatch(
+                    section_id="20de193411b1-s005",
+                    doc_id="20de193411b1",
+                    product_code="N32828-201",
+                    category="rfc_knowledge",
+                    heading="Functional Test RFC \u2014 20V Test",
+                    summary="20V Test: Disaster : Reading 20V failed!",
+                    known_failures=[
+                        KnownFailureEntry(
+                            symptom="Disaster : Reading 20V failed!",
+                            log_signature="Disaster : Reading 20V failed!",
+                            failing_step="20V Test",
+                            corrective_action=(
+                                "Make sure the power supply to card is turned on; "
+                                "check Ambery configuration; if only Standby LED is on, "
+                                "send the card to debug for comparator issue."
+                            ),
+                            confidence="high",
+                            rfc_references=[
+                                RfcReference(
+                                    rfc_id="RFC 1",
+                                    notes="Make sure the power supply to card is turned on",
+                                    failed_test_name="20V Test",
+                                    error_message_or_finding="Disaster : Reading 20V failed!",
+                                )
+                            ],
+                        )
+                    ],
+                    source_filename="N32828-201_RFC_.xlsx",
+                )
+            ],
+        )
+
+        def analyze(ec, em, snippet, knowledge_context=None):  # noqa: ANN001, ARG001
+            return (
+                "The supplied evidence shows failure code 'FFFFFFFF' with message "
+                "'INFO  - Disaster : Reading 20V failed!', but it does not contain "
+                "enough product-specific or log evidence to identify a single root cause.",
+                "See root cause above.",
+                "llm",
+            )
+
+        job = _job([rec])
+        analyze_job(job, analyze_failure=analyze, cache=NoopCache(), knowledge_retriever=FakeRetriever(ctx))
+
+        assert rec.knowledge_used is True
+        assert rec.knowledge_section_ids == ["20de193411b1-s005"]
+        assert "exact rfc_knowledge match" in rec.root_cause
+        assert "power supply to card is turned on" in rec.suggested_solution
+        assert "See root cause above" not in rec.suggested_solution
 
 
 class TestCacheKnowledgeInvalidation:
