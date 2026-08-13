@@ -138,7 +138,7 @@ class Settings:
     # Filename globs treated as supported source documents.
     PRODUCT_KNOWLEDGE_SCAN_GLOBS: list[str] = [
         g for g in os.getenv(
-            "PRODUCT_KNOWLEDGE_SCAN_GLOBS", "*.pdf,*.docx"
+            "PRODUCT_KNOWLEDGE_SCAN_GLOBS", "*.pdf,*.docx,*.xlsx"
         ).split(",") if g.strip()
     ]
     # Retrieval / prompt budgets.
