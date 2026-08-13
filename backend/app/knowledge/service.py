@@ -109,6 +109,27 @@ class KnowledgeIngestionService:
         )
         return manifest
 
+    def remove_document(self, doc_id: str) -> tuple[KnowledgeManifest | None, bool]:
+        """Prune one document and its sections from the existing pack.
+
+        Remaining sections are already curated, so this needs no LLM and works
+        even when no summarization backend is available. Returns the rewritten
+        manifest and whether anything was removed.
+        """
+        manifest = self._store.load_manifest()
+        if manifest is None:
+            return None, False
+        remaining_metas = [m for m in manifest.documents if m.doc_id != doc_id]
+        if len(remaining_metas) == len(manifest.documents):
+            return manifest, False
+        remaining_sections = [s for s in self._store.iter_sections() if s.doc_id != doc_id]
+        warnings = [w for meta in remaining_metas for w in meta.warnings]
+        new_manifest = self._build_manifest(remaining_metas, remaining_sections, warnings)
+        index = self._build_index(remaining_sections)
+        self._store.write_pack(new_manifest, index, remaining_sections)
+        log.info("Pruned document %s from knowledge pack.", doc_id)
+        return new_manifest, True
+
     # --- internals -----------------------------------------------------------
 
     def _summarize_sections(

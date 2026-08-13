@@ -9,9 +9,10 @@ diagnosis prompt. Two guarantees drive the design:
   ``needs_review`` entries (no definition) instead of letting the model invent a
   full form. A human approves/rejects them later via the Knowledge UI.
 
-Product-specific approved definitions override global (product_code == null)
-definitions. Nothing here ever stores raw log text — only the acronym token,
-product code, counters, timestamps, and which record field it was seen in.
+Entries are unique by acronym alone: the glossary holds exactly one record per
+acronym regardless of product. Nothing here ever stores raw log text — only the
+acronym token, product code, counters, timestamps, and which record field it was
+seen in.
 
 File I/O mirrors ``KnowledgeStore``: an in-memory copy is cached and reloaded
 when the file mtime changes (so multiple store instances in one process stay
@@ -169,35 +170,86 @@ def extract_acronyms(
 # ---------------------------------------------------------------------------
 
 def _find_entry(
-    entries: list[AcronymGlossaryEntry], acronym: str, product_code: str | None
+    entries: list[AcronymGlossaryEntry], acronym: str, product_code: str | None = None
 ) -> AcronymGlossaryEntry | None:
-    scope = product_code or None
+    """Look up by acronym only — the glossary keeps one entry per acronym."""
     for entry in entries:
-        if entry.acronym == acronym and (entry.product_code or None) == scope:
+        if entry.acronym == acronym:
             return entry
     return None
 
 
 def _approved_definition(
-    entries: list[AcronymGlossaryEntry], acronym: str, product_code: str | None
+    entries: list[AcronymGlossaryEntry], acronym: str, product_code: str | None = None
 ) -> str | None:
-    """Product-scoped approved definition overrides the global one."""
-    product = _find_entry(entries, acronym, product_code) if product_code else None
-    if product and product.status == "approved" and product.definition:
-        return product.definition
-    glob = _find_entry(entries, acronym, None)
-    if glob and glob.status == "approved" and glob.definition:
-        return glob.definition
+    entry = _find_entry(entries, acronym)
+    if entry and entry.status == "approved" and entry.definition:
+        return entry.definition
     return None
 
 
 def _is_rejected(
-    entries: list[AcronymGlossaryEntry], acronym: str, product_code: str | None
+    entries: list[AcronymGlossaryEntry], acronym: str, product_code: str | None = None
 ) -> bool:
-    for entry in (_find_entry(entries, acronym, product_code), _find_entry(entries, acronym, None)):
-        if entry and entry.status == "rejected":
-            return True
-    return False
+    entry = _find_entry(entries, acronym)
+    return bool(entry and entry.status == "rejected")
+
+
+_STATUS_PRIORITY = {"approved": 2, "rejected": 1, "needs_review": 0}
+
+
+def _min_ts(a: str | None, b: str | None) -> str | None:
+    vals = [t for t in (a, b) if t]
+    return min(vals) if vals else None
+
+
+def _max_ts(a: str | None, b: str | None) -> str | None:
+    vals = [t for t in (a, b) if t]
+    return max(vals) if vals else None
+
+
+def _merge_entry(base: AcronymGlossaryEntry, other: AcronymGlossaryEntry) -> None:
+    """Fold a duplicate ``other`` into ``base`` (same acronym + product scope)."""
+    base.observed_count += other.observed_count
+    base.observed_in_fields = sorted(set(base.observed_in_fields) | set(other.observed_in_fields))
+    base.first_seen_at = _min_ts(base.first_seen_at, other.first_seen_at)
+    base.last_seen_at = _max_ts(base.last_seen_at, other.last_seen_at)
+    base.created_at = _min_ts(base.created_at, other.created_at)
+    base.updated_at = _max_ts(base.updated_at, other.updated_at)
+    if _STATUS_PRIORITY.get(other.status, 0) > _STATUS_PRIORITY.get(base.status, 0):
+        # A human decision (approved/rejected) wins over a pending duplicate.
+        base.status = other.status
+        base.source = other.source
+        if other.definition:
+            base.definition = other.definition
+        if other.notes:
+            base.notes = other.notes
+    else:
+        if not base.definition and other.definition:
+            base.definition = other.definition
+        if not base.notes and other.notes:
+            base.notes = other.notes
+
+
+def _dedupe_entries(
+    entries: list[AcronymGlossaryEntry],
+) -> tuple[list[AcronymGlossaryEntry], int]:
+    """Collapse entries sharing an acronym (regardless of product). First wins,
+    later duplicates are merged in. Returns ``(unique_entries, removed_count)``."""
+    kept: dict[str, AcronymGlossaryEntry] = {}
+    order: list[str] = []
+    removed = 0
+    for entry in entries:
+        key = entry.acronym
+        existing = kept.get(key)
+        if existing is None:
+            kept[key] = entry
+            order.append(key)
+        else:
+            _merge_entry(existing, entry)
+            removed += 1
+    return [kept[k] for k in order], removed
+
 
 
 def _now() -> str:
@@ -248,6 +300,7 @@ class AcronymGlossaryStore:
         self._lock = threading.RLock()
         self._cache: AcronymGlossary | None = None
         self._loaded_mtime: float | None = None
+        self._pending_dedupe_count = 0
 
     # --- loading -------------------------------------------------------------
 
@@ -261,7 +314,16 @@ class AcronymGlossaryStore:
         with self._lock:
             mtime = self._mtime()
             if self._cache is None or mtime != self._loaded_mtime:
-                self._cache = self._load()
+                loaded = self._load()
+                deduped, removed = _dedupe_entries(loaded.entries)
+                if removed:
+                    log.warning(
+                        "Collapsed %s duplicate acronym entr%s on load.",
+                        removed, "y" if removed == 1 else "ies",
+                    )
+                    loaded.entries = deduped
+                self._pending_dedupe_count = removed
+                self._cache = loaded
                 self._loaded_mtime = mtime
             return self._cache
 
@@ -291,6 +353,17 @@ class AcronymGlossaryStore:
         with self._lock:
             self._cache = None
             self._loaded_mtime = None
+
+    def dedupe(self) -> int:
+        """Collapse any duplicate entries on disk and persist. Returns the count
+        removed. Loading already dedupes in memory; this writes the clean file."""
+        with self._lock:
+            glossary = self._ensure_loaded()
+            removed = self._pending_dedupe_count
+            if removed:
+                self._save(glossary)
+                self._pending_dedupe_count = 0
+            return removed
 
     # --- reading -------------------------------------------------------------
 
@@ -345,16 +418,16 @@ class AcronymGlossaryStore:
             glossary = self._ensure_loaded()
             changed = False
             for acronym, count, fields in observations:
-                if _approved_definition(glossary.entries, acronym, scope) is not None:
-                    continue
-                if _is_rejected(glossary.entries, acronym, scope):
-                    continue
-                entry = _find_entry(glossary.entries, acronym, scope)
-                if entry is None and scope is not None:
-                    glob = _find_entry(glossary.entries, acronym, None)
-                    if glob is not None and glob.status == "needs_review":
-                        entry = glob  # fold into the existing global pending entry
-                if entry is None:
+                entry = _find_entry(glossary.entries, acronym)
+                if entry is not None:
+                    if entry.status != "needs_review":
+                        continue  # approved/rejected entries are authoritative
+                    entry.observed_count += max(count, 1)
+                    entry.last_seen_at = now
+                    entry.updated_at = now
+                    entry.observed_in_fields = sorted(set(entry.observed_in_fields) | set(fields))
+                    changed = True
+                else:
                     glossary.entries.append(
                         AcronymGlossaryEntry(
                             acronym=acronym,
@@ -369,13 +442,6 @@ class AcronymGlossaryStore:
                             updated_at=now,
                         )
                     )
-                    changed = True
-                elif entry.status == "needs_review":
-                    entry.observed_count += max(count, 1)
-                    entry.last_seen_at = now
-                    entry.updated_at = now
-                    merged = sorted(set(entry.observed_in_fields) | set(fields))
-                    entry.observed_in_fields = merged
                     changed = True
             if changed:
                 self._save(glossary)
@@ -432,14 +498,10 @@ class AcronymGlossaryStore:
 
     def delete_entry(self, acronym: str, product_code: str | None) -> bool:
         acronym = acronym.strip().upper()
-        scope = (product_code or "").strip() or None
         with self._lock:
             glossary = self._ensure_loaded()
             before = len(glossary.entries)
-            glossary.entries = [
-                e for e in glossary.entries
-                if not (e.acronym == acronym and (e.product_code or None) == scope)
-            ]
+            glossary.entries = [e for e in glossary.entries if e.acronym != acronym]
             if len(glossary.entries) == before:
                 return False
             self._save(glossary)

@@ -40,12 +40,18 @@ class FakeIngestion:
     def __init__(self):
         self.raise_error = False
         self.rebuilt = 0
+        self.pruned = []
 
     def rebuild(self, progress=None):  # noqa: ARG002
         if self.raise_error:
             raise ProductKnowledgeError("no llm")
         self.rebuilt += 1
         return _manifest()
+
+    def remove_document(self, doc_id):
+        self.pruned.append(doc_id)
+        removed = any(d.doc_id == doc_id for d in _manifest().documents)
+        return _manifest(), removed
 
 
 @pytest.fixture()
@@ -183,7 +189,7 @@ class TestKnowledgeDeleteDocument:
         assert resp.status_code == 200
         assert resp.json()["deleted"] == "M79060-001_Debug.pdf"
         assert not __import__("os").path.exists(path)
-        assert state["ingestion"].rebuilt == 1
+        assert doc_id in state["ingestion"].pruned
 
     def test_admin_deletes_document_from_source_dir(self, env, tmp_path):
         client, _ = env

@@ -572,19 +572,29 @@ def knowledge_delete_document(doc_id: str,
          if doc.doc_id == doc_id),
         None,
     )
-    if target is None:
+    removed_filename: str | None = None
+    if target is not None:
+        doc_path = os.path.abspath(target.path)
+        if not any(
+            os.path.normcase(doc_path).startswith(root + os.sep) for root in allowed_roots
+        ):
+            raise HTTPException(403, "Document is outside the allowed knowledge directories.")
+        try:
+            os.remove(doc_path)
+        except OSError as exc:
+            raise HTTPException(500, f"Could not delete document: {type(exc).__name__}") from exc
+        removed_filename = target.filename
+    # Prune the doc from the curated pack directly — no LLM rebuild needed, so
+    # deletion is instant and works even without a summarization backend.
+    manifest, pruned = ingestion.remove_document(doc_id)
+    if target is None and not pruned:
         raise HTTPException(404, "Document not found in the product-knowledge sources.")
-    doc_path = os.path.abspath(target.path)
-    if not any(
-        os.path.normcase(doc_path).startswith(root + os.sep) for root in allowed_roots
-    ):
-        raise HTTPException(403, "Document is outside the allowed knowledge directories.")
-    try:
-        os.remove(doc_path)
-    except OSError as exc:
-        raise HTTPException(500, f"Could not delete document: {type(exc).__name__}") from exc
-    log.info("Deleted product doc %s (%s).", doc_id, target.filename)
-    return {"deleted": target.filename, "manifest": _rebuild_knowledge(ingestion, retriever)}
+    retriever.invalidate()
+    log.info("Deleted product doc %s (%s).", doc_id, removed_filename or doc_id)
+    return {
+        "deleted": removed_filename or doc_id,
+        "manifest": manifest.model_dump() if manifest else None,
+    }
 
 
 @app.delete("/api/knowledge")

@@ -113,14 +113,16 @@ class TestStore:
         assert entries[0].definition == "Board assembly"
         assert entries[0].status == "approved"
 
-    def test_product_definition_overrides_global(self, tmp_path):
+    def test_upsert_is_unique_by_acronym_across_products(self, tmp_path):
         store = _store(tmp_path)
         store.upsert_entry(acronym="PAN", definition="Global PAN", product_code=None, status="approved")
         store.upsert_entry(acronym="PAN", definition="Product PAN", product_code="M79060-001", status="approved")
+        # One entry per acronym regardless of product scope.
+        entries = store.list_entries()
+        assert [e.acronym for e in entries] == ["PAN"]
         service = AcronymGlossaryService(store)
         ctx = service.glossary_for(_fail_rec(error_message="PAN failed"))
         assert "PAN = Product PAN" in ctx.trusted_text
-        assert "Global PAN" not in ctx.trusted_text
 
     def test_global_used_when_no_product_specific(self, tmp_path):
         store = _store(tmp_path)
@@ -157,6 +159,72 @@ class TestStore:
         assert updated.definition == "A Big Component"
         assert store.delete_entry("ABC", "P1") is True
         assert store.list_entries() == []
+
+    def test_duplicates_collapsed_on_load(self, tmp_path):
+        import json
+
+        path = tmp_path / "product_acronyms.json"
+        path.write_text(
+            json.dumps({
+                "entries": [
+                    {"acronym": "PAN", "product_code": None, "status": "needs_review",
+                     "observed_count": 2, "observed_in_fields": ["error_message"]},
+                    {"acronym": "PAN", "product_code": None, "status": "approved",
+                     "definition": "Panel", "observed_count": 3,
+                     "observed_in_fields": ["error_code"]},
+                    {"acronym": "AIC", "product_code": "P1", "status": "needs_review"},
+                ]
+            }),
+            encoding="utf-8",
+        )
+        store = AcronymGlossaryStore(path=str(path))
+        entries = store.list_entries()
+        assert len(entries) == 2  # the two PAN rows merged into one
+        pan = next(e for e in entries if e.acronym == "PAN")
+        assert pan.status == "approved"  # human decision wins over pending
+        assert pan.definition == "Panel"
+        assert pan.observed_count == 5  # counts summed
+        assert set(pan.observed_in_fields) == {"error_message", "error_code"}
+
+    def test_dedupe_persists_clean_file(self, tmp_path):
+        import json
+
+        path = tmp_path / "product_acronyms.json"
+        path.write_text(
+            json.dumps({
+                "entries": [
+                    {"acronym": "DUT", "product_code": None, "status": "needs_review"},
+                    {"acronym": "DUT", "product_code": None, "status": "needs_review"},
+                ]
+            }),
+            encoding="utf-8",
+        )
+        store = AcronymGlossaryStore(path=str(path))
+        assert store.dedupe() == 1
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        assert len(raw["entries"]) == 1
+
+    def test_same_acronym_different_products_collapses(self, tmp_path):
+        import json
+
+        path = tmp_path / "product_acronyms.json"
+        path.write_text(
+            json.dumps({
+                "entries": [
+                    {"acronym": "USB", "product_code": "P1", "status": "needs_review",
+                     "observed_count": 1},
+                    {"acronym": "USB", "product_code": "P2", "status": "approved",
+                     "definition": "Universal Serial Bus", "observed_count": 4},
+                ]
+            }),
+            encoding="utf-8",
+        )
+        store = AcronymGlossaryStore(path=str(path))
+        entries = store.list_entries()
+        assert [e.acronym for e in entries] == ["USB"]  # one row despite two products
+        assert entries[0].status == "approved"
+        assert entries[0].definition == "Universal Serial Bus"
+        assert entries[0].observed_count == 5
 
 
 # ---------------------------------------------------------------------------

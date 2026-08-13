@@ -24,6 +24,7 @@ _knowledge_store = KnowledgeStore()
 _knowledge_retriever = LexicalKnowledgeRetriever(_knowledge_store)
 _knowledge_ingestion = KnowledgeIngestionService(_knowledge_store)
 _acronym_glossary_store = AcronymGlossaryStore()
+_acronym_glossary_store.dedupe()  # self-heal any duplicate entries on startup
 _acronym_glossary_service = AcronymGlossaryService(_acronym_glossary_store)
 _analyzer_service = AnalyzerService(
     knowledge_retriever=_knowledge_retriever,
