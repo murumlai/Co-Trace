@@ -351,7 +351,10 @@ def _parse_json_content(
                 return _analysis_fields_from_json(data, error_code, error_message)
             except (json.JSONDecodeError, ValueError):
                 pass
-        return content.strip() or _insufficient_root_cause(error_code, error_message), "See root cause above."
+        return (
+            content.strip() or _insufficient_root_cause(error_code, error_message),
+            _insufficient_solution(),
+        )
 
 
 # ---------------------------------------------------------------------------
