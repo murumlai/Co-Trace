@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 
 from .models import UnitRecord
+from .record_views import latest_records_by_serial
 
 
 def _first_attempts(records: list[UnitRecord]) -> list[UnitRecord]:
@@ -25,9 +26,11 @@ def compute_summary(records: list[UnitRecord]) -> dict:
     fpy_total = sum(1 for r in firsts if r.result in ("PASS", "FAIL"))
     fpy = (fpy_pass / fpy_total * 100.0) if fpy_total else 0.0
 
-    passed = sum(1 for r in records if r.result == "PASS")
-    failed = sum(1 for r in records if r.result == "FAIL")
-    unknown = sum(1 for r in records if r.result == "UNKNOWN")
+    # Passed/Failed reflect one final result per unit (latest attempt), not runs.
+    latest = latest_records_by_serial(records)
+    passed = sum(1 for r in latest if r.result == "PASS")
+    failed = sum(1 for r in latest if r.result == "FAIL")
+    unknown = sum(1 for r in latest if r.result == "UNKNOWN")
 
     return {
         "total_runs": total,

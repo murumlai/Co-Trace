@@ -97,7 +97,7 @@ export default function Manager({ jobId }) {
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6">
-        <ChartCard title="Yield trend" subtitle="First-pass yield by day">
+        <ChartCard title="Yield trend" subtitle="Pass rate by day">
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={data.trend} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
               <CartesianGrid stroke={GRID} strokeDasharray="4 4" vertical={false} />
