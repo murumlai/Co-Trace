@@ -290,7 +290,7 @@ def _sections_from_headed_lines(
 # Column name variants accepted (case-insensitive, whitespace-normalised).
 _RFC_COL_TEST = re.compile(r"failed.?test.?name|error.?name")
 _RFC_COL_MSG = re.compile(r"error.?message|bin|issue|findings")
-_RFC_COL_RFC = re.compile(r"^rfcs?$")
+_RFC_COL_RFC = re.compile(r"^rfcs?(?:\s*\d+)?$")
 
 # Separators for multiple RFC IDs inside one cell.
 _RFC_ID_SEP = re.compile(r"[\n,;/\\\u2022\u25CF\u25E6]+")
@@ -300,19 +300,19 @@ def _normalize_col(name: object) -> str:
     return re.sub(r"\s+", " ", str(name or "").strip().lower())
 
 
-def _find_header_row(ws) -> tuple[int, dict[str, int]] | None:  # type: ignore[return]
+def _find_header_row(ws) -> tuple[int, dict[str, list[int]]] | None:  # type: ignore[return]
     """Scan up to 20 rows for a header row; return (row_idx, col_map)."""
     for row_idx, row in enumerate(ws.iter_rows(max_row=20, values_only=True)):
-        col_map: dict[str, int] = {}
+        col_map: dict[str, list[int]] = {}
         for col_idx, cell in enumerate(row):
             norm = _normalize_col(cell)
-            if _RFC_COL_TEST.search(norm):
-                col_map["test"] = col_idx
-            elif _RFC_COL_MSG.search(norm):
-                col_map["msg"] = col_idx
+            if _RFC_COL_TEST.search(norm) and "test" not in col_map:
+                col_map["test"] = [col_idx]
+            elif _RFC_COL_MSG.search(norm) and "msg" not in col_map:
+                col_map["msg"] = [col_idx]
             elif _RFC_COL_RFC.fullmatch(norm):
-                col_map["rfc"] = col_idx
-        if "test" in col_map and "rfc" in col_map:
+                col_map.setdefault("rfc", []).append(col_idx)
+        if "test" in col_map and col_map.get("rfc"):
             return row_idx, col_map
     return None
 
@@ -351,22 +351,32 @@ def _extract_xlsx_rfc_sections(
         for row_idx, row in enumerate(ws.iter_rows(values_only=True)):
             if row_idx <= header_row_idx:
                 continue
-            test_val = row[col_map["test"]] if len(row) > col_map["test"] else None
-            msg_val = row[col_map["msg"]] if ("msg" in col_map and len(row) > col_map["msg"]) else None
-            rfc_val = row[col_map["rfc"]] if len(row) > col_map["rfc"] else None
+            test_col = col_map["test"][0]
+            msg_col = col_map.get("msg", [None])[0]
+            test_val = row[test_col] if len(row) > test_col else None
+            msg_val = row[msg_col] if (msg_col is not None and len(row) > msg_col) else None
 
             test_str = str(test_val or "").strip()
             msg_str = str(msg_val or "").strip() if msg_val is not None else ""
-            rfc_ids = _split_rfc_ids(rfc_val)
+            rfc_entries: list[str] = []
+            rfc_cols = col_map["rfc"]
+            for ordinal, rfc_col in enumerate(rfc_cols, start=1):
+                rfc_val = row[rfc_col] if len(row) > rfc_col else None
+                for item in _split_rfc_ids(rfc_val):
+                    if len(rfc_cols) > 1:
+                        rfc_entries.append(f"RFC {ordinal}: {item}")
+                    else:
+                        rfc_entries.append(item)
 
-            if not test_str or not rfc_ids:
+            if not test_str or not rfc_entries:
                 continue
 
             # Build stable human-readable text for the summarizer.
             parts = [f"failed_test_name: {test_str}"]
             if msg_str:
                 parts.append(f"error_message_or_finding: {msg_str}")
-            parts.append(f"rfcs: {', '.join(rfc_ids)}")
+            parts.append("rfc_entries:")
+            parts.extend(f"- {entry}" for entry in rfc_entries)
             text = "\n".join(parts)
             heading = f"{sheet_name} — {test_str}"
             all_text_parts.append(text)
