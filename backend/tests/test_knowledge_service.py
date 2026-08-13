@@ -1,6 +1,7 @@
 """Tests for the knowledge ingestion service (fake summarizer, real DOCX)."""
 from __future__ import annotations
 
+import pytest
 from docx import Document
 from openpyxl import Workbook
 
@@ -8,6 +9,7 @@ from app.knowledge import parsing
 from app.knowledge.models import ExtractedSection, KnowledgeSection, RfcReference, KnownFailureEntry
 from app.knowledge.service import KnowledgeIngestionService
 from app.knowledge.storage import KnowledgeStore
+from app.knowledge.summarizer import ProductKnowledgeError
 
 
 class FakeSummarizer:
@@ -184,3 +186,15 @@ class TestRfcWorkbookIngestion:
         assert entries
         assert any(e.token_weights for e in entries)
         assert all(e.byte_length > 0 for e in entries)
+
+    def test_single_document_parse_failure_does_not_write_empty_pack(self, tmp_path):
+        store = _store(tmp_path)
+        service = KnowledgeIngestionService(store=store, summarizer=FakeSummarizer())
+        bad_path = tmp_path / "N32828-201_RFC_.xlsx"
+        bad_path.write_bytes(b"not an xlsx")
+        doc = parsing.describe_document(str(bad_path))
+
+        with pytest.raises(ProductKnowledgeError, match="parse failed"):
+            service.build([doc])
+
+        assert not store.exists()
