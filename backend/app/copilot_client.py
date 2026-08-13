@@ -182,6 +182,7 @@ async def _stream_once(prompt: str, model: str, system_prompt: str) -> str:
     client = _create_client()
     session = None
     chunks: list[str] = []
+    errors: list[str] = []
     try:
         await client.start()
         session = await client.create_session(
@@ -205,13 +206,23 @@ async def _stream_once(prompt: str, model: str, system_prompt: str) -> str:
                     content = getattr(event.data, "content", None) or ""
                     if content:
                         chunks.append(content)
+            elif event_type == "session.error":
+                data = event.data
+                message = getattr(data, "message", None) or getattr(data, "error", None) or "session.error"
+                errors.append(str(message))
+                done.set()
             elif event_type == "session.idle":
                 done.set()
 
         session.on(on_event)
         await session.send(prompt)
         await asyncio.wait_for(done.wait(), timeout=settings.COPILOT_TIMEOUT_S)
-        return "".join(chunks)
+        if errors:
+            raise RuntimeError(errors[-1])
+        content = "".join(chunks)
+        if not content:
+            raise RuntimeError("Copilot stream completed without assistant content.")
+        return content
     finally:
         if session is not None:
             try:
