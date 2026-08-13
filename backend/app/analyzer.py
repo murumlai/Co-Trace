@@ -250,6 +250,7 @@ def _analyze_unit(
         _call_analyze(analyze_failure, rec.error_code, err_msg, snippet, knowledge_prompt)
     )
     root, solution, source = analysis_result.as_tuple()
+    root, solution = _apply_exact_knowledge_fallback(rec, knowledge, root, solution)
     job.llm_metrics.merge(analysis_result.metrics)
     job.signature_cache[sig] = (root, solution, source)
     rec.root_cause = root
@@ -390,6 +391,68 @@ def _coerce_analysis_result(result: AnalysisReturn) -> LlmAnalysisResult:
         return result
     root, solution, source = result
     return LlmAnalysisResult(root_cause=root, suggested_solution=solution, source=source)
+
+
+def _apply_exact_knowledge_fallback(
+    rec: UnitRecord,
+    knowledge: KnowledgeContext | None,
+    root: str,
+    solution: str,
+) -> tuple[str, str]:
+    if not knowledge or not knowledge.matched:
+        return root, solution
+    if not _analysis_needs_knowledge_fallback(rec, root, solution):
+        return root, solution
+    known_failure = _best_exact_known_failure(rec, knowledge)
+    if known_failure is None:
+        return root, solution
+    match, failure = known_failure
+    symptom = failure.log_signature or failure.symptom or failure.failing_step or match.heading or "known failure"
+    action = failure.corrective_action or _rfc_notes(failure)
+    if not action:
+        return root, solution
+    rooted = failure.root_cause or (
+        f"Product knowledge has an exact {match.category} match for {rec.product_code or 'this product'}: "
+        f"{symptom}."
+    )
+    return rooted, action
+
+
+def _analysis_needs_knowledge_fallback(rec: UnitRecord, root: str, solution: str) -> bool:
+    root_norm = _normalize_msg(root)
+    solution_norm = _normalize_msg(solution)
+    return (
+        "does not contain enough product-specific" in root_norm
+        or "insufficient" in root_norm
+        or solution_norm in ("see root cause above.", "see root cause above")
+        or solution_norm == _normalize_msg(_insufficient_solution())
+    )
+
+
+def _best_exact_known_failure(rec: UnitRecord, knowledge: KnowledgeContext):
+    query_parts = [rec.failing_step or "", rec.error_message or "", rec.error_code or ""]
+    query = _normalize_msg(" ".join(query_parts))
+    for match in knowledge.matches:
+        for failure in match.known_failures:
+            fields = [
+                failure.log_signature,
+                failure.symptom,
+                failure.failing_step,
+                *(ref.error_message_or_finding for ref in failure.rfc_references),
+                *(ref.failed_test_name for ref in failure.rfc_references),
+            ]
+            if any(_field_matches_query(field, query) for field in fields):
+                return match, failure
+    return None
+
+
+def _field_matches_query(field: str | None, query: str) -> bool:
+    field_norm = _normalize_msg(field)
+    return bool(field_norm and (field_norm in query or query in field_norm))
+
+
+def _rfc_notes(failure) -> str:
+    return "; ".join(ref.notes for ref in failure.rfc_references if ref.notes)
 
 
 def reanalyze_unit(
