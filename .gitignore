@@ -21,6 +21,10 @@ frontend_Log.txt
 # Local editor settings
 .vscode/
 
+# Local planning/docs drafts. Keep the top-level README trackable.
+*.md
+!README.md
+
 # Raw manufacturing logs / uploaded datasets
 Log_Files_Folder/
 
