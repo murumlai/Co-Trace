@@ -24,6 +24,20 @@ frontend_Log.txt
 # Local planning/docs drafts. Keep the top-level README trackable.
 *.md
 !README.md
+.github/skills/python-solid-architect/SKILL.md
+architecture.md
+designUI.md
+gemini_integration.md
+glosary_plan.md
+hybrid_UI.md
+llm_plan.md
+plan.md
+pre-process_plan.md
+productAwareDiagnosis_plan.md
+production_flow.md
+rfc_parser.md
+solid_plan.md
+user_authentication_plan.md
 
 # Raw manufacturing logs / uploaded datasets
 Log_Files_Folder/
