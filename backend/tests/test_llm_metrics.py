@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.analyzer import analyze_job
+from app import copilot_client
 from app.job_registry import Job
 from app.models import LlmAnalysisResult, LlmUsageMetrics, UnitRecord
 
@@ -81,3 +82,24 @@ def test_disk_cache_hit_records_skipped_llm_call() -> None:
     assert job.llm_metrics.cache_hits == 1
     assert job.llm_metrics.disk_cache_hits == 1
     assert job.llm_metrics.calls_skipped_by_cache == 1
+
+
+def test_copilot_stream_error_counts_attempted_model_call(monkeypatch) -> None:
+    async def fail_stream(prompt: str, model: str, system_prompt: str) -> str:  # noqa: ARG001
+        raise RuntimeError("Session was not created with authentication info")
+
+    monkeypatch.setattr(copilot_client, "_SDK_AVAILABLE", True)
+    monkeypatch.setattr(copilot_client.settings, "COPILOT_ENABLE_MINI_ENRICH", True)
+    monkeypatch.setattr(copilot_client.settings, "COPILOT_MINI_MODEL", "gpt-5.4-mini")
+    monkeypatch.setattr(copilot_client, "_stream_once", fail_stream)
+
+    result = copilot_client.analyze_with_metrics("E001", "Voltage fault", "Debug excerpt")
+
+    assert result.source == "stub"
+    assert result.metrics.provider == "copilot_sdk"
+    assert result.metrics.mini.model == "gpt-5.4-mini"
+    assert result.metrics.mini.calls == 1
+    assert result.metrics.mini.errors == 1
+    assert result.metrics.mini.input_chars > 0
+    assert result.metrics.mini.output_chars == 0
+    assert result.metrics.total_calls == 1

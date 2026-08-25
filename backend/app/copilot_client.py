@@ -407,6 +407,7 @@ def analyze_with_metrics(
     context = snippet or error_message or ""
     metrics = LlmUsageMetrics(provider="copilot_sdk")
     active_role: LlmModelRole | None = None
+    active_input_chars = 0
 
     try:
         log.info(
@@ -420,6 +421,7 @@ def analyze_with_metrics(
             log.info("Copilot mini model call started (%s).", settings.COPILOT_MINI_MODEL)
             active_role = "mini"
             mini_prompt = _build_mini_prompt(context)
+            active_input_chars = len(_SUMMARIZE_SYSTEM_PROMPT) + len(mini_prompt)
             summary = _run(
                 _stream_once(
                     mini_prompt,
@@ -430,7 +432,7 @@ def analyze_with_metrics(
             metrics.add_model_call(
                 "mini",
                 model=settings.COPILOT_MINI_MODEL,
-                input_chars=len(_SUMMARIZE_SYSTEM_PROMPT) + len(mini_prompt),
+                input_chars=active_input_chars,
                 output_chars=len(summary),
                 credit_tokens_per_credit=settings.LLM_TOKEN_CREDIT_SIZE,
             )
@@ -447,6 +449,7 @@ def analyze_with_metrics(
         diagnose_prompt = _build_diagnose_prompt(
             error_code, error_message, context, knowledge_context
         )
+        active_input_chars = len(_DIAGNOSE_SYSTEM_PROMPT) + len(diagnose_prompt)
         content = _run(
             _stream_once(
                 diagnose_prompt,
@@ -457,7 +460,7 @@ def analyze_with_metrics(
         metrics.add_model_call(
             "reasoning",
             model=settings.COPILOT_REASONING_MODEL,
-            input_chars=len(_DIAGNOSE_SYSTEM_PROMPT) + len(diagnose_prompt),
+            input_chars=active_input_chars,
             output_chars=len(content),
             credit_tokens_per_credit=settings.LLM_TOKEN_CREDIT_SIZE,
         )
@@ -473,13 +476,23 @@ def analyze_with_metrics(
         from . import llm_client
 
         if active_role is not None:
+            role_metrics = metrics.mini if active_role == "mini" else metrics.reasoning
+            active_model = (
+                settings.COPILOT_MINI_MODEL
+                if active_role == "mini"
+                else settings.COPILOT_REASONING_MODEL
+            )
+            if role_metrics.calls == 0:
+                metrics.add_model_call(
+                    active_role,
+                    model=active_model,
+                    input_chars=active_input_chars,
+                    output_chars=0,
+                    credit_tokens_per_credit=settings.LLM_TOKEN_CREDIT_SIZE,
+                )
             metrics.add_model_error(
                 active_role,
-                model=(
-                    settings.COPILOT_MINI_MODEL
-                    if active_role == "mini"
-                    else settings.COPILOT_REASONING_MODEL
-                ),
+                model=active_model,
             )
         log.exception("Copilot analysis failed; using the offline stub.")
         root, solution, _ = llm_client._offline_stub(error_code, error_message)
