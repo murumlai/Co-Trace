@@ -43,6 +43,7 @@ class Settings:
     # single-model setup works out of the box.
     COPILOT_MINI_MODEL: str = os.getenv("COPILOT_MINI_MODEL", "gpt-5.4-mini")
     COPILOT_REASONING_MODEL: str = os.getenv("COPILOT_REASONING_MODEL", "claude-sonnet-4.6")
+    COPILOT_GITHUB_TOKEN: str = os.getenv("COPILOT_GITHUB_TOKEN", "")
     COPILOT_PROXY: str = os.getenv("COPILOT_PROXY", "http://proxy-us.intel.com:912")
     COPILOT_TIMEOUT_S: float = float(os.getenv("COPILOT_TIMEOUT_S", "60"))
     # Run the mini enrichment/summarization pass before the reasoning call.

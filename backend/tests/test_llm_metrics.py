@@ -34,6 +34,27 @@ def _job(records: list[UnitRecord]) -> Job:
     return job
 
 
+def test_copilot_client_receives_configured_github_token(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeConfig:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+    class FakeClient:
+        def __init__(self, config: FakeConfig) -> None:
+            self.config = config
+
+    monkeypatch.setattr(copilot_client, "SubprocessConfig", FakeConfig)
+    monkeypatch.setattr(copilot_client, "CopilotClient", FakeClient)
+    monkeypatch.setattr(copilot_client.settings, "COPILOT_GITHUB_TOKEN", "test-token")
+
+    copilot_client._create_client()
+
+    assert captured["github_token"] == "test-token"
+    assert captured["env"]["HTTP_PROXY"] == copilot_client.settings.COPILOT_PROXY
+
+
 def test_live_llm_metrics_are_separated_by_model_role() -> None:
     def rich_analyze(error_code: str | None, error_message: str | None, snippet: str) -> LlmAnalysisResult:  # noqa: ARG001
         metrics = LlmUsageMetrics(provider="copilot_sdk")
@@ -84,22 +105,58 @@ def test_disk_cache_hit_records_skipped_llm_call() -> None:
     assert job.llm_metrics.calls_skipped_by_cache == 1
 
 
-def test_copilot_stream_error_counts_attempted_model_call(monkeypatch) -> None:
+def test_copilot_auth_error_counts_mini_and_skips_reasoning(monkeypatch) -> None:
+    attempted_models: list[str] = []
+
     async def fail_stream(prompt: str, model: str, system_prompt: str) -> str:  # noqa: ARG001
-        raise RuntimeError("Session was not created with authentication info")
+        attempted_models.append(model)
+        raise RuntimeError("Execution failed: Error: Session was not created with authentication info or custom provider")
 
     monkeypatch.setattr(copilot_client, "_SDK_AVAILABLE", True)
     monkeypatch.setattr(copilot_client.settings, "COPILOT_ENABLE_MINI_ENRICH", True)
     monkeypatch.setattr(copilot_client.settings, "COPILOT_MINI_MODEL", "gpt-5.4-mini")
+    monkeypatch.setattr(copilot_client.settings, "COPILOT_REASONING_MODEL", "claude-sonnet-4.6")
     monkeypatch.setattr(copilot_client, "_stream_once", fail_stream)
 
     result = copilot_client.analyze_with_metrics("E001", "Voltage fault", "Debug excerpt")
 
     assert result.source == "stub"
+    assert "GITHUB_TOKEN" not in result.suggested_solution
+    assert "authentication info" in result.suggested_solution
     assert result.metrics.provider == "copilot_sdk"
     assert result.metrics.mini.model == "gpt-5.4-mini"
     assert result.metrics.mini.calls == 1
     assert result.metrics.mini.errors == 1
     assert result.metrics.mini.input_chars > 0
     assert result.metrics.mini.output_chars == 0
+    assert result.metrics.reasoning.calls == 0
+    assert result.metrics.reasoning.errors == 0
+    assert result.metrics.reasoning.input_chars == 0
+    assert result.metrics.reasoning.output_chars == 0
     assert result.metrics.total_calls == 1
+    assert attempted_models == ["gpt-5.4-mini"]
+
+
+def test_copilot_mini_error_still_allows_reasoning_call(monkeypatch) -> None:
+    async def stream_once(prompt: str, model: str, system_prompt: str) -> str:  # noqa: ARG001
+        if model == "gpt-5.4-mini":
+            raise RuntimeError("mini unavailable")
+        return '{"root_cause":"reasoned root","suggested_solution":"reasoned solution"}'
+
+    monkeypatch.setattr(copilot_client, "_SDK_AVAILABLE", True)
+    monkeypatch.setattr(copilot_client.settings, "COPILOT_ENABLE_MINI_ENRICH", True)
+    monkeypatch.setattr(copilot_client.settings, "COPILOT_MINI_MODEL", "gpt-5.4-mini")
+    monkeypatch.setattr(copilot_client.settings, "COPILOT_REASONING_MODEL", "claude-sonnet-4.6")
+    monkeypatch.setattr(copilot_client, "_stream_once", stream_once)
+
+    result = copilot_client.analyze_with_metrics("E001", "Voltage fault", "Debug excerpt")
+
+    assert result.source == "llm"
+    assert result.root_cause == "reasoned root"
+    assert result.suggested_solution == "reasoned solution"
+    assert result.metrics.mini.calls == 1
+    assert result.metrics.mini.errors == 1
+    assert result.metrics.reasoning.calls == 1
+    assert result.metrics.reasoning.errors == 0
+    assert result.metrics.reasoning.output_chars > 0
+    assert result.metrics.total_calls == 2

@@ -47,6 +47,15 @@ class TestHealthEndpoint:
         data = client.get("/api/health").json()
         assert "debug" in data
 
+    def test_response_has_non_secret_llm_auth_flags(self, client):
+        data = client.get("/api/health").json()
+        assert set(data["llm_auth"]) == {
+            "copilot_sdk_available",
+            "copilot_token_configured",
+            "github_models_token_configured",
+        }
+        assert all(isinstance(value, bool) for value in data["llm_auth"].values())
+
 
 # ---------------------------------------------------------------------------
 # GitHub OAuth routes

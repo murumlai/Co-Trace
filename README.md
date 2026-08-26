@@ -43,6 +43,10 @@ $env:HTTPS_PROXY = "http://proxy-us.intel.com:912"
 $env:HTTP_PROXY = "http://proxy-us.intel.com:912"
 $env:NO_PROXY = "localhost,127.0.0.1"
 
+# Default LLM_PROVIDER=copilot_sdk uses Copilot CLI authentication.
+# You can use either `copilot auth login` or COPILOT_GITHUB_TOKEN.
+copilot auth login
+
 $env:GITHUB_CLIENT_ID = "<github.com OAuth app client id>"
 $env:GITHUB_CLIENT_SECRET = "<github.com OAuth app client secret>"
 $env:JWT_SECRET = "<long random session secret>"
@@ -134,9 +138,10 @@ Important environment variables:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `LLM_PROVIDER` | `copilot_sdk` | `copilot_sdk`, `github_models`, or `offline_stub`. |
-| `GITHUB_TOKEN` | empty | GitHub Models token. Missing token falls back to offline stub. |
+| `GITHUB_TOKEN` | empty | GitHub Models token used only when `LLM_PROVIDER=github_models`. Missing token falls back to offline stub. |
 | `COPILOT_MINI_MODEL` | `gpt-5.4-mini` | Copilot mini/enrichment model. |
 | `COPILOT_REASONING_MODEL` | `claude-sonnet-4.6` | Copilot final root-cause model. |
+| `COPILOT_GITHUB_TOKEN` | empty | Optional GitHub token passed directly to the Copilot SDK provider. If empty, the SDK uses the logged-in Copilot CLI user. |
 | `COPILOT_PROXY` | `http://proxy-us.intel.com:912` | Optional proxy for Copilot SDK subprocesses. |
 | `GITHUB_CLIENT_ID` | empty | Client ID from the github.com OAuth App. |
 | `GITHUB_CLIENT_SECRET` | empty | Client secret from the github.com OAuth App. Set only at runtime. |
@@ -165,6 +170,8 @@ Important environment variables:
 | `CORS_ORIGINS` | localhost dev origins | Allowed frontend origins in development. |
 
 Set secrets at runtime only. See [backend/app/config.py](backend/app/config.py) for the full settings list and defaults.
+
+For the default `copilot_sdk` provider, authenticate with either `copilot auth login` or `COPILOT_GITHUB_TOKEN`. Use `GITHUB_TOKEN` only when explicitly switching to `LLM_PROVIDER=github_models`.
 
 ## Product-Aware Diagnosis
 
