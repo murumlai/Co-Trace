@@ -201,6 +201,9 @@ def _create_client() -> Any:
     if settings.COPILOT_PROXY:
         env.setdefault("HTTP_PROXY", settings.COPILOT_PROXY)
         env.setdefault("HTTPS_PROXY", settings.COPILOT_PROXY)
+    if settings.COPILOT_GH_HOST:
+        # Target the Enterprise host where the user's `copilot login` lives.
+        env.setdefault("COPILOT_GH_HOST", settings.COPILOT_GH_HOST)
     github_token = settings.COPILOT_GITHUB_TOKEN.strip() or None
     if SubprocessConfig is not None:
         return CopilotClient(SubprocessConfig(env=env, github_token=github_token))

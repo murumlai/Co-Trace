@@ -51,10 +51,11 @@ log = logging.getLogger("cotrace.main")
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
     log.info(
-        "Backend started. Provider: %s. Debug: %s. Work dir: %s. Copilot token configured: %s. GitHub Models token configured: %s.",
+        "Backend started. Provider: %s. Debug: %s. Work dir: %s. Copilot host: %s. Copilot token configured: %s. GitHub Models token configured: %s.",
         settings.LLM_PROVIDER,
         settings.APP_DEBUG,
         settings.WORK_DIR,
+        settings.COPILOT_GH_HOST or "github.com",
         bool(settings.COPILOT_GITHUB_TOKEN),
         bool(settings.GITHUB_TOKEN),
     )

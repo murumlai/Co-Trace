@@ -142,6 +142,7 @@ Important environment variables:
 | `COPILOT_MINI_MODEL` | `gpt-5.4-mini` | Copilot mini/enrichment model. |
 | `COPILOT_REASONING_MODEL` | `claude-sonnet-4.6` | Copilot final root-cause model. |
 | `COPILOT_GITHUB_TOKEN` | empty | Optional GitHub token passed directly to the Copilot SDK provider. If empty, the SDK uses the logged-in Copilot CLI user. |
+| `COPILOT_GH_HOST` | empty | GitHub Enterprise host for Copilot auth/session (e.g. `intel-foundry.ghe.com`). Empty targets `github.com`; set this when `copilot login` is on an Enterprise host. |
 | `COPILOT_PROXY` | `http://proxy-us.intel.com:912` | Optional proxy for Copilot SDK subprocesses. |
 | `GITHUB_CLIENT_ID` | empty | Client ID from the github.com OAuth App. |
 | `GITHUB_CLIENT_SECRET` | empty | Client secret from the github.com OAuth App. Set only at runtime. |
