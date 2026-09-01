@@ -47,6 +47,9 @@ $env:NO_PROXY = "localhost,127.0.0.1"
 # You can use either `copilot auth login` or COPILOT_GITHUB_TOKEN.
 copilot auth login
 
+# If your Copilot login is on a GitHub Enterprise host, point the SDK at it:
+# $env:COPILOT_GH_HOST = "intel-foundry.ghe.com"
+
 $env:GITHUB_CLIENT_ID = "<github.com OAuth app client id>"
 $env:GITHUB_CLIENT_SECRET = "<github.com OAuth app client secret>"
 $env:JWT_SECRET = "<long random session secret>"
