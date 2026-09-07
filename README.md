@@ -11,7 +11,7 @@ Related planning docs: [plan.md](plan.md), [hybrid_UI.md](hybrid_UI.md), [pre-pr
 
 - `ftrunnerlog01.txt` is the source of truth for identity, timing, PASS/FAIL, `ErrorMsg`, `Errorcode` (SIMS `.itf` no longer authoritative).
 - Failed runs may attach a bounded, redacted `DebugLog.txt` excerpt from nested zips; each batch writes one redacted `<product_code>.json` per product before cleanup.
-- Diagnosis uses `LLM_PROVIDER` (`copilot_sdk` default, `github_models`, `offline_stub`); passing units never call the LLM.
+- Diagnosis uses `LLM_PROVIDER` (`github_models` default, `copilot_sdk`, `offline_stub`); passing units never call the LLM.
 - GitHub OAuth is required; jobs are owned by the signer, and knowledge/cache deletes are admin-only. A local `ADMIN_USERNAME`/`ADMIN_PASSWORD` sign-in also grants admin for maintenance.
 - Successful diagnoses are cached and reused across uploads unless force-refreshed or the product/acronym context changes the cache key.
 
@@ -43,11 +43,15 @@ $env:HTTPS_PROXY = "http://proxy-us.intel.com:912"
 $env:HTTP_PROXY = "http://proxy-us.intel.com:912"
 $env:NO_PROXY = "localhost,127.0.0.1"
 
-# Default LLM_PROVIDER=copilot_sdk uses Copilot CLI authentication.
-# You can use either `copilot auth login` or COPILOT_GITHUB_TOKEN.
-copilot auth login
+# Default LLM_PROVIDER=github_models uses a GitHub Models token
+# (falls back to the deterministic offline stub when unset).
+$env:GITHUB_TOKEN = "<github models token>"
 
-# If your Copilot login is on a GitHub Enterprise host, point the SDK at it:
+# To use the Copilot SDK provider instead, set LLM_PROVIDER=copilot_sdk and
+# authenticate with `copilot auth login` or COPILOT_GITHUB_TOKEN. If that login
+# is on a GitHub Enterprise host, also set COPILOT_GH_HOST:
+# $env:LLM_PROVIDER = "copilot_sdk"
+# copilot auth login
 # $env:COPILOT_GH_HOST = "intel-foundry.ghe.com"
 
 $env:GITHUB_CLIENT_ID = "<github.com OAuth app client id>"
@@ -87,7 +91,7 @@ Invoke-RestMethod http://127.0.0.1:8000/api/health | ConvertTo-Json -Compress
 Expected shape:
 
 ```json
-{"status":"ok","llm_provider":"copilot_sdk","debug":false}
+{"status":"ok","llm_provider":"github_models","debug":false}
 ```
 
 ## Single-Server Run

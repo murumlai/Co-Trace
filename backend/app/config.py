@@ -25,7 +25,7 @@ class Settings:
     # Routes failed-unit diagnosis. One of: "github_models" | "copilot_sdk" |
     # "offline_stub". Default preserves the original GitHub Models behavior
     # (which itself degrades to the offline stub when GITHUB_TOKEN is unset).
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "copilot_sdk")
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "github_models")
 
     # --- LLM (GitHub Models) ---
     # If no token is present the analyzer falls back to a deterministic offline stub,
