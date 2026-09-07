@@ -102,7 +102,6 @@ _DIAGNOSE_SYSTEM_PROMPT = (
 
 log = logging.getLogger("cotrace.copilot")
 
-_GITHUB_MODELS_TOKEN_HINT = " (Set GITHUB_TOKEN to enable AI diagnosis.)"
 _SECRET_TOKEN_RE = re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]+\b")
 _AUTH_ERROR_MARKERS = (
     "authentication info",
@@ -114,10 +113,6 @@ _AUTH_ERROR_MARKERS = (
     "auth token",
     "unauthorized",
 )
-
-
-def _copilot_stub_solution(solution: str) -> str:
-    return solution.replace(_GITHUB_MODELS_TOKEN_HINT, "")
 
 
 def _is_auth_or_session_config_error(exc: Exception) -> bool:
@@ -201,9 +196,9 @@ def _create_client() -> Any:
     if settings.COPILOT_PROXY:
         env.setdefault("HTTP_PROXY", settings.COPILOT_PROXY)
         env.setdefault("HTTPS_PROXY", settings.COPILOT_PROXY)
-    if settings.COPILOT_GH_HOST:
-        # Target the Enterprise host where the user's `copilot login` lives.
-        env.setdefault("COPILOT_GH_HOST", settings.COPILOT_GH_HOST)
+    # Enterprise Copilot host is mandatory and hard-enforced: force it so no
+    # ambient/public COPILOT_GH_HOST can redirect the session to public github.com.
+    env["COPILOT_GH_HOST"] = settings.COPILOT_GH_HOST
     github_token = settings.COPILOT_GITHUB_TOKEN.strip() or None
     if SubprocessConfig is not None:
         return CopilotClient(SubprocessConfig(env=env, github_token=github_token))
@@ -440,7 +435,7 @@ def analyze_with_metrics(
         root, solution, _ = llm_client._offline_stub(error_code, error_message)
         return LlmAnalysisResult(
             root_cause=root,
-            suggested_solution=f"{_copilot_stub_solution(solution)} (Copilot SDK not installed.)",
+            suggested_solution=f"{solution} (Copilot SDK not installed.)",
             source="stub",
             metrics=LlmUsageMetrics(provider="copilot_sdk"),
         )
@@ -557,7 +552,7 @@ def analyze_with_metrics(
         root, solution, _ = llm_client._offline_stub(error_code, error_message)
         return LlmAnalysisResult(
             root_cause=root,
-            suggested_solution=f"{_copilot_stub_solution(solution)}{_copilot_error_suffix(exc)}",
+            suggested_solution=f"{solution}{_copilot_error_suffix(exc)}",
             source="stub",
             metrics=metrics,
         )

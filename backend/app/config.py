@@ -20,23 +20,20 @@ def _repo_path(*parts: str) -> str:
     return os.path.join(_REPO_ROOT, *parts)
 
 
+# Enterprise Copilot is the ONLY sanctioned AI backend. Public GitHub Models and
+# public github.com Copilot sessions are not permitted.
+COPILOT_ENTERPRISE_HOST = "intel-foundry.ghe.com"
+_PUBLIC_COPILOT_HOSTS = frozenset({"", "github.com", "api.github.com", "www.github.com"})
+
+
 class Settings:
-    # --- LLM provider selection ---
-    # Routes failed-unit diagnosis. One of: "github_models" | "copilot_sdk" |
-    # "offline_stub". Default preserves the original GitHub Models behavior
-    # (which itself degrades to the offline stub when GITHUB_TOKEN is unset).
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "github_models")
+    # --- LLM provider selection (enterprise Copilot only) ---
+    # One of: "copilot_sdk" (enterprise GitHub Copilot) | "offline_stub" (local
+    # deterministic heuristic). The public GitHub Models path has been removed
+    # and is rejected at startup by validate_enterprise_only().
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "copilot_sdk")
 
-    # --- LLM (GitHub Models) ---
-    # If no token is present the analyzer falls back to a deterministic offline stub,
-    # so the app is fully runnable without any external calls.
-    GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "")
-    LLM_ENDPOINT: str = os.getenv("LLM_ENDPOINT", "https://models.inference.ai.azure.com/chat/completions")
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-5.4-mini")  # cost-efficient default
-    LLM_TIMEOUT_S: float = float(os.getenv("LLM_TIMEOUT_S", "30"))
-    LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "2"))
-
-    # --- LLM (GitHub Copilot SDK provider) ---
+    # --- LLM (GitHub Copilot SDK provider — enterprise only) ---
     # Two-tier model policy: a cheap "mini" model summarizes/classifies the
     # bounded redacted excerpt; a larger "reasoning" model produces the final
     # root cause and suggested solution. Both default to the mini model so a
@@ -44,9 +41,9 @@ class Settings:
     COPILOT_MINI_MODEL: str = os.getenv("COPILOT_MINI_MODEL", "gpt-5.4-mini")
     COPILOT_REASONING_MODEL: str = os.getenv("COPILOT_REASONING_MODEL", "claude-sonnet-4.6")
     COPILOT_GITHUB_TOKEN: str = os.getenv("COPILOT_GITHUB_TOKEN", "")
-    # GitHub Enterprise host for Copilot auth/session (e.g. "intel-foundry.ghe.com").
-    # Empty targets github.com; set this when `copilot login` is on an Enterprise host.
-    COPILOT_GH_HOST: str = os.getenv("COPILOT_GH_HOST", "")
+    # Enterprise GitHub host for Copilot auth/session. Defaults to the sanctioned
+    # enterprise host and is hard-enforced at startup; a public host is rejected.
+    COPILOT_GH_HOST: str = os.getenv("COPILOT_GH_HOST", COPILOT_ENTERPRISE_HOST)
     COPILOT_PROXY: str = os.getenv("COPILOT_PROXY", "http://proxy-us.intel.com:912")
     COPILOT_TIMEOUT_S: float = float(os.getenv("COPILOT_TIMEOUT_S", "60"))
     # Run the mini enrichment/summarization pass before the reasoning call.
@@ -197,6 +194,24 @@ class Settings:
     CORS_ORIGINS: list[str] = os.getenv(
         "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
     ).split(",")
+
+    def validate_enterprise_only(self) -> None:
+        """Fail fast unless the AI backend is enterprise Copilot (or the local stub).
+
+        The public GitHub Models provider has been removed and public github.com
+        Copilot sessions are not permitted; a public COPILOT_GH_HOST is rejected.
+        """
+        provider = (self.LLM_PROVIDER or "").strip().lower()
+        if provider not in ("copilot_sdk", "offline_stub"):
+            raise RuntimeError(
+                f"LLM_PROVIDER={self.LLM_PROVIDER!r} is not permitted. Only "
+                "'copilot_sdk' (enterprise Copilot) or 'offline_stub' are allowed."
+            )
+        if provider == "copilot_sdk" and (self.COPILOT_GH_HOST or "").strip().lower() in _PUBLIC_COPILOT_HOSTS:
+            raise RuntimeError(
+                f"COPILOT_GH_HOST={self.COPILOT_GH_HOST!r} targets a public GitHub host. "
+                f"Enterprise Copilot host is required (e.g. {COPILOT_ENTERPRISE_HOST})."
+            )
 
 
 settings = Settings()

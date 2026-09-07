@@ -52,7 +52,6 @@ class TestHealthEndpoint:
         assert set(data["llm_auth"]) == {
             "copilot_sdk_available",
             "copilot_token_configured",
-            "github_models_token_configured",
         }
         assert all(isinstance(value, bool) for value in data["llm_auth"].values())
 
