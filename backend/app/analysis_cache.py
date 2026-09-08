@@ -177,8 +177,6 @@ def _model_identity() -> dict[str, Any]:
             "reasoning_model": settings.COPILOT_REASONING_MODEL,
             "mini_enrich": settings.COPILOT_ENABLE_MINI_ENRICH,
         }
-    if provider == "github_models":
-        return {"model": settings.LLM_MODEL, "endpoint": settings.LLM_ENDPOINT}
     return {"provider": provider}
 
 

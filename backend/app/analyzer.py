@@ -431,7 +431,6 @@ def _analysis_needs_knowledge_fallback(rec: UnitRecord, root: str, solution: str
         or solution_norm in ("see root cause above.", "see root cause above")
         or solution_norm == _normalize_msg(_insufficient_solution())
         or "copilot error:" in solution_norm
-        or "set github_token to enable ai diagnosis" in solution_norm
     )
 
 

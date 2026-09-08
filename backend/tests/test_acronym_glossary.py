@@ -15,7 +15,7 @@ from app.knowledge.acronym_glossary import (
 )
 from app.knowledge.models import KnowledgeContext
 from app.models import UnitRecord
-from app import copilot_client, llm_client
+from app import copilot_client
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +374,7 @@ class TestCacheInvalidation:
 
 class TestPromptRules:
     def test_system_prompts_forbid_unknown_expansion(self):
-        for system_prompt in (llm_client._SYSTEM_PROMPT, copilot_client._DIAGNOSE_SYSTEM_PROMPT):
-            assert "ACRONYM RULES" in system_prompt
-            assert "trusted_acronym_glossary" in system_prompt
-            assert "Never invent, guess, or infer a full form" in system_prompt
+        system_prompt = copilot_client._DIAGNOSE_SYSTEM_PROMPT
+        assert "ACRONYM RULES" in system_prompt
+        assert "trusted_acronym_glossary" in system_prompt
+        assert "Never invent, guess, or infer a full form" in system_prompt

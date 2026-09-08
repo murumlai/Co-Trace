@@ -50,7 +50,15 @@ log = logging.getLogger("cotrace.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
-    log.info("Backend started. Provider: %s. Debug: %s. Work dir: %s.", settings.LLM_PROVIDER, settings.APP_DEBUG, settings.WORK_DIR)
+    settings.validate_enterprise_only()
+    log.info(
+        "Backend started. Provider: %s. Debug: %s. Work dir: %s. Copilot host: %s. Copilot token configured: %s.",
+        settings.LLM_PROVIDER,
+        settings.APP_DEBUG,
+        settings.WORK_DIR,
+        settings.COPILOT_GH_HOST,
+        bool(settings.COPILOT_GITHUB_TOKEN),
+    )
     get_registry().load_from_disk()
     yield
     log.info("Backend stopped.")
@@ -711,7 +719,18 @@ def _run_uploaded_document_knowledge_job(
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "llm_provider": settings.LLM_PROVIDER, "debug": settings.APP_DEBUG}
+    from . import copilot_client  # noqa: PLC0415
+
+    return {
+        "status": "ok",
+        "llm_provider": settings.LLM_PROVIDER,
+        "copilot_gh_host": settings.COPILOT_GH_HOST,
+        "debug": settings.APP_DEBUG,
+        "llm_auth": {
+            "copilot_sdk_available": copilot_client.is_available(),
+            "copilot_token_configured": bool(settings.COPILOT_GITHUB_TOKEN),
+        },
+    }
 
 
 # --------------------------------------------------------------------------

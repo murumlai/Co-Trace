@@ -11,8 +11,8 @@ Related planning docs: [plan.md](plan.md), [hybrid_UI.md](hybrid_UI.md), [pre-pr
 
 - `ftrunnerlog01.txt` is the source of truth for identity, timing, PASS/FAIL, `ErrorMsg`, `Errorcode` (SIMS `.itf` no longer authoritative).
 - Failed runs may attach a bounded, redacted `DebugLog.txt` excerpt from nested zips; each batch writes one redacted `<product_code>.json` per product before cleanup.
-- Diagnosis uses `LLM_PROVIDER` (`copilot_sdk` default, `github_models`, `offline_stub`); passing units never call the LLM.
-- GitHub OAuth is required; jobs are owned by the signer, and knowledge/cache deletes are admin-only. A local `ADMIN_USERNAME`/`ADMIN_PASSWORD` sign-in also grants admin for maintenance.
+- Diagnosis uses `LLM_PROVIDER` (`copilot_sdk` default = enterprise GitHub Copilot, or `offline_stub`); the public GitHub Models path is removed, and passing units never call the LLM.
+- Sign-in can use local admin credentials (`ADMIN_USERNAME`/`ADMIN_PASSWORD`) or optional GitHub OAuth. Jobs are owned by the signer, and knowledge/cache deletes are admin-only.
 - Successful diagnoses are cached and reused across uploads unless force-refreshed or the product/acronym context changes the cache key.
 
 ## Preprocessing Rules
@@ -43,13 +43,25 @@ $env:HTTPS_PROXY = "http://proxy-us.intel.com:912"
 $env:HTTP_PROXY = "http://proxy-us.intel.com:912"
 $env:NO_PROXY = "localhost,127.0.0.1"
 
-$env:GITHUB_CLIENT_ID = "<github.com OAuth app client id>"
-$env:GITHUB_CLIENT_SECRET = "<github.com OAuth app client secret>"
-$env:JWT_SECRET = "<long random session secret>"
+# AI diagnosis uses enterprise GitHub Copilot only (LLM_PROVIDER=copilot_sdk,
+# the default). Authenticate the Copilot CLI against the enterprise host:
+copilot auth login
+$env:COPILOT_GH_HOST = "intel-foundry.ghe.com"   # enterprise host (default; hard-enforced)
+# Optional: use an enterprise token instead of the CLI login:
+# $env:COPILOT_GITHUB_TOKEN = "<enterprise copilot token>"
+
+$env:ADMIN_USERNAME = "admin"
+$sec = Read-Host "Local admin password (hidden)" -AsSecureString
+$env:ADMIN_PASSWORD = [System.Net.NetworkCredential]::new("", $sec).Password
+$env:JWT_SECRET = [Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(48))
 $env:FRONTEND_URL = "http://localhost:5173"
-$env:GITHUB_CALLBACK_URL = "http://localhost:8000/api/auth/github/callback"
 $env:COOKIE_SECURE = "false"
-$env:GITHUB_ADMIN_USERS = "<comma-separated GitHub usernames>"
+
+# Optional GitHub OAuth sign-in, if you want per-user GitHub identities:
+# $env:GITHUB_CLIENT_ID = "<github.com OAuth app client id>"
+# $env:GITHUB_CLIENT_SECRET = "<github.com OAuth app client secret>"
+# $env:GITHUB_CALLBACK_URL = "http://localhost:8000/api/auth/github/callback"
+# $env:GITHUB_ADMIN_USERS = "<comma-separated GitHub usernames>"
 
 .\.venv\Scripts\python.exe backend\run_backend.py
 ```
@@ -62,9 +74,9 @@ npm.cmd install --proxy=http://proxy-us.intel.com:912 --https-proxy=http://proxy
 npm.cmd run dev -- --host localhost
 ```
 
-Open http://localhost:5173 for Vite development. Use `localhost` consistently for the OAuth browser flow; the frontend proxies `/api` to the backend on port `8000`.
+Open http://localhost:5173 for Vite development. The frontend proxies `/api` to the backend on port `8000`. Use the **Sign in as Admin** path with the local credentials above.
 
-Register the local OAuth app at <https://github.com/settings/developers> with:
+If you enable optional GitHub OAuth sign-in, register the local OAuth app at <https://github.com/settings/developers> with:
 
 ```text
 Homepage URL: http://localhost:5173
@@ -80,7 +92,7 @@ Invoke-RestMethod http://127.0.0.1:8000/api/health | ConvertTo-Json -Compress
 Expected shape:
 
 ```json
-{"status":"ok","llm_provider":"copilot_sdk","debug":false}
+{"status":"ok","llm_provider":"copilot_sdk","copilot_gh_host":"intel-foundry.ghe.com","debug":false,"llm_auth":{"copilot_sdk_available":true,"copilot_token_configured":false}}
 ```
 
 ## Single-Server Run
@@ -133,21 +145,22 @@ Important environment variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `LLM_PROVIDER` | `copilot_sdk` | `copilot_sdk`, `github_models`, or `offline_stub`. |
-| `GITHUB_TOKEN` | empty | GitHub Models token. Missing token falls back to offline stub. |
+| `LLM_PROVIDER` | `copilot_sdk` | `copilot_sdk` for enterprise Copilot, or `offline_stub` for the deterministic local heuristic. Other values are rejected at startup. |
 | `COPILOT_MINI_MODEL` | `gpt-5.4-mini` | Copilot mini/enrichment model. |
 | `COPILOT_REASONING_MODEL` | `claude-sonnet-4.6` | Copilot final root-cause model. |
+| `COPILOT_GITHUB_TOKEN` | empty | Optional GitHub token passed directly to the Copilot SDK provider. If empty, the SDK uses the logged-in Copilot CLI user. |
+| `COPILOT_GH_HOST` | `intel-foundry.ghe.com` | Enterprise host for Copilot auth/session. Public hosts such as `github.com` are rejected. |
 | `COPILOT_PROXY` | `http://proxy-us.intel.com:912` | Optional proxy for Copilot SDK subprocesses. |
-| `GITHUB_CLIENT_ID` | empty | Client ID from the github.com OAuth App. |
-| `GITHUB_CLIENT_SECRET` | empty | Client secret from the github.com OAuth App. Set only at runtime. |
-| `GITHUB_CALLBACK_URL` | `http://localhost:8000/api/auth/github/callback` | OAuth callback registered in GitHub. |
+| `GITHUB_CLIENT_ID` | empty | Optional client ID from the github.com OAuth App. Not required when using local admin sign-in. |
+| `GITHUB_CLIENT_SECRET` | empty | Optional client secret from the github.com OAuth App. Set only at runtime. |
+| `GITHUB_CALLBACK_URL` | `http://localhost:8000/api/auth/github/callback` | OAuth callback registered in GitHub when optional OAuth sign-in is enabled. |
 | `FRONTEND_URL` | `http://localhost:5173` | URL to redirect users back to after sign-in. |
 | `JWT_SECRET` | `dev-only-change-me` | Secret used to sign Co-Trace session cookies. Override outside local throwaway runs. |
 | `COOKIE_SECURE` | `0` | Set to `1` when serving over HTTPS in production/IIS. |
-| `GITHUB_ADMIN_USERS` | empty | Comma-separated GitHub usernames allowed to manage knowledge writes and protected cache entries. |
+| `GITHUB_ADMIN_USERS` | empty | Comma-separated GitHub usernames allowed to manage knowledge writes and protected cache entries when OAuth is enabled. |
 | `ADMIN_USERNAME` | `admin` | Username for the local maintenance admin login (separate from GitHub). |
-| `ADMIN_PASSWORD` | empty | Password for the local maintenance admin login. Empty disables it, leaving GitHub as the only sign-in. |
-| `HTTP_PROXY` / `HTTPS_PROXY` | empty | Corporate proxy for backend calls to GitHub OAuth endpoints. |
+| `ADMIN_PASSWORD` | empty | Password for the local maintenance admin login. Empty disables the local admin sign-in path. |
+| `HTTP_PROXY` / `HTTPS_PROXY` | empty | Corporate proxy for backend calls to optional GitHub OAuth endpoints. |
 | `SESSION_TTL_S` | `2592000` | Auth session lifetime, 30 days by default. |
 | `WORK_DIR` | `.cotrace_work` | Per-job uploads, job state, and analysis cache location. |
 | `JOB_TTL_S` | `2592000` | Job retention window, 30 days by default. |
@@ -166,9 +179,11 @@ Important environment variables:
 
 Set secrets at runtime only. See [backend/app/config.py](backend/app/config.py) for the full settings list and defaults.
 
+For the default `copilot_sdk` provider, authenticate against `intel-foundry.ghe.com` with either `copilot auth login` or `COPILOT_GITHUB_TOKEN`. Public GitHub Models access is not available in this app.
+
 ## Product-Aware Diagnosis
 
-Diagnosis can be grounded in curated product context. Supporting PDF/DOCX docs are
+Diagnosis can be grounded in curated product context. Supporting PDF/DOCX/XLSX docs are
 ingested once into a repo-root knowledge pack; at runtime only a few matched
 summaries (never whole documents) are sent alongside the redacted failure excerpt.
 
@@ -179,9 +194,9 @@ summaries (never whole documents) are sent alongside the redacted failure excerp
 ## Security and Storage
 
 - Never commit raw logs, `.env`, tokens, `.cotrace_work`, virtualenvs, `node_modules`, build output, or any GitHub/OAuth/session secrets.
-- Redaction scrubs credentials, IPs, hostnames, usernames, MACs, and serials before LLM analysis; users authenticate via GitHub and Co-Trace stores only its signed HttpOnly session cookie.
+- Redaction scrubs credentials, IPs, hostnames, usernames, MACs, and serials before LLM analysis; users authenticate via local admin credentials or optional GitHub OAuth, and Co-Trace stores only its signed HttpOnly session cookie.
 - Uploads, extracted zips, and preprocessed JSON are removed after processing by default; the analysis cache persists under `WORK_DIR`.
-- In production behind IIS, set OAuth and proxy variables once on the server; users just open the app URL and sign in.
+- In production behind IIS, set the chosen auth variables and proxy values once on the server; users just open the app URL and sign in.
 
 ## Project Layout
 
@@ -194,7 +209,7 @@ backend/app/
   orchestrator.py     Background job pipeline
   job_registry.py     Disk-backed job state and TTL cleanup
   analyzer.py         Failure signature dedup, cache, provider routing
-  llm_client.py       Offline, GitHub Models, and Copilot providers
+  llm_client.py       Enterprise Copilot dispatch and offline stub
   knowledge/          Product-aware diagnosis (parsing, summarizer, retriever)
   aggregator.py       Manager metrics
   redaction.py        Sensitive-data scrubbing
