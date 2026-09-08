@@ -55,6 +55,26 @@ def test_copilot_client_receives_configured_github_token(monkeypatch) -> None:
     assert captured["env"]["HTTP_PROXY"] == copilot_client.settings.COPILOT_PROXY
 
 
+def test_copilot_client_supports_sdk_1_keyword_options(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeClient:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(copilot_client, "SubprocessConfig", None)
+    monkeypatch.setattr(copilot_client, "CopilotClientOptions", None)
+    monkeypatch.setattr(copilot_client, "CopilotClient", FakeClient)
+    monkeypatch.setattr(copilot_client.settings, "COPILOT_GITHUB_TOKEN", "")
+    monkeypatch.setattr(copilot_client.settings, "COPILOT_GH_HOST", "intel-foundry.ghe.com")
+
+    copilot_client._create_client()
+
+    assert captured["env"]["COPILOT_GH_HOST"] == "intel-foundry.ghe.com"
+    assert captured["github_token"] is None
+    assert captured["use_logged_in_user"] is True
+
+
 def test_live_llm_metrics_are_separated_by_model_role() -> None:
     def rich_analyze(error_code: str | None, error_message: str | None, snippet: str) -> LlmAnalysisResult:  # noqa: ARG001
         metrics = LlmUsageMetrics(provider="copilot_sdk")

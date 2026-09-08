@@ -18,7 +18,7 @@ Design notes
 * Every failure path degrades gracefully to the deterministic offline stub so
   the pipeline never crashes because Copilot is unavailable or unauthenticated.
 
-Requires ``github-copilot-sdk==0.2.0`` and a completed ``copilot auth login``
+Requires ``github-copilot-sdk>=1.0.13`` and a completed ``copilot auth login``
 on the host. When the SDK is not importable this module is inert and callers
 fall back to the stub.
 """
@@ -41,7 +41,7 @@ try:  # pragma: no cover - import guard depends on host environment
 
     try:
         from copilot import SubprocessConfig  # type: ignore
-    except ImportError:  # older/newer SDK layout
+    except ImportError:  # SDK 1.x uses keyword options on CopilotClient.
         SubprocessConfig = None  # type: ignore
         try:
             from copilot.types import CopilotClientOptions  # type: ignore
@@ -200,15 +200,27 @@ def _create_client() -> Any:
     # ambient/public COPILOT_GH_HOST can redirect the session to public github.com.
     env["COPILOT_GH_HOST"] = settings.COPILOT_GH_HOST
     github_token = settings.COPILOT_GITHUB_TOKEN.strip() or None
+    use_logged_in_user = github_token is None
     if SubprocessConfig is not None:
-        return CopilotClient(SubprocessConfig(env=env, github_token=github_token))
+        return CopilotClient(SubprocessConfig(
+            env=env,
+            github_token=github_token,
+            use_logged_in_user=use_logged_in_user,
+            log_level="debug" if settings.APP_DEBUG else "info",
+        ))
     if CopilotClientOptions is None:
-        raise ImportError(
-            "Neither SubprocessConfig nor CopilotClientOptions is importable "
-            "from the copilot SDK."
+        return CopilotClient(
+            env=env,
+            github_token=github_token,
+            use_logged_in_user=use_logged_in_user,
+            log_level="debug" if settings.APP_DEBUG else "info",
         )
     try:
-        return CopilotClient(CopilotClientOptions(env=env, github_token=github_token))
+        return CopilotClient(CopilotClientOptions(
+            env=env,
+            github_token=github_token,
+            use_logged_in_user=use_logged_in_user,
+        ))
     except TypeError:
         return CopilotClient(CopilotClientOptions(env=env))
 

@@ -14,7 +14,7 @@ openpyxl>=3.1.0
 
 # Optional: GitHub Copilot SDK provider (LLM_PROVIDER=copilot_sdk).
 # Requires `copilot auth login` on the host and proxy access where applicable.
-github-copilot-sdk==0.2.0
+github-copilot-sdk==1.0.13
 
 # Dev / test tooling
 pytest>=8.0
