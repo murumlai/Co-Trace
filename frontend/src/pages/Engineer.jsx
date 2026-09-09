@@ -451,6 +451,19 @@ function KnowledgeBadge({ attempt }) {
   return <div className="mb-3 text-xs text-muted">◇ {message}</div>
 }
 
+function DebugLogStatus({ attempt }) {
+  const status = attempt.debuglog_status
+  if (!status || status === 'not_applicable') return null
+  const message = attempt.debuglog_message || 'DebugLog status unavailable'
+  const tone = status === 'excerpt' ? 'accent' : status === 'empty' || status === 'loose_present' ? 'warn' : 'muted'
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted">
+      <Badge tone={tone}>DebugLog</Badge>
+      <span className="break-words [overflow-wrap:anywhere]">{message}</span>
+    </div>
+  )
+}
+
 function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache }) {
   const canClearCache =
     !!onClearCache &&
@@ -484,6 +497,7 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
       )}
 
       <KnowledgeBadge attempt={attempt} />
+      <DebugLogStatus attempt={attempt} />
 
       <div className="text-xs uppercase tracking-wide text-muted mb-1">
         Root cause

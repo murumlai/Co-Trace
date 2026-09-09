@@ -206,10 +206,10 @@ def test_copilot_mini_error_still_allows_reasoning_call(monkeypatch) -> None:
 
 
 def test_copilot_short_context_skips_mini_and_calls_reasoning(monkeypatch) -> None:
-    attempted_models: list[str] = []
+    attempted: list[tuple[str, str, str]] = []
 
     async def stream_once(prompt: str, model: str, system_prompt: str) -> str:  # noqa: ARG001
-        attempted_models.append(model)
+        attempted.append((model, prompt, system_prompt))
         return '{"root_cause":"reasoned root","suggested_solution":"reasoned solution"}'
 
     monkeypatch.setattr(copilot_client, "_SDK_AVAILABLE", True)
@@ -225,14 +225,16 @@ def test_copilot_short_context_skips_mini_and_calls_reasoning(monkeypatch) -> No
     assert result.metrics.mini.calls == 0
     assert result.metrics.reasoning.calls == 1
     assert result.metrics.total_calls == 1
-    assert attempted_models == ["claude-sonnet-5"]
+    assert [model for model, _, _ in attempted] == ["claude-sonnet-5"]
+    assert attempted[0][2] == copilot_client._COMPACT_DIAGNOSE_SYSTEM_PROMPT
+    assert len(attempted[0][2]) < len(copilot_client._DIAGNOSE_SYSTEM_PROMPT)
 
 
 def test_copilot_long_context_runs_mini_then_reasoning(monkeypatch) -> None:
-    attempted_models: list[str] = []
+    attempted: list[tuple[str, str]] = []
 
     async def stream_once(prompt: str, model: str, system_prompt: str) -> str:  # noqa: ARG001
-        attempted_models.append(model)
+        attempted.append((model, system_prompt))
         if model == "gpt-5.4-mini":
             return '{"summary":"observed failure","category":"other","observed_signals":[],"hints":[],"confidence":"low"}'
         return '{"root_cause":"reasoned root","suggested_solution":"reasoned solution"}'
@@ -250,4 +252,5 @@ def test_copilot_long_context_runs_mini_then_reasoning(monkeypatch) -> None:
     assert result.metrics.mini.calls == 1
     assert result.metrics.reasoning.calls == 1
     assert result.metrics.total_calls == 2
-    assert attempted_models == ["gpt-5.4-mini", "claude-sonnet-5"]
+    assert [model for model, _ in attempted] == ["gpt-5.4-mini", "claude-sonnet-5"]
+    assert attempted[1][1] == copilot_client._DIAGNOSE_SYSTEM_PROMPT

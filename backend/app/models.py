@@ -56,6 +56,8 @@ class UnitRecord(BaseModel):
     test_mode: Optional[str] = None
     device_class: DeviceClass = "unknown"
     has_debuglog: bool = False
+    debuglog_status: Optional[str] = None
+    debuglog_message: Optional[str] = None
     debug_excerpt: Optional[str] = None
     ftrunner_snippet: Optional[str] = None
 

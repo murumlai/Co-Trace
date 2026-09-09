@@ -228,6 +228,42 @@ class TestProcessRunFolder:
         assert rec.error_message == "Test failed at voltage step"
         assert rec.ftrunner_snippet is not None
         assert "FAIL" in rec.ftrunner_snippet
+        assert rec.debuglog_status == "not_found"
+        assert "supported nested zip archives" in rec.debuglog_message
+
+    def test_fail_unit_reports_nested_debuglog_excerpt_status(self, tmp_path):
+        log = _ft_log(
+            scan_kv="SERIALNUMBER=SN101\nPRODUCTCODE=K77469-400\n",
+            done_block=_done_fail("E005", "Test failed at voltage step"),
+        )
+        root, run_dir = self._run_folder(tmp_path, log)
+        with zipfile.ZipFile(os.path.join(run_dir, "debug.zip"), "w") as zf:
+            zf.writestr("Sequencer 1/DebugLog.txt", "noise\nE005 Test failed at voltage step\nmore")
+
+        rec = FtrunnerPreprocessor().process_run_folder(run_dir, root)
+
+        assert rec is not None
+        assert rec.has_debuglog is True
+        assert rec.debug_excerpt is not None
+        assert rec.debuglog_status == "excerpt"
+        assert "DebugLog excerpt extracted" in rec.debuglog_message
+
+    def test_fail_unit_reports_loose_debuglog_visibility_without_extraction(self, tmp_path):
+        log = _ft_log(
+            scan_kv="SERIALNUMBER=SN101\nPRODUCTCODE=K77469-400\n",
+            done_block=_done_fail("E005", "Test failed at voltage step"),
+        )
+        root, run_dir = self._run_folder(tmp_path, log)
+        with open(os.path.join(run_dir, "DebugLog.txt"), "w", encoding="utf-8") as fh:
+            fh.write("E005 Test failed at voltage step\n")
+
+        rec = FtrunnerPreprocessor().process_run_folder(run_dir, root)
+
+        assert rec is not None
+        assert rec.has_debuglog is False
+        assert rec.debug_excerpt is None
+        assert rec.debuglog_status == "loose_present"
+        assert "nested zip archives only" in rec.debuglog_message
 
     def test_no_ftrunnerlog_returns_none(self, tmp_path):
         run_dir = os.path.join(str(tmp_path), "run1")

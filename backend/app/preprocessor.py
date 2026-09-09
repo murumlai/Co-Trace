@@ -445,14 +445,29 @@ class FtrunnerPreprocessor:
         device_class = self._classify_device(text, steps, test_mode)
 
         has_debuglog = False
+        debuglog_status = "not_applicable"
+        debuglog_message = None
         debug_excerpt = None
         if result == "FAIL":
+            loose_debuglog = any(f.lower() == "debuglog.txt" for f in files)
+            debuglog_status = "loose_present" if loose_debuglog else "not_found"
+            debuglog_message = (
+                "Loose DebugLog.txt present; current extractor reads nested zip archives only."
+                if loose_debuglog
+                else "No DebugLog.txt found in supported nested zip archives."
+            )
             debug_path = find_debuglog(folder)
             if debug_path:
                 has_debuglog = True
                 debug_excerpt = extract_debug_excerpt(
                     _read(debug_path), err_code, err_msg, failing_step,
                 )
+                if debug_excerpt:
+                    debuglog_status = "excerpt"
+                    debuglog_message = f"DebugLog excerpt extracted ({len(debug_excerpt)} chars)."
+                else:
+                    debuglog_status = "empty"
+                    debuglog_message = "DebugLog.txt found but no usable excerpt was extracted."
 
         rel = os.path.relpath(folder, root)
         unit_id = hashlib.sha1(rel.encode("utf-8")).hexdigest()[:16]
@@ -480,6 +495,8 @@ class FtrunnerPreprocessor:
             test_mode=test_mode,
             device_class=device_class,
             has_debuglog=has_debuglog,
+            debuglog_status=debuglog_status,
+            debuglog_message=debuglog_message,
             debug_excerpt=debug_excerpt,
             ftrunner_snippet=ftrunner_snippet,
             redacted_snippet=ftrunner_snippet,
