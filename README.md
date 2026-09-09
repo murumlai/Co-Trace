@@ -48,8 +48,6 @@ $env:COPILOT_GH_HOST = "intel-foundry.ghe.com"   # enterprise host (default; har
 $env:LLM_PROVIDER = "copilot_sdk"
 
 $env:ADMIN_USERNAME = "admin"
-$sec = Read-Host "Local admin password (hidden)" -AsSecureString
-$env:ADMIN_PASSWORD = [System.Net.NetworkCredential]::new("", $sec).Password
 $env:JWT_SECRET = [Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(48))
 $env:FRONTEND_URL = "http://localhost:5173"
 $env:COOKIE_SECURE = "false"
@@ -129,7 +127,7 @@ Most-used environment variables:
 | `JWT_SECRET` | `dev-only-change-me` | Secret used to sign Co-Trace session cookies. Override outside local throwaway runs. |
 | `COOKIE_SECURE` | `0` | Set to `1` when serving over HTTPS in production/IIS. |
 | `ADMIN_USERNAME` | `admin` | Username for the local maintenance admin login (separate from GitHub). |
-| `ADMIN_PASSWORD` | empty | Password for the local maintenance admin login. Empty disables the local admin sign-in path. |
+| `ADMIN_PASSWORD` | `admin` | Password for the local maintenance admin login. Set to empty to disable the local admin sign-in path. |
 | `WORK_DIR` | `.cotrace_work` | Per-job uploads, job state, and analysis cache location. |
 | `CLEANUP_JOB_WORKDIR_AFTER_RUN` | `1` | Deletes uploads/extracted files/preprocessed JSON after terminal job state. |
 | `ANALYSIS_CACHE_ENABLED` | `1` | Reuses successful diagnoses across uploads. |
