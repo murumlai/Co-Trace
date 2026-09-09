@@ -135,7 +135,7 @@ Most-used environment variables:
 | `DEBUG_EXCERPT_CHAR_BUDGET` | `6000` | Max characters in failed-unit DebugLog excerpt. |
 | `PRODUCT_KNOWLEDGE_ENABLED` | `1` | Enables product-aware diagnosis (curated summaries in prompts). |
 | `PRODUCT_KNOWLEDGE_SUMMARY_MODEL` | `gpt-5.4-mini` | Model that summarizes product docs at ingestion (LLM required). |
-| `PRODUCT_KNOWLEDGE_SOURCE_DIRS` | `Log_Files_Folder`, `product_docs` | Folders scanned for supporting PDF/DOCX docs (`os.pathsep`-joined). |
+| `PRODUCT_KNOWLEDGE_SOURCE_DIRS` | `Log_Files_Folder`, `product_docs` | Folders scanned for supporting PDF/DOCX/XLSX docs (`os.pathsep`-joined). |
 
 See [backend/app/config.py](backend/app/config.py) for the full settings list and defaults.
 
@@ -147,13 +147,13 @@ Diagnosis can be grounded in curated product context. Supporting PDF/DOCX/XLSX d
 ingested once into a repo-root knowledge pack; at runtime only a few matched
 summaries (never whole documents) are sent alongside the redacted failure excerpt.
 
-- **Add docs**: drop them in `product_docs/` or `Log_Files_Folder/`, or upload from the **Knowledge** tab (admin). The product code and category are derived from the filename.
+- **Add docs**: drop them in `product_docs/` / `Product_Docs/` or `Log_Files_Folder/`, or upload from the **Knowledge** tab (admin). Upload saves the source file, then rebuilds the generated pack from all configured source docs plus the upload folder.
 - **Ingestion**: sections are summarized by `gpt-5.4-mini` (LLM required). Generated artifacts (`product_knowledge*.json`, `*_sections.jsonl`) live at the repo root, are gitignored, and store only curated summaries, never raw document text.
-- **Rebuild/invalidation**: rebuild from the Knowledge tab or `backend/scripts/build_product_knowledge.py`. The cache key folds in the product/knowledge hash, so changing knowledge invalidates stale diagnoses. The Engineer view shows whether/which product knowledge matched.
+- **Remove/rebuild**: **Remove from pack** prunes only generated knowledge artifacts and preserves the source document. Rebuild from the Knowledge tab or `backend/scripts/build_product_knowledge.py`; changing knowledge invalidates stale diagnoses through the product/knowledge hash.
 
 ## Security and Storage
 
-- Local/generated outputs are gitignored, including `.cotrace_work`, virtualenvs, `node_modules`, `frontend/dist`, `product_docs`, and `product_knowledge*.json` artifacts.
+- Local/generated outputs are gitignored, including `.cotrace_work`, virtualenvs, `node_modules`, `frontend/dist`, `product_docs` / `Product_Docs`, and `product_knowledge*.json` artifacts.
 - Redaction scrubs credentials, IPs, hostnames, usernames, MACs, and serials before LLM analysis; users authenticate via local admin credentials or optional GitHub OAuth, and Co-Trace stores only its signed HttpOnly session cookie.
 - Uploads, extracted zips, and preprocessed JSON are removed after processing by default; the analysis cache persists under `WORK_DIR`.
 - In production behind IIS, set the chosen auth variables and proxy values once on the server; users just open the app URL and sign in.
