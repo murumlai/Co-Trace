@@ -141,7 +141,7 @@ export default function Knowledge() {
   const deleteDocument = (doc) =>
     runAction(`del:${doc.doc_id}`, async () => {
       await api.knowledgeDeleteDocument(doc.doc_id)
-      setNotice(`Deleted ${doc.filename}.`)
+      setNotice(`Removed ${doc.filename} from the knowledge pack.`)
     })
 
   const deletePack = () =>
@@ -298,7 +298,7 @@ export default function Knowledge() {
                         onClick={() => deleteDocument(doc)}
                         disabled={!!busy}
                       >
-                        {busy === `del:${doc.doc_id}` ? 'Deleting…' : 'Delete'}
+                        {busy === `del:${doc.doc_id}` ? 'Removing…' : 'Remove from pack'}
                       </button>
                     )}
                   </div>

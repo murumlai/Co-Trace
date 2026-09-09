@@ -208,10 +208,10 @@ class TestKnowledgeDeleteDocument:
         resp = client.delete(f"/api/knowledge/documents/{doc_id}", headers=_admin_auth(client))
         assert resp.status_code == 200
         assert resp.json()["deleted"] == "M79060-001_Debug.pdf"
-        assert not __import__("os").path.exists(path)
+        assert __import__("os").path.exists(path)
         assert doc_id in state["ingestion"].pruned
 
-    def test_admin_deletes_document_from_source_dir(self, env, tmp_path):
+    def test_admin_preserves_document_in_source_dir(self, env, tmp_path):
         client, _ = env
         from app.knowledge import parsing
 
@@ -222,7 +222,7 @@ class TestKnowledgeDeleteDocument:
         doc_id = parsing.make_doc_id("M13983-700", path.name)
         resp = client.delete(f"/api/knowledge/documents/{doc_id}", headers=_admin_auth(client))
         assert resp.status_code == 200
-        assert not path.exists()
+        assert path.exists()
 
     def test_non_admin_delete_document_forbidden(self, env, tmp_path):
         client, _ = env
