@@ -249,6 +249,52 @@ class TestAnalyzeJobDedup:
         assert calls["n"] == 1
         assert rec.root_cause == "fresh root"
 
+    def test_force_refresh_reuses_in_job_signature_cache_for_duplicates(self, monkeypatch):
+        monkeypatch.setattr("app.analysis_cache.get_entry", lambda *a, **kw: None)
+        monkeypatch.setattr("app.analysis_cache.set_entry", lambda *a, **kw: None)
+
+        calls = {"n": 0}
+
+        def counting_stub(ec, em, snippet):  # noqa: ARG001
+            calls["n"] += 1
+            return "fresh root", "fresh solution", "stub"
+
+        r1 = _fail_rec("u1", "E001", "Voltage fault")
+        r2 = _fail_rec("u2", "E001", "Voltage fault")
+        job = _make_job([r1, r2])
+        job.force_refresh = True
+
+        analyze_job(job, analyze_failure=counting_stub)
+
+        assert calls["n"] == 1
+        assert r1.root_cause == "fresh root"
+        assert r2.root_cause == "fresh root"
+        assert r2.analysis_source == "cached"
+
+    def test_force_refresh_clears_stale_signature_cache_before_reusing_duplicates(self, monkeypatch):
+        monkeypatch.setattr("app.analysis_cache.get_entry", lambda *a, **kw: None)
+        monkeypatch.setattr("app.analysis_cache.set_entry", lambda *a, **kw: None)
+
+        calls = {"n": 0}
+
+        def counting_stub(ec, em, snippet):  # noqa: ARG001
+            calls["n"] += 1
+            return "fresh root", "fresh solution", "stub"
+
+        r1 = _fail_rec("u1", "E001", "Voltage fault")
+        r2 = _fail_rec("u2", "E001", "Voltage fault")
+        sig = signature_for(r1)
+        job = _make_job([r1, r2])
+        job.force_refresh = True
+        job.signature_cache[sig] = ("stale root", "stale solution", "cached")
+
+        analyze_job(job, analyze_failure=counting_stub)
+
+        assert calls["n"] == 1
+        assert r1.root_cause == "fresh root"
+        assert r2.root_cause == "fresh root"
+        assert job.signature_cache[sig] == ("fresh root", "fresh solution", "stub")
+
     def test_analysis_source_set_on_records(self, monkeypatch):
         monkeypatch.setattr("app.analysis_cache.get_entry", lambda *a, **kw: None)
         monkeypatch.setattr("app.analysis_cache.set_entry", lambda *a, **kw: None)

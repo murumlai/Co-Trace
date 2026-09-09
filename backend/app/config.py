@@ -39,7 +39,7 @@ class Settings:
     # root cause and suggested solution. Both default to the mini model so a
     # single-model setup works out of the box.
     COPILOT_MINI_MODEL: str = os.getenv("COPILOT_MINI_MODEL", "gpt-5.4-mini")
-    COPILOT_REASONING_MODEL: str = os.getenv("COPILOT_REASONING_MODEL", "claude-sonnet-4.6")
+    COPILOT_REASONING_MODEL: str = os.getenv("COPILOT_REASONING_MODEL", "claude-sonnet-5")
     COPILOT_GITHUB_TOKEN: str = os.getenv("COPILOT_GITHUB_TOKEN", "")
     # Enterprise GitHub host for Copilot auth/session. Defaults to the sanctioned
     # enterprise host and is hard-enforced at startup; a public host is rejected.
@@ -48,6 +48,7 @@ class Settings:
     COPILOT_TIMEOUT_S: float = float(os.getenv("COPILOT_TIMEOUT_S", "60"))
     # Run the mini enrichment/summarization pass before the reasoning call.
     COPILOT_ENABLE_MINI_ENRICH: bool = _env_flag("COPILOT_ENABLE_MINI_ENRICH", True)
+    COPILOT_MINI_MIN_CONTEXT_CHARS: int = int(os.getenv("COPILOT_MINI_MIN_CONTEXT_CHARS", "500"))
     # Cost display uses token-credit estimates unless a provider returns exact
     # usage. Adjust this if your internal credit accounting uses a different unit.
     LLM_TOKEN_CREDIT_SIZE: int = int(os.getenv("LLM_TOKEN_CREDIT_SIZE", "1000"))
@@ -69,10 +70,10 @@ class Settings:
     GITHUB_ADMIN_USERS: list[str] = [
         user.strip() for user in os.getenv("GITHUB_ADMIN_USERS", "").split(",") if user.strip()
     ]
-    # Local maintenance admin login (separate from GitHub OAuth). An empty
-    # password disables this path entirely, leaving GitHub as the only login.
+    # Local maintenance admin login (separate from GitHub OAuth).
+    # Set ADMIN_PASSWORD="" to disable this path entirely.
     ADMIN_USERNAME: str = os.getenv("ADMIN_USERNAME", "admin")
-    ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "")
+    ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "admin")
 
     # --- Jobs / storage ---
     WORK_DIR: str = os.getenv("WORK_DIR", os.path.join(os.getcwd(), ".cotrace_work"))

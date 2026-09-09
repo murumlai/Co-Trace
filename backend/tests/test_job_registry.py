@@ -93,6 +93,19 @@ class TestJobSave:
         tmp_file = os.path.join(workdir, "job_state.json.tmp")
         assert not os.path.exists(tmp_file)
 
+    def test_to_status_reports_elapsed_seconds_for_running_job(self, monkeypatch):
+        import app.job_registry as jr
+
+        monkeypatch.setattr(jr.time, "time", lambda: 130.5)
+        job = Job(job_id="abc123", created_at=100.0, started_at=110.0, status="running")
+
+        assert job.to_status().elapsed_s == 20.5
+
+    def test_to_status_reports_fixed_elapsed_seconds_for_done_job(self):
+        job = Job(job_id="abc123", created_at=100.0, started_at=110.0, completed_at=135.25, status="done")
+
+        assert job.to_status().elapsed_s == 25.25
+
 
 # ---------------------------------------------------------------------------
 # JobRegistry.load_from_disk

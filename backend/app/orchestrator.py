@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -86,6 +87,8 @@ class JobOrchestrator:
 
         log.info("Job %s started.", job_id[:8])
         job.status = "running"
+        job.started_at = job.started_at or time.time()
+        job.completed_at = None
         job.message = "Scanning uploaded files"
         job.save()
 
@@ -138,6 +141,7 @@ class JobOrchestrator:
             self._analyzer.analyze_job(job, progress_callback=_analysis_progress_updater(job))
 
             job.status = "done"
+            job.completed_at = time.time()
             job.processed = job.total
             job.message = f"Completed: {len(records)} unit runs"
             job.save()
@@ -145,12 +149,14 @@ class JobOrchestrator:
             log.info("Job %s finished: %s unit runs.", job_id[:8], len(records))
         except JobCancelled:
             job.status = "cancelled"
+            job.completed_at = time.time()
             job.message = "Batch stopped by user"
             job.save()
             self._do_cleanup(job)
             log.info("Job %s stopped by user.", job_id[:8])
         except Exception as exc:  # noqa: BLE001 - surface failure to the UI
             job.status = "error"
+            job.completed_at = time.time()
             job.message = f"Processing failed: {type(exc).__name__}: {exc}"
             job.save()
             self._do_cleanup(job)
@@ -199,9 +205,14 @@ def _analysis_progress_updater(job: Any) -> Callable[[int, int, str], None]:
         job.processed = processed
         job.total = max(total, 1)
         if settings.LLM_PROVIDER == "copilot_sdk" and total > 0 and processed < total:
-            passes = 2 if settings.COPILOT_ENABLE_MINI_ENRICH else 1
+            if settings.COPILOT_ENABLE_MINI_ENRICH:
+                calls = f"1-2 Copilot calls; mini skips contexts below {settings.COPILOT_MINI_MIN_CONTEXT_CHARS} chars"
+                passes = 2
+            else:
+                calls = "1 Copilot call"
+                passes = 1
             timeout_s = int(settings.COPILOT_TIMEOUT_S * passes)
-            message = f"{message} (up to {timeout_s}s per uncached signature)"
+            message = f"{message} ({calls}; up to {timeout_s}s per uncached signature)"
         job.message = message
         job.save()
 

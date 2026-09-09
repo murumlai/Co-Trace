@@ -56,6 +56,8 @@ class UnitRecord(BaseModel):
     test_mode: Optional[str] = None
     device_class: DeviceClass = "unknown"
     has_debuglog: bool = False
+    debuglog_status: Optional[str] = None
+    debuglog_message: Optional[str] = None
     debug_excerpt: Optional[str] = None
     ftrunner_snippet: Optional[str] = None
 
@@ -254,6 +256,7 @@ class JobStatus(BaseModel):
     status: JobState = "pending"
     progress: JobProgress = Field(default_factory=JobProgress)
     message: str = ""
+    elapsed_s: float = 0.0
     unit_count: int = 0
     warnings: list[str] = Field(default_factory=list)
     llm_metrics: LlmUsageMetrics = Field(default_factory=LlmUsageMetrics)

@@ -105,6 +105,16 @@ function formatCredits(value) {
   return amount < 1 ? amount.toFixed(4) : amount.toFixed(2)
 }
 
+function formatElapsed(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds || 0)))
+  const mins = Math.floor(total / 60)
+  const secs = total % 60
+  if (mins < 1) return `${secs}s`
+  const hours = Math.floor(mins / 60)
+  const remMins = mins % 60
+  return hours ? `${hours}h ${remMins}m ${secs}s` : `${mins}m ${secs}s`
+}
+
 function providerLabel(provider) {
   return provider ? provider.replace(/_/g, ' ') : 'Not used yet'
 }
@@ -411,7 +421,7 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
           <div className="mt-6">
             <div className="flex justify-between text-sm text-muted mb-2">
               <span>{progress.message || progress.status}</span>
-              <span>{progressLabel}</span>
+              <span>{progress.elapsed_s ? `${progressLabel} · Elapsed ${formatElapsed(progress.elapsed_s)}` : progressLabel}</span>
             </div>
             <div className="h-3 rounded-full bg-surface-2 border border-border overflow-hidden">
               <div

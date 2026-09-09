@@ -117,6 +117,7 @@ function Shell() {
         processed: status.progress.processed,
         total: status.progress.total,
         message: status.message,
+        elapsed_s: status.elapsed_s || 0,
       })
       setLlmMetrics(status.llm_metrics || null)
       if (status.status === 'done') {
