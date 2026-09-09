@@ -77,8 +77,12 @@ def _auth(client) -> dict:  # noqa: ARG001
     return admin_auth_headers()
 
 
-def test_upload_builds_only_the_uploaded_document_and_runs_off_event_loop(client_env):
+def test_upload_rebuilds_pack_with_existing_source_documents_off_event_loop(client_env, tmp_path):
     client, ingestion, retriever = client_env
+    other_docs = tmp_path / "other_docs"
+    other_docs.mkdir(parents=True, exist_ok=True)
+    (other_docs / "M79060-001_Debug.pdf").write_bytes(b"%PDF-1.4 fake")
+
     resp = client.post(
         "/api/knowledge/upload",
         headers=_auth(client),
@@ -86,9 +90,11 @@ def test_upload_builds_only_the_uploaded_document_and_runs_off_event_loop(client
     )
 
     assert resp.status_code == 200
-    assert len(ingestion.docs) == 1
-    assert ingestion.docs[0].filename == "N32828-201_HLD.docx"
-    assert ingestion.docs[0].product_code == "N32828-201"
+    assert {doc.filename for doc in ingestion.docs} == {
+        "M79060-001_Debug.pdf",
+        "N32828-201_HLD.docx",
+    }
+    assert {doc.product_code for doc in ingestion.docs} == {"M79060-001", "N32828-201"}
     assert ingestion.saw_running_loop is False
     assert retriever.invalidated is True
 

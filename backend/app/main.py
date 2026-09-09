@@ -625,10 +625,11 @@ def _build_uploaded_document_knowledge(
     path: str,
     progress: Any | None = None,
 ) -> dict | None:
-    doc = parsing.describe_document(path, source_root=settings.PRODUCT_KNOWLEDGE_DOCS_DIR)
+    source_dirs = [*settings.PRODUCT_KNOWLEDGE_SOURCE_DIRS, settings.PRODUCT_KNOWLEDGE_DOCS_DIR]
+    docs = parsing.scan_source_documents(source_dirs=source_dirs)
     try:
         if hasattr(ingestion, "build"):
-            manifest = ingestion.build([doc], progress=progress)
+            manifest = ingestion.build(docs, progress=progress)
         else:
             manifest = ingestion.rebuild()
     except ProductKnowledgeError as exc:
