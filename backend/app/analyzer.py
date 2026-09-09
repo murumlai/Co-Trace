@@ -170,7 +170,7 @@ def _analysis_progress_message(done: int, total: int, state: str, source: str | 
     if state == "checking":
         return f"Checking saved analysis for failure signature {done}/{total}"
     if state == "llm":
-        return f"Analyzing uncached failure signature {done}/{total}; LLM calls can take a minute"
+        return f"Analyzing uncached failure signature {done}/{total}"
     if source in ("cached", "local-cache"):
         return f"Loaded saved analysis for failure signature {done}/{total}"
     return f"Analyzed failure signature {done}/{total}"

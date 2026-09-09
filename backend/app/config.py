@@ -48,6 +48,7 @@ class Settings:
     COPILOT_TIMEOUT_S: float = float(os.getenv("COPILOT_TIMEOUT_S", "60"))
     # Run the mini enrichment/summarization pass before the reasoning call.
     COPILOT_ENABLE_MINI_ENRICH: bool = _env_flag("COPILOT_ENABLE_MINI_ENRICH", True)
+    COPILOT_MINI_MIN_CONTEXT_CHARS: int = int(os.getenv("COPILOT_MINI_MIN_CONTEXT_CHARS", "500"))
     # Cost display uses token-credit estimates unless a provider returns exact
     # usage. Adjust this if your internal credit accounting uses a different unit.
     LLM_TOKEN_CREDIT_SIZE: int = int(os.getenv("LLM_TOKEN_CREDIT_SIZE", "1000"))

@@ -199,9 +199,14 @@ def _analysis_progress_updater(job: Any) -> Callable[[int, int, str], None]:
         job.processed = processed
         job.total = max(total, 1)
         if settings.LLM_PROVIDER == "copilot_sdk" and total > 0 and processed < total:
-            passes = 2 if settings.COPILOT_ENABLE_MINI_ENRICH else 1
+            if settings.COPILOT_ENABLE_MINI_ENRICH:
+                calls = f"1-2 Copilot calls; mini skips contexts below {settings.COPILOT_MINI_MIN_CONTEXT_CHARS} chars"
+                passes = 2
+            else:
+                calls = "1 Copilot call"
+                passes = 1
             timeout_s = int(settings.COPILOT_TIMEOUT_S * passes)
-            message = f"{message} (up to {timeout_s}s per uncached signature)"
+            message = f"{message} ({calls}; up to {timeout_s}s per uncached signature)"
         job.message = message
         job.save()
 

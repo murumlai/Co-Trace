@@ -453,19 +453,30 @@ def analyze_with_metrics(
         )
 
     context = snippet or error_message or ""
+    stripped_context = context.strip()
+    mini_context_min = max(0, settings.COPILOT_MINI_MIN_CONTEXT_CHARS)
+    run_mini = bool(settings.COPILOT_ENABLE_MINI_ENRICH and len(stripped_context) >= mini_context_min)
     metrics = LlmUsageMetrics(provider="copilot_sdk")
     active_role: LlmModelRole | None = None
     active_input_chars = 0
 
     try:
         log.info(
-            "Copilot analysis started: mini=%s, reasoning=%s, mini pass=%s, context=%s chars.",
+            "Copilot analysis started: mini=%s, reasoning=%s, mini pass=%s, context=%s chars, mini threshold=%s chars.",
             settings.COPILOT_MINI_MODEL,
             settings.COPILOT_REASONING_MODEL,
-            settings.COPILOT_ENABLE_MINI_ENRICH,
+            run_mini,
             len(context),
+            mini_context_min,
         )
-        if settings.COPILOT_ENABLE_MINI_ENRICH and context.strip():
+        if settings.COPILOT_ENABLE_MINI_ENRICH and stripped_context and not run_mini:
+            log.info(
+                "Copilot mini model call skipped: %s context chars below %s-char threshold.",
+                len(stripped_context),
+                mini_context_min,
+            )
+
+        if run_mini:
             log.info("Copilot mini model call started (%s).", settings.COPILOT_MINI_MODEL)
             active_role = "mini"
             mini_prompt = _build_mini_prompt(context)
