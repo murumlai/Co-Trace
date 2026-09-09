@@ -87,7 +87,7 @@ def test_live_llm_metrics_are_separated_by_model_role() -> None:
         )
         metrics.add_model_call(
             "reasoning",
-            model="claude-sonnet-4.6",
+            model="claude-sonnet-5",
             input_chars=2000,
             output_chars=400,
             credit_tokens_per_credit=1000,
@@ -105,7 +105,7 @@ def test_live_llm_metrics_are_separated_by_model_role() -> None:
     assert job.llm_metrics.provider == "copilot_sdk"
     assert job.llm_metrics.mini.model == "gpt-5.4-mini"
     assert job.llm_metrics.mini.calls == 1
-    assert job.llm_metrics.reasoning.model == "claude-sonnet-4.6"
+    assert job.llm_metrics.reasoning.model == "claude-sonnet-5"
     assert job.llm_metrics.reasoning.calls == 1
     assert job.llm_metrics.total_calls == 2
     assert job.llm_metrics.cache_hits == 1
@@ -135,7 +135,7 @@ def test_copilot_auth_error_counts_mini_and_skips_reasoning(monkeypatch) -> None
     monkeypatch.setattr(copilot_client, "_SDK_AVAILABLE", True)
     monkeypatch.setattr(copilot_client.settings, "COPILOT_ENABLE_MINI_ENRICH", True)
     monkeypatch.setattr(copilot_client.settings, "COPILOT_MINI_MODEL", "gpt-5.4-mini")
-    monkeypatch.setattr(copilot_client.settings, "COPILOT_REASONING_MODEL", "claude-sonnet-4.6")
+    monkeypatch.setattr(copilot_client.settings, "COPILOT_REASONING_MODEL", "claude-sonnet-5")
     monkeypatch.setattr(copilot_client, "_stream_once", fail_stream)
 
     result = copilot_client.analyze_with_metrics("E001", "Voltage fault", "Debug excerpt")
@@ -166,7 +166,7 @@ def test_copilot_mini_error_still_allows_reasoning_call(monkeypatch) -> None:
     monkeypatch.setattr(copilot_client, "_SDK_AVAILABLE", True)
     monkeypatch.setattr(copilot_client.settings, "COPILOT_ENABLE_MINI_ENRICH", True)
     monkeypatch.setattr(copilot_client.settings, "COPILOT_MINI_MODEL", "gpt-5.4-mini")
-    monkeypatch.setattr(copilot_client.settings, "COPILOT_REASONING_MODEL", "claude-sonnet-4.6")
+    monkeypatch.setattr(copilot_client.settings, "COPILOT_REASONING_MODEL", "claude-sonnet-5")
     monkeypatch.setattr(copilot_client, "_stream_once", stream_once)
 
     result = copilot_client.analyze_with_metrics("E001", "Voltage fault", "Debug excerpt")

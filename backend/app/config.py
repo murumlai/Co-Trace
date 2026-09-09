@@ -39,7 +39,7 @@ class Settings:
     # root cause and suggested solution. Both default to the mini model so a
     # single-model setup works out of the box.
     COPILOT_MINI_MODEL: str = os.getenv("COPILOT_MINI_MODEL", "gpt-5.4-mini")
-    COPILOT_REASONING_MODEL: str = os.getenv("COPILOT_REASONING_MODEL", "claude-sonnet-4.6")
+    COPILOT_REASONING_MODEL: str = os.getenv("COPILOT_REASONING_MODEL", "claude-sonnet-5")
     COPILOT_GITHUB_TOKEN: str = os.getenv("COPILOT_GITHUB_TOKEN", "")
     # Enterprise GitHub host for Copilot auth/session. Defaults to the sanctioned
     # enterprise host and is hard-enforced at startup; a public host is rejected.
