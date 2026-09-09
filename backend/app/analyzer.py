@@ -108,6 +108,8 @@ def analyze_job(
     """
     failed = [rec for rec in job.records if rec.result == "FAIL"]
     force_refresh = bool(getattr(job, "force_refresh", False))
+    if force_refresh and job.signature_cache:
+        job.signature_cache.clear()
     total_signatures = len({signature_for(rec) for rec in failed})
     log.info(
         "Analysis started for job %s: %s failed units, %s unique signatures, %s cached signatures.",
@@ -179,6 +181,7 @@ def _analyze_unit(
     rec: UnitRecord,
     force: bool,
     analyze_failure: AnalyzeFailure,
+    reuse_signature_cache: bool = True,
     progress_callback: Callable[[str], None] | None = None,
     progress_index: int = 1,
     progress_total: int = 1,
@@ -212,7 +215,7 @@ def _analyze_unit(
     )
     rec.analysis_cache_key = cache_key
 
-    if not force and sig in job.signature_cache:
+    if reuse_signature_cache and sig in job.signature_cache:
         root, solution, _src = job.signature_cache[sig]
         root, solution = _apply_exact_knowledge_fallback(rec, knowledge, root, solution)
         job.signature_cache[sig] = (root, solution, _src)
@@ -474,6 +477,7 @@ def reanalyze_unit(
                 return rec
             _analyze_unit(
                 job, rec, force=True,
+                reuse_signature_cache=False,
                 analyze_failure=analyze_failure,
                 knowledge_retriever=knowledge_retriever,
                 acronym_glossary=acronym_glossary,
@@ -531,6 +535,7 @@ class AnalyzerService:
                     return rec
                 _analyze_unit(
                     job, rec, force=True,
+                    reuse_signature_cache=False,
                     analyze_failure=self._analyze_failure,
                     cache=self._cache,
                     knowledge_retriever=self._knowledge_retriever,
