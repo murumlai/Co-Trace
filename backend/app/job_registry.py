@@ -35,6 +35,8 @@ class Job:
     processed: int = 0
     total: int = 0
     created_at: float = field(default_factory=time.time)
+    started_at: float | None = None
+    completed_at: float | None = None
     records: list[UnitRecord] = field(default_factory=list)
     workdir: str = ""
     warnings: list[str] = field(default_factory=list)
@@ -53,10 +55,21 @@ class Job:
             status=self.status,
             progress=JobProgress(processed=self.processed, total=self.total),
             message=self.message,
+            elapsed_s=round(self.elapsed_s(), 2),
             unit_count=len(self.records),
             warnings=self.warnings,
             llm_metrics=self.llm_metrics,
         )
+
+    def elapsed_s(self) -> float:
+        start = self.started_at or self.created_at
+        if self.completed_at is not None:
+            end = self.completed_at
+        elif self.status in {"done", "error", "cancelled"}:
+            end = start
+        else:
+            end = time.time()
+        return max(0.0, end - start)
 
     def save(self) -> None:
         """Persist current job state via the injected store.
@@ -86,6 +99,8 @@ def _inline_save(job: Job) -> None:
         "processed": job.processed,
         "total": job.total,
         "created_at": job.created_at,
+        "started_at": job.started_at,
+        "completed_at": job.completed_at,
         "workdir": job.workdir,
         "warnings": job.warnings,
         "cancel_requested": job.cancel_requested,
@@ -156,6 +171,8 @@ class DiskJobStateStore:
                     processed=state.get("processed", 0),
                     total=state.get("total", 0),
                     created_at=created_at,
+                    started_at=state.get("started_at"),
+                    completed_at=state.get("completed_at"),
                     workdir=state.get("workdir", entry.path),
                     warnings=state.get("warnings", []),
                     cancel_requested=state.get("cancel_requested", False),
@@ -165,6 +182,7 @@ class DiskJobStateStore:
                 )
                 if job.status == "running":
                     job.status = "error"
+                    job.completed_at = now
                     job.message = "Server restarted during processing — please re-upload"
                     self.save(job)
                 yield job

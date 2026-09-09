@@ -256,6 +256,7 @@ class JobStatus(BaseModel):
     status: JobState = "pending"
     progress: JobProgress = Field(default_factory=JobProgress)
     message: str = ""
+    elapsed_s: float = 0.0
     unit_count: int = 0
     warnings: list[str] = Field(default_factory=list)
     llm_metrics: LlmUsageMetrics = Field(default_factory=LlmUsageMetrics)
