@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 
 from ..config import settings
@@ -59,34 +60,43 @@ class LexicalKnowledgeRetriever:
         if index is None or manifest is None:
             return KnowledgeContext(product_code=product_code, match_status="no_product_knowledge")
 
-        # Build the candidate entry list: exact product-code match first,
-        # then RFC sections from a family-level workbook as fallback.
-        entries = list(index.by_product.get(product_code) or [])
-        family_code = _family_code_for(product_code)
-        if family_code and family_code != product_code:
-            for entry in index.by_product.get(family_code) or []:
-                if entry.category == "rfc_knowledge" and entry not in entries:
-                    entries.append(entry)
+        # Build the candidate entry list: exact product-code match first, then
+        # canonical suffix aliases (e.g. AAN32828-201 -> N32828-201), then RFC
+        # sections from matching family-level workbooks as fallback.
+        product_candidates = _product_code_candidates(product_code)
+        entries: list[SectionIndexEntry] = []
+        seen_sections: set[str] = set()
+        for candidate in product_candidates:
+            _add_entries(entries, seen_sections, index.by_product.get(candidate) or [])
+        family_codes = [code for code in (_family_code_for(c) for c in product_candidates) if code]
+        for family_code in family_codes:
+            if family_code not in product_candidates:
+                _add_entries(
+                    entries,
+                    seen_sections,
+                    [e for e in index.by_product.get(family_code) or [] if e.category == "rfc_knowledge"],
+                )
             # Also check all other keys whose product_family_code matches.
             for key, key_entries in index.by_product.items():
-                if key == product_code or key == family_code:
+                if key in product_candidates or key == family_code:
                     continue
-                for entry in key_entries:
-                    if (
-                        entry.category == "rfc_knowledge"
-                        and entry.product_family_code == family_code
-                        and entry not in entries
-                    ):
-                        entries.append(entry)
+                _add_entries(
+                    entries,
+                    seen_sections,
+                    [
+                        e for e in key_entries
+                        if e.category == "rfc_knowledge" and e.product_family_code == family_code
+                    ],
+                )
 
         if not entries:
             return KnowledgeContext(
                 product_code=product_code,
-                knowledge_hash=manifest.product_hash(product_code),
+                knowledge_hash=_knowledge_hash_for(manifest, product_candidates),
                 match_status="no_product_knowledge",
             )
 
-        knowledge_hash = manifest.product_hash(product_code)
+        knowledge_hash = _knowledge_hash_for(manifest, product_candidates)
         query = summarizer_mod.tokenize(
             " ".join(
                 v for v in (record.failing_step, record.error_code, record.error_message) if v
@@ -204,6 +214,47 @@ def _family_code_for(product_code: str) -> str | None:
     """
     from .parsing import extract_product_family_code  # noqa: PLC0415
     return extract_product_family_code(product_code)
+
+
+def _product_code_candidates(product_code: str) -> list[str]:
+    """Return exact and canonical suffix candidates for a runtime product code."""
+    candidates: list[str] = []
+
+    def add(value: str | None) -> None:
+        value = (value or "").strip()
+        if value and value not in candidates:
+            candidates.append(value)
+
+    add(product_code)
+    upper = product_code.strip().upper()
+    add(upper)
+    from .parsing import extract_product_code  # noqa: PLC0415
+
+    add(extract_product_code(upper))
+    for match in re.finditer(r"([A-Z]+)([0-9]{4,6}-[0-9]{2,4})", upper):
+        letters, numeric = match.groups()
+        for suffix_len in (2, 1):
+            if len(letters) >= suffix_len:
+                add(f"{letters[-suffix_len:]}{numeric}")
+    return candidates
+
+
+def _add_entries(
+    out: list[SectionIndexEntry], seen_sections: set[str], entries: list[SectionIndexEntry]
+) -> None:
+    for entry in entries:
+        if entry.section_id in seen_sections:
+            continue
+        out.append(entry)
+        seen_sections.add(entry.section_id)
+
+
+def _knowledge_hash_for(manifest: KnowledgeManifest, product_codes: list[str]) -> str:
+    for code in product_codes:
+        product_hash = manifest.product_hash(code)
+        if product_hash:
+            return product_hash
+    return ""
 
 
 def _mtime(path: str) -> float:

@@ -277,6 +277,41 @@ class TestRfcRetriever:
                 f"No RFC match for {code}"
             )
 
+    def test_prefixed_runtime_product_code_uses_canonical_suffix(self, tmp_path):
+        """AAN32828-201 from logs should retrieve N32828-201 knowledge."""
+        store = _store(tmp_path)
+        rfc_section = KnowledgeSection(
+            section_id="RFC-s000",
+            doc_id="RFC",
+            product_code="N32828-201",
+            product_family_code="N32828",
+            category="rfc_knowledge",
+            heading="Functional Test RFC — 20V Test",
+            summary="20V Test failed with Disaster : Reading 20V failed!",
+            known_failures=[
+                KnownFailureEntry(
+                    failing_step="20V Test",
+                    log_signature="Disaster : Reading 20V failed!",
+                    corrective_action="Unplug and replug the USB cable. Re-run the TP.",
+                )
+            ],
+            source_filename="N32828-201_RFC.xlsx",
+        )
+        _write(store, [rfc_section])
+        retriever = LexicalKnowledgeRetriever(store)
+
+        ctx = retriever.retrieve(
+            _rec(
+                "AAN32828-201",
+                failing_step="20V MPDU PDB1 FT",
+                error_message="INFO  - Disaster : Reading 20V failed!",
+            )
+        )
+
+        assert ctx.match_status == "matched"
+        assert ctx.knowledge_hash == "h_N32828-201"
+        assert ctx.matched_section_ids == ["RFC-s000"]
+
     def test_format_match_includes_rfc_ids(self, tmp_path):
         """Formatted context must expose RFC IDs and notes for LLM prompts."""
         from app.knowledge.retriever import _format_match
