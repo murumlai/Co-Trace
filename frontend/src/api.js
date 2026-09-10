@@ -59,6 +59,8 @@ export const api = {
   knowledgeScan: () => request('/api/knowledge/scan'),
   knowledgeSections: (product) =>
     request(`/api/knowledge/sections${product ? `?product=${encodeURIComponent(product)}` : ''}`),
+  knowledgeUploadCheck: (filename) =>
+    request(`/api/knowledge/upload/check?filename=${encodeURIComponent(filename)}`),
   knowledgeJob: (jobId) => request(`/api/knowledge/jobs/${jobId}`),
   knowledgeRebuild: () => request('/api/knowledge/rebuild', { method: 'POST' }),
   knowledgeUpload: (formData, options = {}) =>

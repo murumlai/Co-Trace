@@ -36,6 +36,7 @@ export default function Knowledge() {
   const [sections, setSections] = useState([])
   const [openProduct, setOpenProduct] = useState(null)
   const [job, setJob] = useState(null)
+  const [duplicateUpload, setDuplicateUpload] = useState(null)
   const fileInput = useRef(null)
 
   const load = async () => {
@@ -90,14 +91,25 @@ export default function Knowledge() {
       log('info', 'Knowledge rebuilt')
     })
 
-  const upload = (event) => {
+  const upload = async (event) => {
     const file = event.target.files?.[0]
     if (!file) return
     event.target.value = ''
-    uploadDocument(file)
+    setError('')
+    setNotice('')
+    try {
+      const duplicate = await api.knowledgeUploadCheck(file.name)
+      if (duplicate.exists) {
+        setDuplicateUpload({ file, duplicate })
+        return
+      }
+      uploadDocument(file)
+    } catch (err) {
+      setError(err.message)
+    }
   }
 
-  const uploadDocument = async (file) => {
+  const uploadDocument = async (file, duplicatePolicy = 'error', successMessage = null) => {
     setBusy('upload')
     setError('')
     setNotice('')
@@ -109,13 +121,47 @@ export default function Knowledge() {
     try {
       const form = new FormData()
       form.append('file', file)
+      form.append('duplicate_policy', duplicatePolicy)
       const started = await api.knowledgeUpload(form)
+      if (!started.job_id) {
+        setJob(null)
+        setNotice(started.message || `Kept existing ${started.filename || file.name}.`)
+        await load()
+        setBusy('')
+        return
+      }
       if (started.job) setJob(started.job)
-      await pollKnowledgeJob(started.job_id, `Uploaded and ingested ${file.name}.`)
+      await pollKnowledgeJob(started.job_id, successMessage || `Uploaded and ingested ${file.name}.`)
     } catch (err) {
       setError(err.message)
       setBusy('')
     }
+  }
+
+  const replaceDuplicateUpload = () => {
+    const pending = duplicateUpload
+    if (!pending) return
+    setDuplicateUpload(null)
+    uploadDocument(
+      pending.file,
+      'replace',
+      `Replaced and ingested ${pending.duplicate.filename || pending.file.name}.`,
+    )
+  }
+
+  const keepDuplicateUpload = () => {
+    const pending = duplicateUpload
+    if (!pending) return
+    setDuplicateUpload(null)
+    if (pending.duplicate.knowledge_exists) {
+      setNotice(`Kept existing ${pending.duplicate.filename}; knowledge is already extracted.`)
+      return
+    }
+    uploadDocument(
+      pending.file,
+      'keep',
+      `Kept existing ${pending.duplicate.filename} and ingested it.`,
+    )
   }
 
   const pollKnowledgeJob = async (jobId, successMessage) => {
@@ -232,6 +278,15 @@ export default function Knowledge() {
 
       {busy && <KnowledgeProgress busy={busy} job={job} />}
 
+      {duplicateUpload && (
+        <DuplicateUploadDialog
+          duplicate={duplicateUpload.duplicate}
+          onReplace={replaceDuplicateUpload}
+          onKeep={keepDuplicateUpload}
+          onCancel={() => setDuplicateUpload(null)}
+        />
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <StatCard label="Products" value={products.length} />
         <StatCard label="Documents" value={documents.length} />
@@ -345,6 +400,40 @@ export default function Knowledge() {
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+function DuplicateUploadDialog({ duplicate, onReplace, onKeep, onCancel }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4 py-6">
+      <Panel
+        className="w-full max-w-lg border-border-strong bg-surface p-5 shadow-xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="duplicate-upload-title"
+      >
+        <h2 id="duplicate-upload-title" className="font-display text-xl font-bold text-ink">
+          File already exists
+        </h2>
+        <p className="mt-2 text-sm text-muted">
+          {duplicate.filename} is already in the product documents folder.
+        </p>
+        <div className="mt-4 rounded-lg border border-border bg-surface-2/60 p-3 text-sm">
+          <div className="flex flex-wrap gap-2">
+            {duplicate.category && categoryBadge(duplicate.category)}
+            {duplicate.product_code && <Badge tone="accent" dot={false}>{duplicate.product_code}</Badge>}
+            <Badge tone={duplicate.knowledge_exists ? 'pass' : 'warn'} dot={false}>
+              {duplicate.knowledge_exists ? 'Knowledge extracted' : 'Knowledge missing'}
+            </Badge>
+          </div>
+        </div>
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <Button onClick={onCancel}>Cancel</Button>
+          <Button onClick={onKeep}>Keep old file</Button>
+          <Button variant="primary" onClick={onReplace}>Replace file</Button>
+        </div>
+      </Panel>
     </div>
   )
 }

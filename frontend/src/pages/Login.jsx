@@ -8,13 +8,16 @@ const AUTH_ERROR_COPY = {
   oauth_failed: 'GitHub sign-in failed. Please try again.',
 }
 
+const DEFAULT_ADMIN_USERNAME = 'admin'
+const DEFAULT_ADMIN_PASSWORD = 'admin'
+
 export default function Login() {
   const { login, adminLogin, sessionExpired, clearSessionNotice } = useAuth()
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [showAdmin, setShowAdmin] = useState(false)
-  const [adminUser, setAdminUser] = useState('')
-  const [adminPass, setAdminPass] = useState('')
+  const [adminUser, setAdminUser] = useState(DEFAULT_ADMIN_USERNAME)
+  const [adminPass, setAdminPass] = useState(DEFAULT_ADMIN_PASSWORD)
 
   const oauthError = useMemo(() => {
     const params = new URLSearchParams(window.location.search)

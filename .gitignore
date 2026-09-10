@@ -47,6 +47,7 @@ Log_Files_Folder/
 product_knowledge.json
 product_knowledge_index.json
 product_knowledge_sections.jsonl
+Product_Docs/
 product_docs/
 
 # Authoritative acronym glossary — may contain proprietary product terminology.

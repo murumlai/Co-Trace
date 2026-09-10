@@ -135,7 +135,7 @@ Most-used environment variables:
 | `DEBUG_EXCERPT_CHAR_BUDGET` | `6000` | Max characters in failed-unit DebugLog excerpt. |
 | `PRODUCT_KNOWLEDGE_ENABLED` | `1` | Enables product-aware diagnosis (curated summaries in prompts). |
 | `PRODUCT_KNOWLEDGE_SUMMARY_MODEL` | `gpt-5.4-mini` | Model that summarizes product docs at ingestion (LLM required). |
-| `PRODUCT_KNOWLEDGE_SOURCE_DIRS` | `Log_Files_Folder`, `product_docs` | Folders scanned for supporting PDF/DOCX/XLSX docs (`os.pathsep`-joined). |
+| `PRODUCT_KNOWLEDGE_SOURCE_DIRS` | `Log_Files_Folder`, `Product_Docs` | Folders scanned for supporting PDF/DOCX/XLSX docs (`os.pathsep`-joined). |
 
 See [backend/app/config.py](backend/app/config.py) for the full settings list and defaults.
 
@@ -147,7 +147,7 @@ Diagnosis can be grounded in curated product context. Supporting PDF/DOCX/XLSX d
 ingested once into a repo-root knowledge pack; at runtime only a few matched
 summaries (never whole documents) are sent alongside the redacted failure excerpt.
 
-- **Add docs**: drop them in `product_docs/` / `Product_Docs/` or `Log_Files_Folder/`, or upload from the **Knowledge** tab (admin). Upload saves the source file, then rebuilds the generated pack from all configured source docs plus the upload folder.
+- **Add docs**: drop them in `Product_Docs/` or `Log_Files_Folder/`, or upload from the **Knowledge** tab (admin). If an uploaded filename already exists in `Product_Docs/`, choose whether to replace it or keep the old file; keeping an already-ingested file does no extra work.
 - **Ingestion**: sections are summarized by `gpt-5.4-mini` (LLM required). Generated artifacts (`product_knowledge*.json`, `*_sections.jsonl`) live at the repo root, are gitignored, and store only curated summaries, never raw document text.
 - **Remove/rebuild**: **Remove from pack** prunes only generated knowledge artifacts and preserves the source document. Rebuild from the Knowledge tab or `backend/scripts/build_product_knowledge.py`; changing knowledge invalidates stale diagnoses through the product/knowledge hash.
 

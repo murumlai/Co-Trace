@@ -426,10 +426,50 @@ def _knowledge_status(store: Any) -> dict:
     }
 
 
+def _uploaded_document_state(filename: str, store: Any) -> dict:
+    safe_filename = _sanitize_filename(filename)
+    dest = os.path.join(settings.PRODUCT_KNOWLEDGE_DOCS_DIR, safe_filename)
+    exists = os.path.isfile(dest)
+    doc_id = None
+    product_code = None
+    category = None
+    size_bytes = 0
+    knowledge_exists = False
+    if exists:
+        doc = parsing.describe_document(dest, source_root=settings.PRODUCT_KNOWLEDGE_DOCS_DIR)
+        doc_id = doc.doc_id
+        product_code = doc.product_code
+        category = doc.category
+        size_bytes = doc.size_bytes
+        manifest = store.load_manifest()
+        knowledge_exists = bool(
+            manifest and any(meta.doc_id == doc.doc_id for meta in manifest.documents)
+        )
+    return {
+        "filename": safe_filename,
+        "exists": exists,
+        "knowledge_exists": knowledge_exists,
+        "doc_id": doc_id,
+        "product_code": product_code,
+        "category": category,
+        "size_bytes": size_bytes,
+    }
+
+
 @app.get("/api/knowledge")
 def knowledge_status(user: str = Depends(require_user),  # noqa: ARG001
                      store: Any = Depends(get_knowledge_store)) -> dict:
     return _knowledge_status(store)
+
+
+@app.get("/api/knowledge/upload/check")
+def knowledge_upload_check(filename: str,
+                           user: AuthenticatedUser = Depends(require_admin),  # noqa: ARG001
+                           store: Any = Depends(get_knowledge_store)) -> dict:
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext not in _ALLOWED_DOC_EXTS:
+        raise HTTPException(400, f"Unsupported document type: {ext or 'unknown'} (PDF/DOCX/XLSX only)")
+    return _uploaded_document_state(filename, store)
 
 
 @app.get("/api/knowledge/scan")
@@ -519,15 +559,43 @@ def delete_acronym(acronym: str, product: str | None = None,
 async def knowledge_upload(
     background: BackgroundTasks,
     file: UploadFile = File(...),
+    duplicate_policy: str = Form("error"),
     user: AuthenticatedUser = Depends(require_admin),  # noqa: ARG001
     ingestion: Any = Depends(get_knowledge_ingestion),
     retriever: Any = Depends(get_knowledge_retriever),
+    store: Any = Depends(get_knowledge_store),
 ) -> dict:
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in _ALLOWED_DOC_EXTS:
         raise HTTPException(400, f"Unsupported document type: {ext or 'unknown'} (PDF/DOCX/XLSX only)")
     os.makedirs(settings.PRODUCT_KNOWLEDGE_DOCS_DIR, exist_ok=True)
-    dest = os.path.join(settings.PRODUCT_KNOWLEDGE_DOCS_DIR, _sanitize_filename(file.filename))
+    existing = _uploaded_document_state(file.filename or "", store)
+    policy = (duplicate_policy or "error").strip().lower()
+    if policy not in {"error", "replace", "keep"}:
+        raise HTTPException(400, "duplicate_policy must be one of: error, replace, keep")
+    dest = os.path.join(settings.PRODUCT_KNOWLEDGE_DOCS_DIR, existing["filename"])
+    if existing["exists"] and policy == "error":
+        raise HTTPException(409, f"{existing['filename']} already exists in the product-docs folder.")
+    if existing["exists"] and policy == "keep":
+        await file.close()
+        if existing["knowledge_exists"]:
+            return {
+                "filename": existing["filename"],
+                "job_id": None,
+                "job": None,
+                "kept_existing": True,
+                "knowledge_exists": True,
+                "message": f"Kept existing {existing['filename']}; knowledge already exists.",
+            }
+        job = _create_knowledge_job("upload", existing["filename"])
+        background.add_task(_run_uploaded_document_knowledge_job, job["job_id"], ingestion, retriever, dest)
+        return {
+            "filename": existing["filename"],
+            "job_id": job["job_id"],
+            "job": job,
+            "kept_existing": True,
+            "knowledge_exists": False,
+        }
     size = 0
     limit = settings.PRODUCT_KNOWLEDGE_UPLOAD_MAX_BYTES
     try:
@@ -546,7 +614,12 @@ async def knowledge_upload(
     log.info("Product doc uploaded: %s (%s bytes).", os.path.basename(dest), size)
     job = _create_knowledge_job("upload", os.path.basename(dest))
     background.add_task(_run_uploaded_document_knowledge_job, job["job_id"], ingestion, retriever, dest)
-    return {"filename": os.path.basename(dest), "job_id": job["job_id"], "job": job}
+    return {
+        "filename": os.path.basename(dest),
+        "job_id": job["job_id"],
+        "job": job,
+        "replaced_existing": existing["exists"] and policy == "replace",
+    }
 
 
 @app.get("/api/knowledge/jobs/{job_id}")

@@ -130,12 +130,12 @@ class Settings:
     PRODUCT_KNOWLEDGE_SOURCE_DIRS: list[str] = [
         p for p in os.getenv(
             "PRODUCT_KNOWLEDGE_SOURCE_DIRS",
-            os.pathsep.join([_repo_path("Log_Files_Folder"), _repo_path("product_docs")]),
+            os.pathsep.join([_repo_path("Log_Files_Folder"), _repo_path("Product_Docs")]),
         ).split(os.pathsep) if p.strip()
     ]
     # Curated-docs folder used by the Knowledge UI upload route.
     PRODUCT_KNOWLEDGE_DOCS_DIR: str = os.getenv(
-        "PRODUCT_KNOWLEDGE_DOCS_DIR", _repo_path("product_docs")
+        "PRODUCT_KNOWLEDGE_DOCS_DIR", _repo_path("Product_Docs")
     )
     # Filename globs treated as supported source documents.
     PRODUCT_KNOWLEDGE_SCAN_GLOBS: list[str] = [

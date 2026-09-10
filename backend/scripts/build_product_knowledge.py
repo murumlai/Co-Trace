@@ -1,6 +1,6 @@
 """Rebuild the repo-root product-knowledge pack from supporting documents.
 
-Scans the configured source folders (``Log_Files_Folder`` and ``product_docs``
+Scans the configured source folders (``Log_Files_Folder`` and ``Product_Docs``
 by default), extracts and summarizes PDF/DOCX product docs with GPT 5.4-mini,
 and writes the three generated artifacts:
 
@@ -14,7 +14,7 @@ fast if none is available.
 Usage (from the repo root, with the backend venv active)::
 
     python backend/scripts/build_product_knowledge.py
-    python backend/scripts/build_product_knowledge.py --source-dir product_docs
+    python backend/scripts/build_product_knowledge.py --source-dir Product_Docs
     python backend/scripts/build_product_knowledge.py --source-dir A --source-dir B
 """
 from __future__ import annotations
