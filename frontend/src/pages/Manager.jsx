@@ -42,7 +42,7 @@ function ChartCard({ title, subtitle, children }) {
   )
 }
 
-export default function Manager({ jobId }) {
+export default function Manager({ jobId, onDrillDown }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -145,11 +145,17 @@ export default function Manager({ jobId }) {
           </ResponsiveContainer>
           <ul className="mt-4 space-y-1.5 text-sm">
             {data.pareto.slice(0, 5).map((p) => (
-              <li key={p.reason} className="flex justify-between gap-4">
+              <li key={p.signature}>
+                <button
+                  type="button"
+                  onClick={() => onDrillDown({ signature: p.signature, label: p.reason })}
+                  className="flex w-full justify-between gap-4 rounded-md px-1 py-1 text-left hover:bg-surface-2 focus-ring"
+                >
                 <span className="truncate text-ink-2">{p.reason}</span>
                 <span className="shrink-0 text-muted">
                   {p.count} · <span className="text-ink font-medium">{p.pct}%</span>
                 </span>
+                </button>
               </li>
             ))}
           </ul>
@@ -166,6 +172,24 @@ export default function Manager({ jobId }) {
               <Bar dataKey="fail" name="Fail" stackId="a" fill={DANGER} radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
+          <ul className="mt-4 space-y-1.5 text-sm">
+            {data.stations.map((station) => (
+              <li key={`${station.host || ''}:${station.station_id || ''}`}>
+                <button
+                  type="button"
+                  onClick={() => onDrillDown({
+                    station_id: station.station_id,
+                    host: station.host,
+                    label: station.station,
+                  })}
+                  className="flex w-full justify-between gap-4 rounded-md px-1 py-1 text-left hover:bg-surface-2 focus-ring"
+                >
+                  <span className="truncate text-ink-2">{station.station}</span>
+                  <span className="shrink-0 text-muted">{station.fail} fails</span>
+                </button>
+              </li>
+            ))}
+          </ul>
         </ChartCard>
 
         <ChartCard title="Lot-to-lot comparison" subtitle="Yield by lot">
@@ -181,7 +205,18 @@ export default function Manager({ jobId }) {
               </thead>
               <tbody>
                 {data.lots.map((l) => (
-                  <tr key={l.lot} className="text-ink border-b border-border/60 last:border-0">
+                  <tr
+                    key={l.lot}
+                    className="cursor-pointer text-ink border-b border-border/60 last:border-0 hover:bg-surface-2"
+                    onClick={() => onDrillDown({ lot_id: l.lot, label: l.lot })}
+                    tabIndex={0}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        onDrillDown({ lot_id: l.lot, label: l.lot })
+                      }
+                    }}
+                  >
                     <td className="py-2 truncate">{l.lot}</td>
                     <td className="py-2 text-right text-teal">{l.pass}</td>
                     <td className="py-2 text-right text-danger">{l.fail}</td>

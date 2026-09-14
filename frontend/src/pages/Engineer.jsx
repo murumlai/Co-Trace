@@ -105,7 +105,7 @@ const compareGroups = (sortBy) => (left, right) => {
   )
 }
 
-export default function Engineer({ jobId }) {
+export default function Engineer({ jobId, drillDown, onClearDrillDown }) {
   const { isAdmin } = useAuth()
   const [units, setUnits] = useState([])
   const [clusters, setClusters] = useState([])
@@ -137,6 +137,10 @@ export default function Engineer({ jobId }) {
       },
     )
   }, [jobId])
+
+  useEffect(() => {
+    if (drillDown?.signature) setActiveSignature(drillDown.signature)
+  }, [drillDown])
 
   const counts = useMemo(() => {
     const c = { all: units.length, fail: 0, retry_pass: 0, first_pass: 0, unknown: 0 }
@@ -231,16 +235,53 @@ export default function Engineer({ jobId }) {
           const matchesSignature =
             !activeSignature ||
             unit.failures?.some((failure) => failure.signature === activeSignature)
+          const matchesStation =
+            !drillDown?.station_id ||
+            groupAttempts(unit).some(
+              (attempt) =>
+                attempt.station_id === drillDown.station_id &&
+                (!drillDown.host || attempt.host === drillDown.host),
+            )
+          const matchesLot =
+            !drillDown?.lot_id ||
+            groupAttempts(unit).some((attempt) => attempt.lot_id === drillDown.lot_id)
           return (
             matchesClass &&
             matchesSerial &&
             matchesSignature &&
+            matchesStation &&
+            matchesLot &&
             groupMatchesSearch(unit, searchQuery)
           )
         })
         .sort(compareGroups(sortBy)),
-    [activeSignature, filter, searchQuery, serialFilter, sortBy, units],
+    [activeSignature, drillDown, filter, searchQuery, serialFilter, sortBy, units],
   )
+
+  const drillDownStats = useMemo(() => {
+    if (!drillDown) return null
+    const matchesAttempt = (attempt) => {
+      if (drillDown.signature) return attempt.signature === drillDown.signature
+      if (drillDown.station_id) {
+        return (
+          attempt.station_id === drillDown.station_id &&
+          (!drillDown.host || attempt.host === drillDown.host)
+        )
+      }
+      return attempt.lot_id === drillDown.lot_id
+    }
+    const matchingUnits = units.filter((unit) => groupAttempts(unit).some(matchesAttempt))
+    const attempts = matchingUnits.reduce(
+      (total, unit) => total + groupAttempts(unit).filter(matchesAttempt).length,
+      0,
+    )
+    return { attempts, units: matchingUnits.length }
+  }, [drillDown, units])
+
+  const clearDrillDown = () => {
+    if (drillDown?.signature) setActiveSignature(null)
+    onClearDrillDown?.()
+  }
 
   // A re-analysis returns a single failing attempt; splice it back into the
   // group that owns it.
@@ -366,11 +407,28 @@ export default function Engineer({ jobId }) {
         <ClusterPanel
           clusters={clusters}
           activeSignature={activeSignature}
-          onSelect={setActiveSignature}
+          onSelect={(signature) => {
+            onClearDrillDown?.()
+            setActiveSignature(signature)
+          }}
         />
       )}
 
-      {activeSignature && (
+      {drillDown && drillDownStats && (
+        <div className="mb-4 flex items-center gap-3">
+          <Badge tone="accent">
+            From Manager: {drillDown.label || 'selection'} · {drillDownStats.attempts} attempt{drillDownStats.attempts === 1 ? '' : 's'}
+            {drillDownStats.attempts !== drillDownStats.units
+              ? ` across ${drillDownStats.units} units`
+              : ''}
+          </Badge>
+          <Button variant="ghost" className="px-2 py-1" onClick={clearDrillDown}>
+            Clear
+          </Button>
+        </div>
+      )}
+
+      {activeSignature && !drillDown && (
         <div className="mb-4 flex items-center gap-3">
           <Badge tone="accent">
             Failure family: {clusters.find((cluster) => cluster.signature === activeSignature)?.error_code || activeSignature}
@@ -465,7 +523,7 @@ export default function Engineer({ jobId }) {
       ) : shown.length === 0 ? (
         <Card className="p-10 text-center text-muted">
           <p>No units match the current search and filters.</p>
-          {(searchQuery || filter !== 'all' || serialFilter !== 'all' || activeSignature) && (
+          {(searchQuery || filter !== 'all' || serialFilter !== 'all' || activeSignature || drillDown) && (
             <Button
               variant="ghost"
               className="mt-3"
@@ -473,6 +531,7 @@ export default function Engineer({ jobId }) {
                 setSearchQuery('')
                 setClassFilter('all')
                 setActiveSignature(null)
+                onClearDrillDown?.()
               }}
             >
               Clear search and filters

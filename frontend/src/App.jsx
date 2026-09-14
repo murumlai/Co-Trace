@@ -30,6 +30,7 @@ function Shell() {
   const [batchRunning, setBatchRunning] = useState(false)
   const [batchProgress, setBatchProgress] = useState(null)
   const [batchError, setBatchError] = useState('')
+  const [engineerDrillDown, setEngineerDrillDown] = useState(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [warnings, setWarnings] = useState([])
   const [llmMetrics, setLlmMetrics] = useState(null)
@@ -58,6 +59,7 @@ function Shell() {
 
   const onJobReady = (id, jobWarnings = []) => {
     setJobId(id)
+    setEngineerDrillDown(null)
     setWarnings(jobWarnings)
     setTab('engineer')
     log('info', 'Job ready', { jobId: id, warningCount: jobWarnings.length })
@@ -153,6 +155,12 @@ function Shell() {
     } catch (err) {
       setBatchError(err.message)
     }
+  }
+
+  const openEngineerDrillDown = (filter) => {
+    setEngineerDrillDown(filter)
+    setTab('engineer')
+    setMenuOpen(false)
   }
 
   const NavButton = ({ id, label }) => {
@@ -308,8 +316,14 @@ function Shell() {
             setFiles={setSelectedFiles}
           />
         )}
-        {tab === 'engineer' && <Engineer jobId={jobId} />}
-        {tab === 'manager' && <Manager jobId={jobId} />}
+        {tab === 'engineer' && (
+          <Engineer
+            jobId={jobId}
+            drillDown={engineerDrillDown}
+            onClearDrillDown={() => setEngineerDrillDown(null)}
+          />
+        )}
+        {tab === 'manager' && <Manager jobId={jobId} onDrillDown={openEngineerDrillDown} />}
         {tab === 'knowledge' && <Knowledge />}
         {tab === 'about' && <About />}
       </main>

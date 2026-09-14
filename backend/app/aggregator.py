@@ -140,19 +140,23 @@ def compute_failure_clusters(records: list[UnitRecord]) -> list[dict]:
 
 
 def compute_station_breakdown(records: list[UnitRecord]) -> list[dict]:
-    buckets: dict[str, dict[str, int]] = defaultdict(lambda: {"pass": 0, "fail": 0})
+    buckets: dict[tuple[str | None, str | None], dict[str, int]] = defaultdict(
+        lambda: {"pass": 0, "fail": 0}
+    )
     for r in records:
-        key = f"{r.host or 'unknown'} / ST{r.station_id or '?'}"
+        key = (r.station_id, r.host)
         if r.result == "PASS":
             buckets[key]["pass"] += 1
         elif r.result == "FAIL":
             buckets[key]["fail"] += 1
     out = []
-    for key in sorted(buckets):
-        p, f = buckets[key]["pass"], buckets[key]["fail"]
+    for station_id, host in sorted(buckets, key=lambda key: (key[1] or "", key[0] or "")):
+        p, f = buckets[(station_id, host)]["pass"], buckets[(station_id, host)]["fail"]
         tot = p + f
         out.append({
-            "station": key,
+            "station": f"{host or 'unknown'} / ST{station_id or '?'}",
+            "station_id": station_id,
+            "host": host,
             "pass": p,
             "fail": f,
             "total": tot,

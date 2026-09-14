@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.aggregator import compute_failure_clusters, compute_pareto
+from app.aggregator import compute_failure_clusters, compute_pareto, compute_station_breakdown
 from app.models import UnitRecord
 from app.record_views import signature_for
 
@@ -71,3 +71,13 @@ def test_clusters_sort_by_count_then_latest_failure() -> None:
 
 def test_clusters_handle_empty_batch() -> None:
     assert compute_failure_clusters([]) == []
+
+
+def test_station_breakdown_exposes_drill_down_keys() -> None:
+    record = _failure("u1", "SN1", "Family A", "2026-01-01T10:00:00")
+    record.host = "tester-01"
+
+    station = compute_station_breakdown([record])[0]
+
+    assert station["station_id"] == "ST1"
+    assert station["host"] == "tester-01"
