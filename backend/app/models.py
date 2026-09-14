@@ -289,6 +289,35 @@ class FrontendLogRequest(BaseModel):
     context: dict = Field(default_factory=dict)
 
 
+FeedbackAction = Literal["helpful", "not_helpful", "fixed_after_action", "not_root_cause"]
+
+
+class FeedbackCreateRequest(BaseModel):
+    unit_id: str
+    action: FeedbackAction
+    note: Optional[str] = Field(default=None, max_length=2000)
+
+
+class FeedbackEntry(BaseModel):
+    feedback_id: str
+    job_id: str
+    owner_id: str
+    owner_login: str
+    unit_id: str
+    signature: Optional[str] = None
+    cache_key: Optional[str] = None
+    product_code: Optional[str] = None
+    op_id: Optional[str] = None
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    failing_step: Optional[str] = None
+    analysis_source: Optional[str] = None
+    action: FeedbackAction
+    note: Optional[str] = None
+    created_at: str
+    expires_at: float
+
+
 class AcronymUpsertRequest(BaseModel):
     """Create/update a glossary entry from the review UI."""
 

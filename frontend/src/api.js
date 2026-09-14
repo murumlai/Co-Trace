@@ -55,6 +55,9 @@ export const api = {
     if (signature) params.set('signature', signature)
     return request(`/api/jobs/${jobId}/debug-packet?${params}`, { responseType: 'text' })
   },
+  feedback: (jobId) => request(`/api/jobs/${jobId}/feedback`),
+  createFeedback: (jobId, payload) =>
+    request(`/api/jobs/${jobId}/feedback`, { method: 'POST', body: payload }),
   reanalyze: (jobId, unitId) =>
     request(`/api/jobs/${jobId}/units/${unitId}/reanalyze`, { method: 'POST' }),
   manager: (jobId) => request(`/api/jobs/${jobId}/manager`),

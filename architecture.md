@@ -146,6 +146,38 @@ graph TB
     UploadStore --> WorkDir
 ```
 
+## Approved Debug Memory Extension
+
+The generated knowledge pack cannot own engineer feedback or admin-authored playbooks. Feedback
+must survive a page/job reload, while `KnowledgeService.rebuild()` replaces every generated
+`KnowledgeSection` and would erase playbooks that did not originate in a source document. Two
+small file-backed stores therefore sit beside, rather than inside, the generated pack.
+
+```mermaid
+flowchart LR
+        UI[Engineer / Knowledge UI] --> API[FastAPI routes]
+        API -->|owned job only| Feedback[FeedbackStore protocol]
+        API -->|admin CRUD| Playbooks[PlaybookStore protocol]
+        Feedback --> FDisk[(feedback.json)]
+        Playbooks --> PDisk[(admin_playbooks.json)]
+        Analyzer -->|reviewed exact match first| Playbooks
+        Analyzer -->|no playbook| Cache[Analysis cache]
+        Cache -->|miss| LLM[Copilot]
+        Retriever[Knowledge retriever] --> Docs[(generated document knowledge)]
+        Retriever --> Playbooks
+```
+
+- Both stores use the existing lock plus atomic JSON replacement pattern and are injected from
+    `dependencies.py` behind narrow protocols.
+- Feedback routes require the existing job-ownership check. Notes are redacted and bounded on
+    write; stored failure metadata is an explicit whitelist. Entries expire with the owning job's
+    configured TTL and are never exposed across owners.
+- Playbook mutation is admin-only. Entries are retained as `draft`, `reviewed`, or `retired` and
+    are not deleted by knowledge rebuild or document deletion.
+- Analysis precedence is reviewed playbook, in-job cache, disk cache, then Copilot. Playbook
+    results are deterministic and are never written to the analysis cache, so retirement takes
+    effect without cache cleanup.
+
 ## Analysis Request Flow
 
 ```mermaid

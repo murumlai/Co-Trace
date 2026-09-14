@@ -87,6 +87,7 @@ class Settings:
     FRONTEND_LOG_MAX_CONTEXT_CHARS: int = int(os.getenv("FRONTEND_LOG_MAX_CONTEXT_CHARS", "4000"))
     ANALYSIS_CACHE_ENABLED: bool = _env_flag("ANALYSIS_CACHE_ENABLED", True)
     ANALYSIS_CACHE_FILE: str = os.getenv("ANALYSIS_CACHE_FILE", os.path.join(WORK_DIR, "analysis_cache.json"))
+    FEEDBACK_STORE_FILE: str = os.getenv("FEEDBACK_STORE_FILE", os.path.join(WORK_DIR, "feedback.json"))
     UPLOAD_ZIP_MAX_FILES: int = int(os.getenv("UPLOAD_ZIP_MAX_FILES", "20000"))
     UPLOAD_ZIP_MAX_TOTAL_BYTES: int = int(os.getenv("UPLOAD_ZIP_MAX_TOTAL_BYTES", str(2 * 1024 * 1024 * 1024)))
     UPLOAD_ZIP_MAX_FILE_BYTES: int = int(os.getenv("UPLOAD_ZIP_MAX_FILE_BYTES", str(512 * 1024 * 1024)))

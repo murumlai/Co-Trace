@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
 
@@ -31,6 +32,7 @@ from .dependencies import (
     get_analysis_cache,
     get_analyzer_service,
     get_acronym_glossary_store,
+    get_feedback_store,
     get_knowledge_ingestion,
     get_knowledge_retriever,
     get_knowledge_store,
@@ -40,7 +42,8 @@ from .dependencies import (
 from .knowledge import parsing
 from .knowledge.summarizer import ProductKnowledgeError, is_llm_backend_available
 from .logging_config import setup_backend_logging, write_frontend_log
-from .models import AcronymUpsertRequest, AdminLoginRequest, FrontendLogRequest
+from .models import AcronymUpsertRequest, AdminLoginRequest, FeedbackCreateRequest, FeedbackEntry, FrontendLogRequest
+from .redaction import redact
 from .record_views import build_debug_packet, group_units_by_serial
 from .upload_storage import UploadStorageError, save_uploads
 
@@ -357,6 +360,47 @@ def debug_packet(job_id: str, unit_id: str | None = None, signature: str | None 
         media_type="text/markdown",
         headers={"Content-Disposition": 'attachment; filename="co-trace-debug-packet.md"'},
     )
+
+
+@app.get("/api/jobs/{job_id}/feedback")
+def list_feedback(job_id: str, user: AuthenticatedUser = Depends(require_user),
+                  reg: Any = Depends(get_registry),
+                  store: Any = Depends(get_feedback_store)) -> dict:
+    _get_owned_job(job_id, user, reg)
+    entries = store.list_for_job(job_id, user.github_id)
+    return {"entries": [entry.model_dump() for entry in entries]}
+
+
+@app.post("/api/jobs/{job_id}/feedback")
+def create_feedback(req: FeedbackCreateRequest, job_id: str,
+                    user: AuthenticatedUser = Depends(require_user),
+                    reg: Any = Depends(get_registry),
+                    store: Any = Depends(get_feedback_store)) -> dict:
+    job = _get_owned_job(job_id, user, reg)
+    record = next((item for item in job.records if item.unit_id == req.unit_id), None)
+    if record is None or record.result != "FAIL":
+        raise HTTPException(404, "Failed attempt not found")
+    entry = FeedbackEntry(
+        feedback_id=uuid.uuid4().hex,
+        job_id=job_id,
+        owner_id=user.github_id,
+        owner_login=user.login,
+        unit_id=record.unit_id,
+        signature=record.signature,
+        cache_key=record.analysis_cache_key,
+        product_code=record.product_code,
+        op_id=record.op_id,
+        error_code=record.error_code,
+        error_message=redact(record.error_message)[:500] or None,
+        failing_step=record.failing_step,
+        analysis_source=record.analysis_source,
+        action=req.action,
+        note=redact(req.note)[:2000] or None,
+        created_at=datetime.now(timezone.utc).isoformat(),
+        expires_at=job.created_at + settings.JOB_TTL_S,
+    )
+    store.add(entry)
+    return entry.model_dump()
 
 
 @app.post("/api/jobs/{job_id}/units/{unit_id}/reanalyze")

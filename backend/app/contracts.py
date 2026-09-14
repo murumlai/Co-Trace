@@ -194,6 +194,16 @@ class AnalysisCache(Protocol):
         ...
 
 
+class FeedbackStore(Protocol):
+    """Persists redacted engineer feedback scoped to job owners."""
+
+    def add(self, entry: Any) -> Any:
+        ...
+
+    def list_for_job(self, job_id: str, owner_id: str) -> list[Any]:
+        ...
+
+
 class FailureAnalyzer(Protocol):
     """Orchestrates per-job failure analysis using a cache and LLM provider."""
 

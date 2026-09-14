@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from .analysis_cache import DiskAnalysisCache
 from .analyzer import AnalyzerService
+from .feedback_store import DiskFeedbackStore
 from .job_registry import JobRegistry, registry as _registry
 from .knowledge.acronym_glossary import AcronymGlossaryService, AcronymGlossaryStore
 from .knowledge.retriever import LexicalKnowledgeRetriever
@@ -20,6 +21,7 @@ from .orchestrator import JobOrchestrator, _default_orchestrator as _orchestrato
 # ---------------------------------------------------------------------------
 
 _analysis_cache = DiskAnalysisCache()
+_feedback_store = DiskFeedbackStore()
 _knowledge_store = KnowledgeStore()
 _knowledge_retriever = LexicalKnowledgeRetriever(_knowledge_store)
 _knowledge_ingestion = KnowledgeIngestionService(_knowledge_store)
@@ -59,6 +61,11 @@ def get_analyzer_service() -> AnalyzerService:
 def get_analysis_cache() -> DiskAnalysisCache:
     """Provide the disk-backed analysis cache adapter."""
     return _analysis_cache
+
+
+def get_feedback_store() -> DiskFeedbackStore:
+    """Provide the owner-scoped engineer feedback store."""
+    return _feedback_store
 
 
 def get_knowledge_retriever() -> LexicalKnowledgeRetriever:

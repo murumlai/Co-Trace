@@ -114,6 +114,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
   const { isAdmin } = useAuth()
   const [units, setUnits] = useState([])
   const [clusters, setClusters] = useState([])
+  const [feedbackEntries, setFeedbackEntries] = useState([])
   const [runCount, setRunCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
@@ -128,16 +129,22 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
   const [clearingCache, setClearingCache] = useState(null)
   const [clearingAll, setClearingAll] = useState(false)
   const [exporting, setExporting] = useState(null)
+  const [feedbackBusy, setFeedbackBusy] = useState(null)
   const [actionError, setActionError] = useState('')
 
   useEffect(() => {
     if (!jobId) return
     setLoading(true)
     setActiveSignature(null)
-    Promise.all([api.units(jobId), api.clusters(jobId).catch(() => ({ clusters: [] }))]).then(
-      ([unitData, clusterData]) => {
+    Promise.all([
+      api.units(jobId),
+      api.clusters(jobId).catch(() => ({ clusters: [] })),
+      api.feedback(jobId).catch(() => ({ entries: [] })),
+    ]).then(
+      ([unitData, clusterData, feedbackData]) => {
       setUnits(unitData.units)
       setClusters(clusterData.clusters || [])
+      setFeedbackEntries(feedbackData.entries || [])
       setRunCount(unitData.run_count ?? unitData.units.length)
       setLoading(false)
       },
@@ -376,6 +383,25 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
     }
   }
 
+  const submitFeedback = async (attempt, action, note) => {
+    const key = `${attempt.unit_id}:${action}`
+    setFeedbackBusy(key)
+    setActionError('')
+    try {
+      const entry = await api.createFeedback(jobId, {
+        unit_id: attempt.unit_id,
+        action,
+        note: note.trim() || null,
+      })
+      setFeedbackEntries((current) => [...current, entry])
+    } catch (err) {
+      setActionError(err.message)
+      throw err
+    } finally {
+      setFeedbackBusy(null)
+    }
+  }
+
   if (!jobId) return <EmptyState />
 
   const detailProps = {
@@ -388,6 +414,9 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
     exporting,
     onExport: exportPacket,
     onReviewKnowledge,
+    feedbackEntries,
+    feedbackBusy,
+    onFeedback: submitFeedback,
   }
 
   return (
@@ -657,7 +686,7 @@ const attemptsLabel = (u) =>
   u.failure_count > 0 ? `${u.attempt_count} · ${u.failure_count} failed` : `${u.attempt_count}`
 
 
-function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge }) {
+function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback }) {
   return (
     <TableShell tableClassName="table-fixed min-w-[760px]">
       <colgroup>
@@ -721,6 +750,9 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                         exporting={exporting}
                         onExport={onExport}
                         onReviewKnowledge={onReviewKnowledge}
+                        feedbackEntries={feedbackEntries}
+                        feedbackBusy={feedbackBusy}
+                        onFeedback={onFeedback}
                       />
                     </div>
                   </td>
@@ -734,7 +766,7 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
   )
 }
 
-function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge }) {
+function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback }) {
   return (
     <div className="space-y-4">
       {units.map((u) => {
@@ -777,6 +809,9 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                   exporting={exporting}
                   onExport={onExport}
                   onReviewKnowledge={onReviewKnowledge}
+                  feedbackEntries={feedbackEntries}
+                  feedbackBusy={feedbackBusy}
+                  onFeedback={onFeedback}
                 />
               </div>
             )}
@@ -787,7 +822,7 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
   )
 }
 
-function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge }) {
+function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback }) {
   const passedAfter =
     u.classification === 'retry_pass'
       ? `Passed after ${u.failure_count} failed attempt${u.failure_count === 1 ? '' : 's'}.`
@@ -816,6 +851,9 @@ function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearing
           exporting={exporting}
           onExport={onExport}
           onReviewKnowledge={onReviewKnowledge}
+          feedbackEntries={feedbackEntries.filter((entry) => entry.unit_id === attempt.unit_id)}
+          feedbackBusy={feedbackBusy}
+          onFeedback={onFeedback}
         />
       ))}
     </div>
@@ -1058,7 +1096,7 @@ function StructuredRca({ attempt }) {
   )
 }
 
-function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge }) {
+function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback }) {
   const canClearCache =
     !!onClearCache &&
     attempt.analysis_cache_key && ['llm', 'local-cache'].includes(attempt.analysis_source)
@@ -1094,6 +1132,12 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
       <DebugLogStatus attempt={attempt} />
       <EvidenceQuality attempt={attempt} />
       <StructuredRca attempt={attempt} />
+      <FeedbackControls
+        attempt={attempt}
+        entries={feedbackEntries}
+        busy={feedbackBusy}
+        onSubmit={onFeedback}
+      />
 
       <div className="text-xs uppercase tracking-wide text-muted mb-1">
         Root cause
@@ -1155,6 +1199,62 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
         )}
       </div>
     </Panel>
+  )
+}
+
+const FEEDBACK_ACTIONS = [
+  ['helpful', 'Helpful'],
+  ['not_helpful', 'Not helpful'],
+  ['fixed_after_action', 'Fixed after action'],
+  ['not_root_cause', 'Not root cause'],
+]
+
+function FeedbackControls({ attempt, entries, busy, onSubmit }) {
+  const [note, setNote] = useState('')
+  const submit = async (action) => {
+    try {
+      await onSubmit(attempt, action, note)
+      setNote('')
+    } catch {
+      // The page-level action error carries the API message.
+    }
+  }
+
+  return (
+    <div className="mb-4 border-y border-border/60 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs uppercase tracking-wide text-muted">Engineer feedback</div>
+        {entries.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {entries.slice(-3).map((entry) => (
+              <Badge key={entry.feedback_id} tone={entry.action.includes('not_') ? 'warn' : 'pass'}>
+                {FEEDBACK_ACTIONS.find(([value]) => value === entry.action)?.[1] || entry.action}
+              </Badge>
+            ))}
+          </div>
+        )}
+      </div>
+      <textarea
+        value={note}
+        maxLength={2000}
+        onChange={(event) => setNote(event.target.value)}
+        placeholder="Optional engineer note"
+        className="mt-3 min-h-20 w-full resize-y rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink placeholder-placeholder outline-none focus:border-accent focus-ring"
+      />
+      <div className="mt-2 flex flex-wrap gap-2">
+        {FEEDBACK_ACTIONS.map(([action, label]) => (
+          <Button
+            key={action}
+            variant="ghost"
+            className="px-3 py-1.5"
+            disabled={busy === `${attempt.unit_id}:${action}`}
+            onClick={() => submit(action)}
+          >
+            {busy === `${attempt.unit_id}:${action}` ? 'Saving…' : label}
+          </Button>
+        ))}
+      </div>
+    </div>
   )
 }
 
