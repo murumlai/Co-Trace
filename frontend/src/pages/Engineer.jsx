@@ -23,6 +23,10 @@ const FILTERS = [
   ['first_pass', 'First-pass'],
 ]
 
+const LARGE_BATCH_THRESHOLD = 150
+const LARGE_TABLE_PAGE_SIZE = 75
+const LARGE_CARD_PAGE_SIZE = 20
+
 const SORT_OPTIONS = [
   ['latest_failure', 'Latest failure'],
   ['status_priority', 'Status priority'],
@@ -123,6 +127,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState('latest_failure')
   const [activeSignature, setActiveSignature] = useState(null)
+  const [page, setPage] = useState(1)
   const [view, setView] = useState('table')
   const [expanded, setExpanded] = useState(null)
   const [reanalyzing, setReanalyzing] = useState(null)
@@ -270,6 +275,16 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
         .sort(compareGroups(sortBy)),
     [activeSignature, drillDown, filter, searchQuery, serialFilter, sortBy, units],
   )
+  const pageSize = view === 'cards' ? LARGE_CARD_PAGE_SIZE : LARGE_TABLE_PAGE_SIZE
+  const pageCount = shown.length > LARGE_BATCH_THRESHOLD ? Math.ceil(shown.length / pageSize) : 1
+  const activePage = Math.min(page, pageCount)
+  const visibleUnits = pageCount > 1
+    ? shown.slice((activePage - 1) * pageSize, activePage * pageSize)
+    : shown
+
+  useEffect(() => {
+    setPage(1)
+  }, [activeSignature, drillDown, filter, jobId, searchQuery, serialFilter, sortBy, view])
 
   const drillDownStats = useMemo(() => {
     if (!drillDown) return null
@@ -577,6 +592,16 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
         </div>
       )}
 
+      {pageCount > 1 && (
+        <PaginationControls
+          page={activePage}
+          pageCount={pageCount}
+          pageSize={pageSize}
+          total={shown.length}
+          onChange={setPage}
+        />
+      )}
+
       {loading ? (
         <Card className="p-10 text-center text-muted">Loading units…</Card>
       ) : shown.length === 0 ? (
@@ -598,10 +623,71 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
           )}
         </Card>
       ) : view === 'table' ? (
-        <TableView units={shown} {...detailProps} />
+        <TableView units={visibleUnits} {...detailProps} />
       ) : (
-        <CardsView units={shown} {...detailProps} />
+        <CardsView units={visibleUnits} {...detailProps} />
       )}
+      {pageCount > 1 && (
+        <PaginationControls
+          page={activePage}
+          pageCount={pageCount}
+          pageSize={pageSize}
+          total={shown.length}
+          onChange={setPage}
+          className="mt-4"
+        />
+      )}
+    </div>
+  )
+}
+
+function PaginationControls({ page, pageCount, pageSize, total, onChange, className = 'mb-4' }) {
+  const first = (page - 1) * pageSize + 1
+  const last = Math.min(page * pageSize, total)
+  return (
+    <div className={`flex flex-wrap items-center justify-between gap-3 ${className}`}>
+      <span className="text-sm text-muted">Showing {first}-{last} of {total} units</span>
+      <div className="flex items-center gap-1" aria-label="Unit pages">
+        <ToolbarButton
+          aria-label="First page"
+          title="First page"
+          disabled={page === 1}
+          className="h-9 w-9 justify-center px-0 disabled:opacity-40"
+          onClick={() => onChange(1)}
+        >
+          «
+        </ToolbarButton>
+        <ToolbarButton
+          aria-label="Previous page"
+          title="Previous page"
+          disabled={page === 1}
+          className="h-9 w-9 justify-center px-0 disabled:opacity-40"
+          onClick={() => onChange(page - 1)}
+        >
+          ‹
+        </ToolbarButton>
+        <span className="min-w-24 text-center text-sm font-medium text-ink">
+          {page} / {pageCount}
+        </span>
+        <ToolbarButton
+          aria-label="Next page"
+          title="Next page"
+          disabled={page === pageCount}
+          className="h-9 w-9 justify-center px-0 disabled:opacity-40"
+          onClick={() => onChange(page + 1)}
+        >
+          ›
+        </ToolbarButton>
+        <ToolbarButton
+          aria-label="Last page"
+          title="Last page"
+          disabled={page === pageCount}
+          className="h-9 w-9 justify-center px-0 disabled:opacity-40"
+          onClick={() => onChange(pageCount)}
+        >
+          »
+        </ToolbarButton>
+      </div>
     </div>
   )
 }
