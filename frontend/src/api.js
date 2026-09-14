@@ -47,6 +47,7 @@ export const api = {
   status: (jobId) => request(`/api/jobs/${jobId}/status`),
   stop: (jobId) => request(`/api/jobs/${jobId}/stop`, { method: 'POST' }),
   units: (jobId) => request(`/api/jobs/${jobId}/units`),
+  clusters: (jobId) => request(`/api/jobs/${jobId}/clusters`),
   reanalyze: (jobId, unitId) =>
     request(`/api/jobs/${jobId}/units/${unitId}/reanalyze`, { method: 'POST' }),
   manager: (jobId) => request(`/api/jobs/${jobId}/manager`),

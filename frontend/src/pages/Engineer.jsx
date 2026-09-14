@@ -108,6 +108,7 @@ const compareGroups = (sortBy) => (left, right) => {
 export default function Engineer({ jobId }) {
   const { isAdmin } = useAuth()
   const [units, setUnits] = useState([])
+  const [clusters, setClusters] = useState([])
   const [runCount, setRunCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
@@ -115,6 +116,7 @@ export default function Engineer({ jobId }) {
   const [serialFilter, setSerialFilter] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState('latest_failure')
+  const [activeSignature, setActiveSignature] = useState(null)
   const [view, setView] = useState('table')
   const [expanded, setExpanded] = useState(null)
   const [reanalyzing, setReanalyzing] = useState(null)
@@ -125,11 +127,15 @@ export default function Engineer({ jobId }) {
   useEffect(() => {
     if (!jobId) return
     setLoading(true)
-    api.units(jobId).then((d) => {
-      setUnits(d.units)
-      setRunCount(d.run_count ?? d.units.length)
+    setActiveSignature(null)
+    Promise.all([api.units(jobId), api.clusters(jobId).catch(() => ({ clusters: [] }))]).then(
+      ([unitData, clusterData]) => {
+      setUnits(unitData.units)
+      setClusters(clusterData.clusters || [])
+      setRunCount(unitData.run_count ?? unitData.units.length)
       setLoading(false)
-    })
+      },
+    )
   }, [jobId])
 
   const counts = useMemo(() => {
@@ -222,10 +228,18 @@ export default function Engineer({ jobId }) {
           const serial = unit.serial_number || unit.unit_id
           const matchesClass = filter === 'all' || unit.classification === filter
           const matchesSerial = serialFilter === 'all' || serial === serialFilter
-          return matchesClass && matchesSerial && groupMatchesSearch(unit, searchQuery)
+          const matchesSignature =
+            !activeSignature ||
+            unit.failures?.some((failure) => failure.signature === activeSignature)
+          return (
+            matchesClass &&
+            matchesSerial &&
+            matchesSignature &&
+            groupMatchesSearch(unit, searchQuery)
+          )
         })
         .sort(compareGroups(sortBy)),
-    [filter, searchQuery, serialFilter, sortBy, units],
+    [activeSignature, filter, searchQuery, serialFilter, sortBy, units],
   )
 
   // A re-analysis returns a single failing attempt; splice it back into the
@@ -348,6 +362,25 @@ export default function Engineer({ jobId }) {
         </div>
       )}
 
+      {!loading && clusters.length > 0 && (
+        <ClusterPanel
+          clusters={clusters}
+          activeSignature={activeSignature}
+          onSelect={setActiveSignature}
+        />
+      )}
+
+      {activeSignature && (
+        <div className="mb-4 flex items-center gap-3">
+          <Badge tone="accent">
+            Failure family: {clusters.find((cluster) => cluster.signature === activeSignature)?.error_code || activeSignature}
+          </Badge>
+          <Button variant="ghost" className="px-2 py-1" onClick={() => setActiveSignature(null)}>
+            Clear
+          </Button>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <div className="flex flex-wrap items-center gap-2">
           {FILTERS.map(([key, label]) => (
@@ -432,13 +465,14 @@ export default function Engineer({ jobId }) {
       ) : shown.length === 0 ? (
         <Card className="p-10 text-center text-muted">
           <p>No units match the current search and filters.</p>
-          {(searchQuery || filter !== 'all' || serialFilter !== 'all') && (
+          {(searchQuery || filter !== 'all' || serialFilter !== 'all' || activeSignature) && (
             <Button
               variant="ghost"
               className="mt-3"
               onClick={() => {
                 setSearchQuery('')
                 setClassFilter('all')
+                setActiveSignature(null)
               }}
             >
               Clear search and filters
@@ -451,6 +485,67 @@ export default function Engineer({ jobId }) {
         <CardsView units={shown} {...detailProps} />
       )}
     </div>
+  )
+}
+
+function ClusterPanel({ clusters, activeSignature, onSelect }) {
+  return (
+    <section className="mb-6" aria-labelledby="failure-families-heading">
+      <div className="mb-3 flex items-end justify-between gap-4">
+        <div>
+          <h2 id="failure-families-heading" className="font-display text-lg font-bold text-ink">
+            Failure families
+          </h2>
+          <p className="text-sm text-muted">Grouped by normalized error signature.</p>
+        </div>
+        <span className="text-xs text-muted">{clusters.length} families</span>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {clusters.map((cluster) => {
+          const selected = activeSignature === cluster.signature
+          const knowledge = Object.entries(cluster.knowledge_status_summary || {})
+            .map(([status, count]) => `${count} ${status.replaceAll('_', ' ')}`)
+            .join(', ')
+          const sources = Object.entries(cluster.analysis_source_summary || {})
+            .map(([source, count]) => `${count} ${source}`)
+            .join(', ')
+          const lastSeen = cluster.last_seen
+            ? new Date(cluster.last_seen).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
+            : 'Unknown'
+          return (
+            <button
+              key={cluster.signature}
+              type="button"
+              onClick={() => onSelect(selected ? null : cluster.signature)}
+              className={[
+                'min-w-0 rounded-panel border p-4 text-left transition-colors focus-ring',
+                selected
+                  ? 'border-accent bg-accent/10'
+                  : 'border-border bg-surface hover:border-border-strong hover:bg-surface-2',
+              ].join(' ')}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-semibold text-ink break-words [overflow-wrap:anywhere]">
+                    {cluster.error_code || 'Unknown failure'}
+                  </div>
+                  <div className="mt-1 line-clamp-2 text-sm text-muted break-words [overflow-wrap:anywhere]">
+                    {cluster.error_message || 'No error message'}
+                  </div>
+                </div>
+                <Badge tone="fail">{cluster.count}</Badge>
+              </div>
+              <div className="mt-3 space-y-1 text-xs text-muted">
+                <div>{cluster.stations?.join(', ') || 'No station'} · {cluster.lots?.join(', ') || 'No lot'}</div>
+                <div>{knowledge || 'Knowledge status unavailable'}</div>
+                <div>{sources || 'Analysis source unavailable'}</div>
+                <div>Latest: {lastSeen}</div>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 
