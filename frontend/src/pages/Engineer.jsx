@@ -45,6 +45,11 @@ const SEARCH_FIELDS = [
   'failing_step',
   'root_cause',
   'suggested_solution',
+  'root_cause_category',
+  'evidence_summary',
+  'next_debug_action',
+  'likely_owner',
+  'safety_or_escape_risk',
   'knowledge_match_status',
 ]
 
@@ -869,6 +874,53 @@ function EvidenceQuality({ attempt }) {
   )
 }
 
+function StructuredRca({ attempt }) {
+  const hasStructuredRca =
+    attempt.confidence != null ||
+    attempt.root_cause_category ||
+    attempt.evidence_summary ||
+    attempt.next_debug_action ||
+    attempt.likely_owner ||
+    attempt.safety_or_escape_risk ||
+    attempt.needs_more_evidence != null
+  if (!hasStructuredRca) return null
+
+  const confidence =
+    attempt.confidence != null ? `${Math.round(attempt.confidence * 100)}% confidence` : null
+
+  return (
+    <div className="mb-4">
+      <div className="flex flex-wrap gap-2">
+        {attempt.root_cause_category && <Badge tone="accent">{attempt.root_cause_category}</Badge>}
+        {confidence && <Badge tone="muted">{confidence}</Badge>}
+        {attempt.likely_owner && <Badge tone="muted">Owner: {attempt.likely_owner}</Badge>}
+        {attempt.safety_or_escape_risk && (
+          <Badge tone={attempt.safety_or_escape_risk.toLowerCase() === 'low' ? 'pass' : 'warn'}>
+            Risk: {attempt.safety_or_escape_risk}
+          </Badge>
+        )}
+        {attempt.needs_more_evidence === true && <Badge tone="warn">Needs more evidence</Badge>}
+      </div>
+      {attempt.evidence_summary && (
+        <div className="mt-3">
+          <div className="mb-1 text-xs uppercase tracking-wide text-muted">Evidence summary</div>
+          <p className="text-sm text-ink-2 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+            {attempt.evidence_summary}
+          </p>
+        </div>
+      )}
+      {attempt.next_debug_action && (
+        <div className="mt-3 border-l-2 border-accent pl-3">
+          <div className="mb-1 text-xs uppercase tracking-wide text-muted">Next debug action</div>
+          <p className="font-medium text-ink whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+            {attempt.next_debug_action}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache }) {
   const canClearCache =
     !!onClearCache &&
@@ -904,6 +956,7 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
       <KnowledgeBadge attempt={attempt} />
       <DebugLogStatus attempt={attempt} />
       <EvidenceQuality attempt={attempt} />
+      <StructuredRca attempt={attempt} />
 
       <div className="text-xs uppercase tracking-wide text-muted mb-1">
         Root cause
