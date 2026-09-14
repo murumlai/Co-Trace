@@ -26,7 +26,7 @@ function categoryBadge(category) {
   )
 }
 
-export default function Knowledge() {
+export default function Knowledge({ jobId, reviewFilter, onClearReview }) {
   const { isAdmin } = useAuth()
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -34,6 +34,7 @@ export default function Knowledge() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [sections, setSections] = useState([])
+  const [batchUnits, setBatchUnits] = useState([])
   const [openProduct, setOpenProduct] = useState(null)
   const [job, setJob] = useState(null)
   const [duplicateUpload, setDuplicateUpload] = useState(null)
@@ -56,6 +57,14 @@ export default function Knowledge() {
     load()
   }, [])
 
+  useEffect(() => {
+    if (!jobId) {
+      setBatchUnits([])
+      return
+    }
+    api.units(jobId).then((data) => setBatchUnits(data.units || [])).catch(() => setBatchUnits([]))
+  }, [jobId])
+
   const manifest = status?.manifest || null
   const products = manifest?.products || []
   const documents = manifest?.documents || []
@@ -68,6 +77,37 @@ export default function Knowledge() {
     })
     return map
   }, [documents])
+
+  const coverage = useMemo(() => {
+    const failures = batchUnits.flatMap((unit) => unit.failures || [])
+    const documentedProducts = new Set(products.map((product) => product.product_code))
+    const batchProducts = new Set(
+      batchUnits.flatMap((unit) => [unit.final?.product_code, ...(unit.failures || []).map((failure) => failure.product_code)]).filter(Boolean),
+    )
+    const unmatched = failures.filter((failure) => failure.knowledge_match_status !== 'matched')
+    const matched = failures.filter((failure) => failure.knowledge_match_status === 'matched')
+    const sectionIds = new Set(matched.flatMap((failure) => failure.knowledge_section_ids || []))
+    const acronyms = new Map()
+    failures.forEach((failure) => {
+      ;(failure.unknown_acronyms || []).forEach((acronym) => {
+        const current = acronyms.get(acronym) || { acronym, count: 0, products: new Set() }
+        current.count += 1
+        if (failure.product_code) current.products.add(failure.product_code)
+        acronyms.set(acronym, current)
+      })
+    })
+    return {
+      missingProducts: [...batchProducts].filter((product) => !documentedProducts.has(product)).sort(),
+      unmatched,
+      matchedCount: matched.length,
+      failureCount: failures.length,
+      sectionCount: sectionIds.size,
+      acronyms: [...acronyms.values()].map((entry) => ({
+        ...entry,
+        products: [...entry.products].sort(),
+      })).sort((left, right) => right.count - left.count),
+    }
+  }, [batchUnits, products])
 
   const runAction = async (label, fn) => {
     setBusy(label)
@@ -297,6 +337,14 @@ export default function Knowledge() {
         <StatCard label="Summary model" value={status?.summary_model || '—'} small />
       </div>
 
+      {batchUnits.length > 0 && (
+        <CoverageQueue
+          coverage={coverage}
+          reviewFilter={reviewFilter}
+          onClearReview={onClearReview}
+        />
+      )}
+
       {manifest?.generated_at && (
         <p className="text-xs text-muted mb-4">
           Generated {manifest.generated_at.replace('T', ' ').slice(0, 19)} · hash{' '}
@@ -401,6 +449,84 @@ export default function Knowledge() {
         </div>
       )}
     </div>
+  )
+}
+
+function CoverageQueue({ coverage, reviewFilter, onClearReview }) {
+  const focusedProduct = reviewFilter?.productCode
+  const focusedAcronym = reviewFilter?.acronym
+  const unmatched = focusedProduct
+    ? coverage.unmatched.filter((failure) => failure.product_code === focusedProduct)
+    : coverage.unmatched
+  const acronyms = focusedAcronym
+    ? coverage.acronyms.filter((entry) => entry.acronym === focusedAcronym)
+    : coverage.acronyms
+
+  return (
+    <section className="mb-8" aria-labelledby="coverage-heading">
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 id="coverage-heading" className="font-display text-xl font-bold text-ink">
+            Batch knowledge coverage
+          </h2>
+          <p className="mt-1 text-sm text-muted">Documentation and glossary gaps affecting the loaded batch.</p>
+        </div>
+        {reviewFilter && (
+          <div className="flex items-center gap-2">
+            <Badge tone="accent">
+              Review: {focusedAcronym || focusedProduct || 'selected failure'}
+            </Badge>
+            <Button variant="ghost" className="px-2 py-1" onClick={onClearReview}>Clear</Button>
+          </div>
+        )}
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <Panel className="p-4">
+          <h3 className="font-semibold text-ink">Products without documents</h3>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {coverage.missingProducts.length
+              ? coverage.missingProducts.map((product) => (
+                  <Badge key={product} tone={product === focusedProduct ? 'fail' : 'warn'}>{product}</Badge>
+                ))
+              : <span className="text-sm text-muted">Every batch product has documentation.</span>}
+          </div>
+        </Panel>
+        <Panel className="p-4">
+          <h3 className="font-semibold text-ink">Matched section coverage</h3>
+          <p className="mt-2 font-display text-2xl font-bold text-ink">
+            {coverage.matchedCount}/{coverage.failureCount}
+          </p>
+          <p className="text-sm text-muted">failed attempts matched across {coverage.sectionCount} sections</p>
+        </Panel>
+        <Panel className="p-4">
+          <h3 className="font-semibold text-ink">Failures without matched sections</h3>
+          {unmatched.length ? (
+            <ul className="mt-3 max-h-48 space-y-2 overflow-auto text-sm">
+              {unmatched.map((failure) => (
+                <li key={failure.unit_id} className="flex items-start justify-between gap-3">
+                  <span className="min-w-0 break-words text-ink-2">
+                    {failure.error_code || 'Unknown'} · {failure.failing_step || failure.error_message || 'No detail'}
+                  </span>
+                  <Badge tone="warn">{failure.product_code || 'No product'}</Badge>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="mt-3 text-sm text-muted">No unmatched failures in this view.</p>}
+        </Panel>
+        <Panel className="p-4">
+          <h3 className="font-semibold text-ink">Unknown acronyms</h3>
+          {acronyms.length ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {acronyms.map((entry) => (
+                <Badge key={entry.acronym} tone={entry.acronym === focusedAcronym ? 'fail' : 'warn'}>
+                  {entry.acronym} · {entry.count} · {entry.products.join(', ') || 'global'}
+                </Badge>
+              ))}
+            </div>
+          ) : <p className="mt-3 text-sm text-muted">No unknown acronyms in this view.</p>}
+        </Panel>
+      </div>
+    </section>
   )
 }
 

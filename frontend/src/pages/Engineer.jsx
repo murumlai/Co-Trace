@@ -110,7 +110,7 @@ const compareGroups = (sortBy) => (left, right) => {
   )
 }
 
-export default function Engineer({ jobId, drillDown, onClearDrillDown }) {
+export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewKnowledge }) {
   const { isAdmin } = useAuth()
   const [units, setUnits] = useState([])
   const [clusters, setClusters] = useState([])
@@ -387,6 +387,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown }) {
     onClearCache: isAdmin ? clearCache : undefined,
     exporting,
     onExport: exportPacket,
+    onReviewKnowledge,
   }
 
   return (
@@ -656,7 +657,7 @@ const attemptsLabel = (u) =>
   u.failure_count > 0 ? `${u.attempt_count} · ${u.failure_count} failed` : `${u.attempt_count}`
 
 
-function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport }) {
+function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge }) {
   return (
     <TableShell tableClassName="table-fixed min-w-[760px]">
       <colgroup>
@@ -719,6 +720,7 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                         onClearCache={onClearCache}
                         exporting={exporting}
                         onExport={onExport}
+                        onReviewKnowledge={onReviewKnowledge}
                       />
                     </div>
                   </td>
@@ -732,7 +734,7 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
   )
 }
 
-function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport }) {
+function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge }) {
   return (
     <div className="space-y-4">
       {units.map((u) => {
@@ -774,6 +776,7 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                   onClearCache={onClearCache}
                   exporting={exporting}
                   onExport={onExport}
+                  onReviewKnowledge={onReviewKnowledge}
                 />
               </div>
             )}
@@ -784,7 +787,7 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
   )
 }
 
-function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport }) {
+function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge }) {
   const passedAfter =
     u.classification === 'retry_pass'
       ? `Passed after ${u.failure_count} failed attempt${u.failure_count === 1 ? '' : 's'}.`
@@ -812,6 +815,7 @@ function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearing
           onClearCache={onClearCache}
           exporting={exporting}
           onExport={onExport}
+          onReviewKnowledge={onReviewKnowledge}
         />
       ))}
     </div>
@@ -1054,7 +1058,7 @@ function StructuredRca({ attempt }) {
   )
 }
 
-function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport }) {
+function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge }) {
   const canClearCache =
     !!onClearCache &&
     attempt.analysis_cache_key && ['llm', 'local-cache'].includes(attempt.analysis_source)
@@ -1138,6 +1142,17 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
         >
           {exporting === attempt.unit_id ? 'Exporting…' : 'Export packet'}
         </Button>
+        {(attempt.knowledge_match_status !== 'matched' || attempt.unknown_acronyms?.length > 0) && (
+          <Button
+            variant="ghost"
+            onClick={() => onReviewKnowledge?.({
+              productCode: attempt.product_code,
+              acronym: attempt.unknown_acronyms?.[0] || null,
+            })}
+          >
+            Review knowledge
+          </Button>
+        )}
       </div>
     </Panel>
   )

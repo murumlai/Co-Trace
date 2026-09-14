@@ -31,6 +31,7 @@ function Shell() {
   const [batchProgress, setBatchProgress] = useState(null)
   const [batchError, setBatchError] = useState('')
   const [engineerDrillDown, setEngineerDrillDown] = useState(null)
+  const [knowledgeReview, setKnowledgeReview] = useState(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [warnings, setWarnings] = useState([])
   const [llmMetrics, setLlmMetrics] = useState(null)
@@ -162,6 +163,12 @@ function Shell() {
   const openEngineerDrillDown = (filter) => {
     setEngineerDrillDown(filter)
     setTab('engineer')
+    setMenuOpen(false)
+  }
+
+  const openKnowledgeReview = (filter) => {
+    setKnowledgeReview(filter)
+    setTab('knowledge')
     setMenuOpen(false)
   }
 
@@ -323,10 +330,17 @@ function Shell() {
             jobId={jobId}
             drillDown={engineerDrillDown}
             onClearDrillDown={() => setEngineerDrillDown(null)}
+            onReviewKnowledge={openKnowledgeReview}
           />
         )}
         {tab === 'manager' && <Manager jobId={jobId} onDrillDown={openEngineerDrillDown} />}
-        {tab === 'knowledge' && <Knowledge />}
+        {tab === 'knowledge' && (
+          <Knowledge
+            jobId={jobId}
+            reviewFilter={knowledgeReview}
+            onClearReview={() => setKnowledgeReview(null)}
+          />
+        )}
         {tab === 'about' && <About />}
       </main>
     </div>
