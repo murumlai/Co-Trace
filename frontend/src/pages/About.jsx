@@ -3,23 +3,43 @@ import { Card, IconWell } from '../components/ui'
 const FEATURES = [
   {
     icon: '📤',
-    title: 'Upload logs',
-    body: 'Drop FTRunner log folders, individual files, or a single root-level .zip archive for large batches. Processing runs asynchronously with progress polling and manual stop support.',
+    title: 'Batch processing',
+    body: 'Load FTRunner folders, individual text logs, or a root-level ZIP. Processing reports its current stage, elapsed time, cache use, and Copilot calls, and can be stopped safely.',
   },
   {
     icon: '🔧',
-    title: 'Engineer view',
-    body: 'One row per serial number, classified as first-pass, retry-pass, or failing. Failed attempts get root-cause guidance, log evidence, cache controls, and manual re-analysis.',
+    title: 'Engineer triage',
+    body: 'Search and sort serial groups, start from the highest-volume failure family, inspect every failed attempt, compare retry-pass runs, and re-analyze when new evidence is available.',
   },
   {
     icon: '📊',
-    title: 'Manager view',
-    body: 'First-pass yield, yield trend, a Pareto of failure reasons, station/tester breakdown, and lot-to-lot comparison.',
+    title: 'Yield and drill-down',
+    body: 'Review first-pass yield, trends, signature-keyed Pareto failures, stations, and lots. Manager selections open the exact affected units in Engineer view.',
+  },
+  {
+    icon: '◈',
+    title: 'Evidence-aware RCA',
+    body: 'Diagnoses show confidence, category, likely owner, risk, evidence summary, and next debug action when available, together with the sources that support them.',
+  },
+  {
+    icon: '📚',
+    title: 'Debug memory',
+    body: 'Product documents, RFC knowledge, and approved acronyms ground analysis. Reviewed known-failure playbooks provide deterministic guidance before cache or Copilot lookup.',
+  },
+  {
+    icon: '✓',
+    title: 'Handoff and feedback',
+    body: 'Export bounded, redacted Markdown packets for a unit or failure family. Engineers can record whether guidance helped, fixed the issue, or missed the root cause.',
   },
   {
     icon: '🔒',
     title: 'Private by design',
-    body: 'Credentials, IPs, hostnames, usernames, and MAC addresses are scrubbed from stored artifacts and from text sent to the AI. Serial numbers are retained in stored data for yield math but are scrubbed before any AI call. Passing units never trigger an AI call.',
+    body: 'Credentials, IPs, hosts, usernames, MAC addresses, and serials are scrubbed before AI calls. Feedback and exports are redacted, job data is owner-scoped, and passing units never trigger analysis.',
+  },
+  {
+    icon: '↔',
+    title: 'Production-scale review',
+    body: 'Large Engineer result sets are paginated while search, sorting, and filters still evaluate the complete batch, keeping detailed table and card workflows responsive.',
   },
 ]
 
@@ -27,6 +47,13 @@ const CLASSES = [
   ['First-pass', 'Passed on the first attempt — no analysis needed.', 'text-teal'],
   ['Retry-pass', 'Failed at least once, then passed. Previous failures are diagnosed.', 'text-warning'],
   ['Failing', 'Still failing on the latest attempt. Each failure is diagnosed.', 'text-danger'],
+]
+
+const DIAGNOSIS_SOURCES = [
+  ['Reviewed playbook', 'An administrator-approved exact signature match, checked before cache or Copilot.', 'text-teal'],
+  ['Copilot analysis', 'A fresh diagnosis generated from bounded, redacted evidence and matched product knowledge.', 'text-accent'],
+  ['Saved or reused analysis', 'A prior result reused from disk or from a matching signature in the current batch.', 'text-muted'],
+  ['Offline placeholder', 'A local fallback when live analysis is unavailable; clearly marked as weak evidence.', 'text-warning'],
 ]
 
 export default function About() {
@@ -38,7 +65,7 @@ export default function About() {
         </IconWell>
         <div>
           <h1 className="font-display text-4xl font-extrabold tracking-tight text-ink">About Co-Trace</h1>
-          <p className="mt-1 text-muted">Manufacturing test-log dashboard</p>
+          <p className="mt-1 text-muted">Manufacturing failure triage and debug handoff</p>
         </div>
       </div>
 
@@ -46,8 +73,8 @@ export default function About() {
         <p className="text-ink leading-relaxed">
           Co-Trace turns raw manufacturing test logs into clear, audience-specific insights.
           Upload a batch of FTRunner logs and the app parses every unit run, protects sensitive
-          fields, separates first-pass, retry-pass, and failing units, and turns failed attempts
-          into actionable evidence for engineers and yield trends for managers.
+          fields, groups recurring failures by stable signatures, and connects yield signals to
+          evidence-backed root-cause guidance, next actions, and reusable debug knowledge.
         </p>
       </Card>
 
@@ -67,6 +94,18 @@ export default function About() {
           </Card>
         ))}
       </div>
+
+      <h2 className="font-display text-2xl font-bold text-ink mb-4">Where guidance comes from</h2>
+      <Card className="p-6 mb-8">
+        <ul className="grid gap-4 sm:grid-cols-2">
+          {DIAGNOSIS_SOURCES.map(([label, body, tone]) => (
+            <li key={label} className="min-w-0 border-l-2 border-border pl-3">
+              <div className={['font-semibold', tone].join(' ')}>{label}</div>
+              <p className="mt-1 text-sm leading-relaxed text-muted">{body}</p>
+            </li>
+          ))}
+        </ul>
+      </Card>
 
       <h2 className="font-display text-2xl font-bold text-ink mb-4">How units are classified</h2>
       <Card className="p-6 mb-8">
@@ -90,7 +129,8 @@ export default function About() {
       </Card>
 
       <p className="text-sm text-muted text-center">
-        Upload a batch on the Home tab to get started.
+        Co-Trace supports triage and evidence review; engineers remain responsible for validating
+        diagnoses and confirming corrective actions on the actual unit and station.
       </p>
     </div>
   )
