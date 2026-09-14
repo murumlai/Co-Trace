@@ -754,6 +754,7 @@ function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearing
           <span>{passedAfter} Previous failures below.</span>
         </div>
       )}
+      {u.classification === 'retry_pass' && <RetryComparison unit={u} />}
       {u.failures.map((attempt, i) => (
         <FailureBlock
           key={attempt.unit_id}
@@ -768,6 +769,93 @@ function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearing
           onClearCache={onClearCache}
         />
       ))}
+    </div>
+  )
+}
+
+const formatAttemptTime = (value) =>
+  value ? value.replace('T', ' ').slice(0, 19) : 'Unavailable'
+
+const stepSummary = (attempt) => {
+  const steps = attempt.steps || []
+  if (!steps.length) return 'No step data'
+  const passed = steps.filter((step) => step.result === 'PASS').length
+  const failed = steps.filter((step) => step.result === 'FAIL').length
+  return `${steps.length} steps · ${passed} passed${failed ? ` · ${failed} failed` : ''}`
+}
+
+function RetryComparison({ unit }) {
+  const finalAttempt = unit.final
+  const repeatedSteps = new Set(
+    (unit.failures || [])
+      .map((attempt) => attempt.failing_step)
+      .filter((step, index, all) => step && all.indexOf(step) !== index),
+  )
+
+  return (
+    <section className="border-y border-border py-4" aria-label="Retry comparison">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="font-display text-sm font-bold text-ink">Failed attempts vs final pass</h3>
+        <Badge tone="pass">Final pass</Badge>
+      </div>
+      <div className="space-y-3">
+        {unit.failures.map((failure, index) => {
+          const stationChanged =
+            (failure.station_id || failure.host) &&
+            (failure.station_id !== finalAttempt.station_id || failure.host !== finalAttempt.host)
+          const durationDifference = Math.abs(
+            Number(failure.duration_s || 0) - Number(finalAttempt.duration_s || 0),
+          )
+          const durationChanged =
+            durationDifference >= 5 &&
+            durationDifference >= Math.max(1, Number(finalAttempt.duration_s || 0) * 0.5)
+          const repeatedStep = repeatedSteps.has(failure.failing_step)
+
+          return (
+            <div key={failure.unit_id} className="grid min-w-0 gap-3 md:grid-cols-2">
+              <ComparisonAttempt
+                title={`Failed attempt ${index + 1}`}
+                attempt={failure}
+                tone="fail"
+                highlights={{ stationChanged, durationChanged, repeatedStep }}
+              />
+              <ComparisonAttempt
+                title="Final passing attempt"
+                attempt={finalAttempt}
+                tone="pass"
+                highlights={{ stationChanged, durationChanged }}
+              />
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+function ComparisonAttempt({ title, attempt, tone, highlights = {} }) {
+  return (
+    <div className="min-w-0 rounded-lg border border-border bg-surface px-4 py-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <Badge tone={tone}>{title}</Badge>
+        {highlights.stationChanged && <Badge tone="warn">Station changed</Badge>}
+        {highlights.durationChanged && <Badge tone="warn">Duration changed</Badge>}
+        {highlights.repeatedStep && <Badge tone="warn">Repeated failing step</Badge>}
+      </div>
+      <dl className="grid grid-cols-[6rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+        <dt className="text-muted">Station / host</dt>
+        <dd className="break-words text-ink">{attempt.station_id || '—'} / {attempt.host || '—'}</dd>
+        <dt className="text-muted">Duration</dt>
+        <dd className="text-ink">{attempt.duration_s ? `${attempt.duration_s.toFixed(1)}s` : 'Unavailable'}</dd>
+        <dt className="text-muted">Steps</dt>
+        <dd className="break-words text-ink">{stepSummary(attempt)}</dd>
+        <dt className="text-muted">Failing step</dt>
+        <dd className="break-words text-ink">{attempt.failing_step || 'None'}</dd>
+        <dt className="text-muted">Started</dt>
+        <dd className="break-words text-ink">{formatAttemptTime(attempt.start_time)}</dd>
+        <dt className="text-muted">Ended</dt>
+        <dd className="break-words text-ink">{formatAttemptTime(attempt.end_time)}</dd>
+      </dl>
     </div>
   )
 }
