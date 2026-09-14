@@ -7,6 +7,7 @@ import {
   Card,
   IconWell,
   Input,
+  MetricCard,
   Panel,
   SegmentedControl,
   StatusBadge,
@@ -153,6 +154,43 @@ export default function Engineer({ jobId }) {
     return keys.size
   }, [units])
 
+  const triageSummary = useMemo(() => {
+    const failures = units.flatMap((unit) => unit.failures || [])
+    const signatures = new Map()
+    failures.forEach((failure) => {
+      if (!failure.signature) return
+      const current = signatures.get(failure.signature) || {
+        count: 0,
+        label: failure.error_code || failure.error_message || failure.signature,
+      }
+      current.count += 1
+      signatures.set(failure.signature, current)
+    })
+    const topFailure = [...signatures.values()].sort((left, right) => right.count - left.count)[0]
+    const matchedKnowledge = failures.filter(
+      (failure) => failure.knowledge_match_status === 'matched',
+    ).length
+    const newestFailure = Math.max(
+      0,
+      ...failures.map((failure) => Date.parse(failure.end_time || failure.start_time || '') || 0),
+    )
+
+    return {
+      failing: units.filter((unit) => unit.classification === 'fail').length,
+      retryPass: units.filter((unit) => unit.classification === 'retry_pass').length,
+      topFailure: topFailure ? `${topFailure.count} · ${topFailure.label}` : 'None',
+      missingDebugLog: failures.filter(
+        (failure) => failure.debuglog_status && failure.debuglog_status !== 'excerpt',
+      ).length,
+      knowledgeCoverage: failures.length
+        ? `${Math.round((matchedKnowledge / failures.length) * 100)}%`
+        : '—',
+      newestFailure: newestFailure
+        ? new Date(newestFailure).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
+        : '—',
+    }
+  }, [units])
+
   const setClassFilter = (cls) => {
     setFilter(cls)
     setSerialFilter('all')
@@ -282,6 +320,33 @@ export default function Engineer({ jobId }) {
           </p>
         )}
       </div>
+
+      {!loading && (
+        <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <MetricCard label="Still failing" value={triageSummary.failing} tone="fail" />
+          <MetricCard label="Retry-pass" value={triageSummary.retryPass} tone="warn" />
+          <MetricCard
+            label="Top failure"
+            value={triageSummary.topFailure}
+            className="[&_div:nth-child(2)]:break-words [&_div:nth-child(2)]:text-lg"
+          />
+          <MetricCard
+            label="DebugLog missing"
+            value={triageSummary.missingDebugLog}
+            tone="warn"
+          />
+          <MetricCard
+            label="Knowledge coverage"
+            value={triageSummary.knowledgeCoverage}
+            tone="accent"
+          />
+          <MetricCard
+            label="Newest failure"
+            value={triageSummary.newestFailure}
+            className="[&_div:nth-child(2)]:text-lg"
+          />
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <div className="flex flex-wrap items-center gap-2">
