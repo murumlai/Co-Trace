@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Button, Card, IconWell } from '../components/ui'
+import { Badge, Button, Card, IconWell } from '../components/ui'
 
 // Reads a browser file's relative path (folder uploads set webkitRelativePath).
 function relPath(file) {
