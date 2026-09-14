@@ -127,6 +127,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown }) {
   const [reanalyzing, setReanalyzing] = useState(null)
   const [clearingCache, setClearingCache] = useState(null)
   const [clearingAll, setClearingAll] = useState(false)
+  const [exporting, setExporting] = useState(null)
   const [actionError, setActionError] = useState('')
 
   useEffect(() => {
@@ -356,6 +357,25 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown }) {
     }
   }
 
+  const exportPacket = async ({ unitId, signature, filename }) => {
+    const exportKey = unitId || signature
+    setExporting(exportKey)
+    setActionError('')
+    try {
+      const markdown = await api.debugPacket(jobId, { unitId, signature })
+      const url = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setActionError(err.message)
+    } finally {
+      setExporting(null)
+    }
+  }
+
   if (!jobId) return <EmptyState />
 
   const detailProps = {
@@ -365,6 +385,8 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown }) {
     onReanalyze: reanalyze,
     clearingCache,
     onClearCache: isAdmin ? clearCache : undefined,
+    exporting,
+    onExport: exportPacket,
   }
 
   return (
@@ -412,6 +434,8 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown }) {
         <ClusterPanel
           clusters={clusters}
           activeSignature={activeSignature}
+          exporting={exporting}
+          onExport={exportPacket}
           onSelect={(signature) => {
             onClearDrillDown?.()
             setActiveSignature(signature)
@@ -552,7 +576,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown }) {
   )
 }
 
-function ClusterPanel({ clusters, activeSignature, onSelect }) {
+function ClusterPanel({ clusters, activeSignature, exporting, onSelect, onExport }) {
   return (
     <section className="mb-6" aria-labelledby="failure-families-heading">
       <div className="mb-3 flex items-end justify-between gap-4">
@@ -577,17 +601,20 @@ function ClusterPanel({ clusters, activeSignature, onSelect }) {
             ? new Date(cluster.last_seen).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
             : 'Unknown'
           return (
-            <button
+            <div
               key={cluster.signature}
-              type="button"
-              onClick={() => onSelect(selected ? null : cluster.signature)}
               className={[
-                'min-w-0 rounded-panel border p-4 text-left transition-colors focus-ring',
+                'min-w-0 rounded-panel border p-4 text-left transition-colors',
                 selected
                   ? 'border-accent bg-accent/10'
                   : 'border-border bg-surface hover:border-border-strong hover:bg-surface-2',
               ].join(' ')}
             >
+              <button
+                type="button"
+                onClick={() => onSelect(selected ? null : cluster.signature)}
+                className="block w-full text-left focus-ring"
+              >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="font-semibold text-ink break-words [overflow-wrap:anywhere]">
@@ -605,7 +632,19 @@ function ClusterPanel({ clusters, activeSignature, onSelect }) {
                 <div>{sources || 'Analysis source unavailable'}</div>
                 <div>Latest: {lastSeen}</div>
               </div>
-            </button>
+              </button>
+              <Button
+                variant="ghost"
+                className="mt-3 px-2 py-1"
+                disabled={exporting === cluster.signature}
+                onClick={() => onExport({
+                  signature: cluster.signature,
+                  filename: `co-trace-cluster-${cluster.signature}.md`,
+                })}
+              >
+                {exporting === cluster.signature ? 'Exporting…' : 'Export packet'}
+              </Button>
+            </div>
           )
         })}
       </div>
@@ -617,7 +656,7 @@ const attemptsLabel = (u) =>
   u.failure_count > 0 ? `${u.attempt_count} · ${u.failure_count} failed` : `${u.attempt_count}`
 
 
-function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache }) {
+function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport }) {
   return (
     <TableShell tableClassName="table-fixed min-w-[760px]">
       <colgroup>
@@ -678,6 +717,8 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                         onReanalyze={onReanalyze}
                         clearingCache={clearingCache}
                         onClearCache={onClearCache}
+                        exporting={exporting}
+                        onExport={onExport}
                       />
                     </div>
                   </td>
@@ -691,7 +732,7 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
   )
 }
 
-function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache }) {
+function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport }) {
   return (
     <div className="space-y-4">
       {units.map((u) => {
@@ -731,6 +772,8 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                   onReanalyze={onReanalyze}
                   clearingCache={clearingCache}
                   onClearCache={onClearCache}
+                  exporting={exporting}
+                  onExport={onExport}
                 />
               </div>
             )}
@@ -741,7 +784,7 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
   )
 }
 
-function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearingCache, onClearCache }) {
+function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport }) {
   const passedAfter =
     u.classification === 'retry_pass'
       ? `Passed after ${u.failure_count} failed attempt${u.failure_count === 1 ? '' : 's'}.`
@@ -767,6 +810,8 @@ function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearing
           onReanalyze={onReanalyze}
           clearingCache={clearingCache}
           onClearCache={onClearCache}
+          exporting={exporting}
+          onExport={onExport}
         />
       ))}
     </div>
@@ -1009,7 +1054,7 @@ function StructuredRca({ attempt }) {
   )
 }
 
-function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache }) {
+function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport }) {
   const canClearCache =
     !!onClearCache &&
     attempt.analysis_cache_key && ['llm', 'local-cache'].includes(attempt.analysis_source)
@@ -1083,6 +1128,16 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
             {clearingCache === attempt.analysis_cache_key ? 'Clearing cache…' : 'Clear cached result'}
           </Button>
         )}
+        <Button
+          variant="ghost"
+          onClick={() => onExport({
+            unitId: attempt.unit_id,
+            filename: `co-trace-unit-${attempt.serial_number || attempt.unit_id}.md`,
+          })}
+          disabled={exporting === attempt.unit_id}
+        >
+          {exporting === attempt.unit_id ? 'Exporting…' : 'Export packet'}
+        </Button>
       </div>
     </Panel>
   )

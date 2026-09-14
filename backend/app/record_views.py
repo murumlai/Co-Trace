@@ -4,8 +4,10 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import defaultdict
+from collections.abc import Iterable
 
 from .models import Classification, SerialUnitGroup, UnitRecord
+from .redaction import redact
 
 _WS = re.compile(r"\s+")
 _NUM = re.compile(r"\d+")
@@ -92,6 +94,126 @@ def group_units_by_serial(records: list[UnitRecord]) -> list[SerialUnitGroup]:
     order = {"fail": 0, "unknown": 1, "retry_pass": 2, "first_pass": 3}
     groups.sort(key=lambda g: order.get(g.classification, 9))
     return groups
+
+
+def build_debug_packet(
+    records: list[UnitRecord],
+    *,
+    unit_id: str | None = None,
+    signature: str | None = None,
+) -> str:
+    if bool(unit_id) == bool(signature):
+        raise ValueError("Specify exactly one unit_id or signature")
+
+    if unit_id:
+        target = next((record for record in records if record.unit_id == unit_id), None)
+        if target is None:
+            raise LookupError("Unit not found")
+        attempts = [
+            record
+            for record in records
+            if (
+                target.serial_number
+                and record.serial_number == target.serial_number
+                or not target.serial_number
+                and record.unit_id == target.unit_id
+            )
+        ]
+        title = target.serial_number or target.unit_id
+        lines = [f"# Debug packet: {_field(title)}", "", "## Unit", ""]
+        lines.extend(_identity_lines(target))
+    else:
+        attempts = [
+            record
+            for record in records
+            if record.result == "FAIL" and signature_for(record) == signature
+        ]
+        if not attempts:
+            raise LookupError("Failure cluster not found")
+        representative = attempts[0]
+        title = representative.error_code or signature or "failure"
+        lines = [f"# Failure cluster packet: {_field(title)}", "", "## Cluster", ""]
+        lines.extend([
+            f"- Signature: {_field(signature)}",
+            f"- Failed attempts: {len(attempts)}",
+            f"- Affected units: {len({record.serial_number or record.unit_id for record in attempts})}",
+            f"- Stations: {_field_list(record.station_id for record in attempts)}",
+            f"- Lots: {_field_list(record.lot_id for record in attempts)}",
+            f"- Products: {_field_list(record.product_code for record in attempts)}",
+        ])
+
+    ordered = sorted(attempts, key=_latest_sort_key)
+    lines.extend(["", "## Attempt history", ""])
+    for index, attempt in enumerate(ordered[:10], start=1):
+        lines.extend(_attempt_lines(attempt, index))
+    if len(ordered) > 10:
+        lines.extend(["", f"_Omitted {len(ordered) - 10} additional attempts._"])
+    lines.extend([
+        "",
+        "## Redaction",
+        "",
+        "Evidence excerpts were redacted and capped at 2,000 characters per attempt.",
+        "",
+    ])
+    return "\n".join(lines)
+
+
+def _identity_lines(record: UnitRecord) -> list[str]:
+    return [
+        f"- Serial: {_field(record.serial_number)}",
+        f"- Unit run: {_field(record.unit_id)}",
+        f"- Product: {_field(record.product_code)}",
+        f"- Lot: {_field(record.lot_id)}",
+        f"- Station: {_field(record.station_id)}",
+        f"- Host: {_field(record.host)}",
+    ]
+
+
+def _attempt_lines(record: UnitRecord, index: int) -> list[str]:
+    lines = [
+        f"### Attempt {index}: {_field(record.result)}",
+        "",
+        f"- Unit run: {_field(record.unit_id)}",
+        f"- Started: {_field(record.start_time)}",
+        f"- Ended: {_field(record.end_time)}",
+        f"- Duration: {record.duration_s:.1f}s",
+        f"- Station / host: {_field(record.station_id)} / {_field(record.host)}",
+        f"- Error: {_field(record.error_code)} - {_field(record.error_message)}",
+        f"- Failing step: {_field(record.failing_step)}",
+        f"- Analysis source: {_field(record.analysis_source)}",
+        f"- Context source: {_field(record.analysis_context_source)}",
+    ]
+    optional_fields = [
+        ("Root cause", record.root_cause),
+        ("Suggested solution", record.suggested_solution),
+        ("Category", record.root_cause_category),
+        ("Confidence", record.confidence),
+        ("Evidence summary", record.evidence_summary),
+        ("Next debug action", record.next_debug_action),
+        ("Likely owner", record.likely_owner),
+        ("Safety / escape risk", record.safety_or_escape_risk),
+        ("Needs more evidence", record.needs_more_evidence),
+        ("Knowledge sections", ", ".join(record.knowledge_section_ids)),
+        ("Knowledge categories", ", ".join(record.knowledge_categories)),
+        ("Acronyms used", ", ".join(record.acronyms_used)),
+        ("Unknown acronyms", ", ".join(record.unknown_acronyms)),
+    ]
+    lines.extend(f"- {label}: {_field(value)}" for label, value in optional_fields if value not in (None, "", []))
+    excerpt = record.redacted_snippet or record.debug_excerpt or record.ftrunner_snippet
+    if excerpt:
+        safe_excerpt = redact(excerpt)[:2000]
+        lines.extend(["", "Evidence excerpt:", "", *[f"    {line}" for line in safe_excerpt.splitlines()]])
+    lines.append("")
+    return lines
+
+
+def _field(value: object) -> str:
+    text = " ".join(str(value if value not in (None, "") else "Unavailable").split())
+    return text[:500]
+
+
+def _field_list(values: Iterable[object]) -> str:
+    return ", ".join(sorted({_field(value) for value in values if value})) or "Unavailable"
 
 
 def _unit_key(record: UnitRecord) -> str:

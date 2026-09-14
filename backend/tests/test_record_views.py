@@ -7,9 +7,11 @@ from __future__ import annotations
 
 from app.models import UnitRecord
 from app.record_views import (
+    build_debug_packet,
     classify_attempts,
     group_units_by_serial,
     latest_records_by_serial,
+    signature_for,
 )
 
 
@@ -132,3 +134,37 @@ class TestGroupUnitsBySerial:
         assert serials == {"SNA", "SNB", "SNC"}
         snb = next(r for r in latest if r.serial_number == "SNB")
         assert snb.result == "PASS"
+
+
+def test_unit_debug_packet_is_redacted_and_bounded():
+    record = _rec("u1", "SN1", "FAIL", "2026-01-01T10:00:00")
+    record.error_code = "E1"
+    record.debug_excerpt = "password=secret\n" + ("A" * 2500)
+    record.root_cause = "fixture contact"
+
+    packet = build_debug_packet([record], unit_id="u1")
+
+    assert "fixture contact" in packet
+    assert "password=secret" not in packet
+    assert packet.count("A") <= 2000
+
+
+def test_cluster_debug_packet_includes_only_matching_failures():
+    matching = _rec("u1", "SN1", "FAIL", "2026-01-01T10:00:00")
+    matching.error_code = "E1"
+    matching.error_message = "Retry count 3 exceeded"
+    same_family = matching.model_copy(update={
+        "unit_id": "u2",
+        "serial_number": "SN2",
+        "error_message": "Retry count 7 exceeded",
+    })
+    passing = _rec("u3", "SN3", "PASS", "2026-01-01T11:00:00")
+
+    packet = build_debug_packet(
+        [matching, same_family, passing],
+        signature=signature_for(matching),
+    )
+
+    assert "Failed attempts: 2" in packet
+    assert "Affected units: 2" in packet
+    assert "u3" not in packet

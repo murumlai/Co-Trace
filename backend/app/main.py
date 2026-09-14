@@ -21,7 +21,7 @@ from urllib.parse import urlencode
 
 from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import aggregator
@@ -41,7 +41,7 @@ from .knowledge import parsing
 from .knowledge.summarizer import ProductKnowledgeError, is_llm_backend_available
 from .logging_config import setup_backend_logging, write_frontend_log
 from .models import AcronymUpsertRequest, AdminLoginRequest, FrontendLogRequest
-from .record_views import group_units_by_serial
+from .record_views import build_debug_packet, group_units_by_serial
 from .upload_storage import UploadStorageError, save_uploads
 
 setup_backend_logging(settings.APP_DEBUG)
@@ -339,6 +339,24 @@ def clusters(job_id: str, user: AuthenticatedUser = Depends(require_user),
              reg: Any = Depends(get_registry)) -> dict:
     job = _get_owned_job(job_id, user, reg)
     return {"clusters": aggregator.compute_failure_clusters(job.records)}
+
+
+@app.get("/api/jobs/{job_id}/debug-packet", response_class=PlainTextResponse)
+def debug_packet(job_id: str, unit_id: str | None = None, signature: str | None = None,
+                 user: AuthenticatedUser = Depends(require_user),
+                 reg: Any = Depends(get_registry)) -> PlainTextResponse:
+    job = _get_owned_job(job_id, user, reg)
+    try:
+        content = build_debug_packet(job.records, unit_id=unit_id, signature=signature)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return PlainTextResponse(
+        content,
+        media_type="text/markdown",
+        headers={"Content-Disposition": 'attachment; filename="co-trace-debug-packet.md"'},
+    )
 
 
 @app.post("/api/jobs/{job_id}/units/{unit_id}/reanalyze")

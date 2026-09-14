@@ -218,6 +218,7 @@ class TestJobOwnership:
             ("POST", "/api/jobs/owned-job/stop"),
             ("GET", "/api/jobs/owned-job/units"),
             ("GET", "/api/jobs/owned-job/clusters"),
+            ("GET", "/api/jobs/owned-job/debug-packet?unit_id=u1"),
             ("POST", "/api/jobs/owned-job/units/u1/reanalyze"),
             ("GET", "/api/jobs/owned-job/manager"),
         ],

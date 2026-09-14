@@ -1,6 +1,6 @@
 import { debugLog, log } from './logger'
 
-async function request(path, { method = 'GET', body, headers = {}, signal, authOptional = false } = {}) {
+async function request(path, { method = 'GET', body, headers = {}, signal, authOptional = false, responseType = 'json' } = {}) {
   const started = performance.now()
   let res
   try {
@@ -35,6 +35,7 @@ async function request(path, { method = 'GET', body, headers = {}, signal, authO
   if (method !== 'GET') {
     log('info', 'API request completed', { path, method, status: res.status, durationMs })
   }
+  if (responseType === 'text') return res.text()
   return res.json()
 }
 
@@ -48,6 +49,12 @@ export const api = {
   stop: (jobId) => request(`/api/jobs/${jobId}/stop`, { method: 'POST' }),
   units: (jobId) => request(`/api/jobs/${jobId}/units`),
   clusters: (jobId) => request(`/api/jobs/${jobId}/clusters`),
+  debugPacket: (jobId, { unitId, signature }) => {
+    const params = new URLSearchParams()
+    if (unitId) params.set('unit_id', unitId)
+    if (signature) params.set('signature', signature)
+    return request(`/api/jobs/${jobId}/debug-packet?${params}`, { responseType: 'text' })
+  },
   reanalyze: (jobId, unitId) =>
     request(`/api/jobs/${jobId}/units/${unitId}/reanalyze`, { method: 'POST' }),
   manager: (jobId) => request(`/api/jobs/${jobId}/manager`),
