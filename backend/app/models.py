@@ -249,6 +249,7 @@ class SerialUnitGroup(BaseModel):
 class JobProgress(BaseModel):
     processed: int = 0
     total: int = 0
+    stage: Optional[str] = None
 
 
 class JobStatus(BaseModel):

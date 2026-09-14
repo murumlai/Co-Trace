@@ -89,6 +89,7 @@ class JobOrchestrator:
         job.status = "running"
         job.started_at = job.started_at or time.time()
         job.completed_at = None
+        job.stage = "parsing"
         job.message = "Scanning uploaded files"
         job.save()
 
@@ -124,6 +125,7 @@ class JobOrchestrator:
             _raise_if_cancelled(job)
 
             # One redacted <product_code>.json per product, serving both tabs.
+            job.stage = "writing"
             job.message = "Writing per-product JSON"
             written = self._writer.write(
                 records, os.path.join(job.workdir, "preprocessed"), warnings=job.warnings
@@ -132,6 +134,7 @@ class JobOrchestrator:
             _raise_if_cancelled(job)
 
             # Engineer analysis only for failed units (grouped by signature).
+            job.stage = "analysis"
             job.message = "Analyzing failed units"
             log.info(
                 "Job %s analyzing %s failed units.",
@@ -143,6 +146,7 @@ class JobOrchestrator:
             job.status = "done"
             job.completed_at = time.time()
             job.processed = job.total
+            job.stage = "complete"
             job.message = f"Completed: {len(records)} unit runs"
             job.save()
             self._do_cleanup(job)
@@ -150,6 +154,7 @@ class JobOrchestrator:
         except JobCancelled:
             job.status = "cancelled"
             job.completed_at = time.time()
+            job.stage = "cancelled"
             job.message = "Batch stopped by user"
             job.save()
             self._do_cleanup(job)
@@ -157,6 +162,7 @@ class JobOrchestrator:
         except Exception as exc:  # noqa: BLE001 - surface failure to the UI
             job.status = "error"
             job.completed_at = time.time()
+            job.stage = "error"
             job.message = f"Processing failed: {type(exc).__name__}: {exc}"
             job.save()
             self._do_cleanup(job)
@@ -200,10 +206,11 @@ def run_job(job_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _analysis_progress_updater(job: Any) -> Callable[[int, int, str], None]:
-    def update(processed: int, total: int, message: str) -> None:
+    def update(processed: int, total: int, message: str, stage: str = "analysis") -> None:
         _raise_if_cancelled(job)
         job.processed = processed
         job.total = max(total, 1)
+        job.stage = stage
         if settings.LLM_PROVIDER == "copilot_sdk" and total > 0 and processed < total:
             if settings.COPILOT_ENABLE_MINI_ENRICH:
                 calls = f"1-2 Copilot calls; mini skips contexts below {settings.COPILOT_MINI_MIN_CONTEXT_CHARS} chars"

@@ -32,6 +32,7 @@ class Job:
     force_refresh: bool = False
     status: JobState = "pending"
     message: str = ""
+    stage: str = "pending"
     processed: int = 0
     total: int = 0
     created_at: float = field(default_factory=time.time)
@@ -53,7 +54,7 @@ class Job:
         return JobStatus(
             job_id=self.job_id,
             status=self.status,
-            progress=JobProgress(processed=self.processed, total=self.total),
+            progress=JobProgress(processed=self.processed, total=self.total, stage=self.stage),
             message=self.message,
             elapsed_s=round(self.elapsed_s(), 2),
             unit_count=len(self.records),
@@ -96,6 +97,7 @@ def _inline_save(job: Job) -> None:
         "force_refresh": job.force_refresh,
         "status": job.status,
         "message": job.message,
+        "stage": job.stage,
         "processed": job.processed,
         "total": job.total,
         "created_at": job.created_at,

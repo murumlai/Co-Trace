@@ -71,6 +71,23 @@ class TestSignatureFor:
         assert all(c in "0123456789abcdef" for c in sig)
 
 
+def test_progress_reports_stable_analysis_stages():
+    events: list[tuple[int, int, str, str]] = []
+    job = _make_job([_fail_rec("u1")])
+
+    analyze_job(
+        job,
+        analyze_failure=_stub_analyze,
+        progress_callback=lambda processed, total, message, stage: events.append(
+            (processed, total, message, stage)
+        ),
+    )
+
+    stages = [stage for _, _, _, stage in events]
+    assert "checking_cache" in stages
+    assert "analyzing" in stages
+
+
 # ---------------------------------------------------------------------------
 # build_llm_context
 # ---------------------------------------------------------------------------

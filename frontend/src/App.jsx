@@ -73,7 +73,7 @@ function Shell() {
     setWarnings([])
     setLlmMetrics(null)
     setActiveJobId(null)
-    setBatchProgress({ status: 'uploading', processed: 0, total: files.length, message: 'Uploading files' })
+    setBatchProgress({ status: 'uploading', stage: 'uploading', processed: 0, total: files.length, message: 'Uploading files' })
     const controller = new AbortController()
     uploadAbort.current = controller
     try {
@@ -103,6 +103,7 @@ function Shell() {
       setBatchProgress((current) => ({
         ...(current || {}),
         status: stopped ? 'cancelled' : 'error',
+        stage: stopped ? 'cancelled' : 'error',
         message: stopped ? 'Batch stopped by user' : err.message,
       }))
       setBatchRunning(false)
@@ -116,6 +117,7 @@ function Shell() {
       if (runToken.current !== token) return
       setBatchProgress({
         status: status.status,
+        stage: status.progress.stage,
         processed: status.progress.processed,
         total: status.progress.total,
         message: status.message,
@@ -147,7 +149,7 @@ function Shell() {
       uploadAbort.current?.abort()
       uploadAbort.current = null
       setBatchRunning(false)
-      setBatchProgress({ status: 'cancelled', processed: 0, total: 1, message: 'Batch stopped by user' })
+      setBatchProgress({ status: 'cancelled', stage: 'cancelled', processed: 0, total: 1, message: 'Batch stopped by user' })
       return
     }
     try {

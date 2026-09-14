@@ -20,7 +20,7 @@ log = logging.getLogger("cotrace.analyzer")
 
 AnalysisReturn = tuple[str, str, str] | LlmAnalysisResult
 AnalyzeFailure = Callable[..., AnalysisReturn]
-AnalysisProgress = Callable[[int, int, str], None]
+AnalysisProgress = Callable[[int, int, str, str], None]
 
 
 def build_llm_context(record: UnitRecord) -> tuple[str, str]:
@@ -103,7 +103,12 @@ def analyze_job(
         len(job.signature_cache),
     )
     if progress_callback:
-        progress_callback(0, total_signatures, _analysis_progress_message(0, total_signatures, "starting"))
+        progress_callback(
+            0,
+            total_signatures,
+            _analysis_progress_message(0, total_signatures, "starting"),
+            "analysis",
+        )
 
     completed_signatures: set[str] = set()
     for rec in failed:
@@ -114,6 +119,7 @@ def analyze_job(
                 len(completed_signatures),
                 total_signatures,
                 _analysis_progress_message(len(completed_signatures) + 1, total_signatures, "checking"),
+                "checking_cache",
             )
         source = _analyze_unit(
             job,
@@ -124,10 +130,11 @@ def analyze_job(
             knowledge_retriever=knowledge_retriever,
             acronym_glossary=acronym_glossary,
             progress_callback=(
-                lambda message: progress_callback(
+                lambda message, stage: progress_callback(
                     len(completed_signatures),
                     total_signatures,
                     message,
+                    stage,
                 )
                 if is_new_signature and progress_callback
                 else None
@@ -142,6 +149,7 @@ def analyze_job(
                     len(completed_signatures),
                     total_signatures,
                     _analysis_progress_message(len(completed_signatures), total_signatures, "done", source),
+                    "loaded_cache" if source in ("cached", "local-cache") else "analyzing",
                 )
     log.info("Analysis finished for job %s: %s cached signatures.", job.job_id[:8], len(job.signature_cache))
 
@@ -166,7 +174,7 @@ def _analyze_unit(
     force: bool,
     analyze_failure: AnalyzeFailure,
     reuse_signature_cache: bool = True,
-    progress_callback: Callable[[str], None] | None = None,
+    progress_callback: Callable[[str, str], None] | None = None,
     progress_index: int = 1,
     progress_total: int = 1,
     cache: object | None = None,
@@ -225,7 +233,10 @@ def _analyze_unit(
             return rec.analysis_source
 
     if progress_callback:
-        progress_callback(_analysis_progress_message(progress_index, progress_total, "llm"))
+        progress_callback(
+            _analysis_progress_message(progress_index, progress_total, "llm"),
+            "analyzing",
+        )
 
     _record_glossary_unknowns(rec, glossary, acronym_glossary)
     log.info(

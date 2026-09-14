@@ -106,6 +106,11 @@ class TestJobSave:
 
         assert job.to_status().elapsed_s == 25.25
 
+    def test_to_status_exposes_progress_stage(self):
+        job = Job(job_id="abc123", stage="checking_cache")
+
+        assert job.to_status().progress.stage == "checking_cache"
+
 
 # ---------------------------------------------------------------------------
 # JobRegistry.load_from_disk

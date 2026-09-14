@@ -21,7 +21,7 @@ from .models import LlmAnalysisResult, UnitRecord
 # Type aliases re-exported for convenience
 # ---------------------------------------------------------------------------
 
-AnalysisProgress = Callable[[int, int, str], None]
+AnalysisProgress = Callable[[int, int, str, str], None]
 """(processed: int, total: int, message: str) → None"""
 
 AnalyzeFailure = Callable[[str | None, str | None, str], tuple[str, str, str] | LlmAnalysisResult]

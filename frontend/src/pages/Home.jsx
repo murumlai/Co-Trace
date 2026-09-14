@@ -205,6 +205,27 @@ function SummaryMetric({ label, value }) {
   )
 }
 
+const PROGRESS_STAGE = {
+  uploading: { label: 'Uploading', tone: 'accent' },
+  parsing: { label: 'Parsing logs', tone: 'accent' },
+  writing: { label: 'Preparing records', tone: 'accent' },
+  analysis: { label: 'Preparing analysis', tone: 'accent' },
+  checking_cache: { label: 'Checking saved analysis', tone: 'muted' },
+  analyzing: { label: 'Analyzing with Copilot', tone: 'accent' },
+  loaded_cache: { label: 'Loaded from cache', tone: 'pass' },
+  complete: { label: 'Complete', tone: 'pass' },
+  cancelled: { label: 'Cancelled', tone: 'warn' },
+  error: { label: 'Failed', tone: 'fail' },
+}
+
+function ProgressStage({ stage, status }) {
+  const meta = PROGRESS_STAGE[stage] || PROGRESS_STAGE[status] || {
+    label: stage || status || 'Pending',
+    tone: 'muted',
+  }
+  return <Badge tone={meta.tone}>{meta.label}</Badge>
+}
+
 export default function Home({ onStartBatch, onStopBatch, processing, progress, batchError, llmMetrics, files, setFiles }) {
   const [dragging, setDragging] = useState(false)
   const [localError, setLocalError] = useState('')
@@ -419,8 +440,11 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
 
         {progress && (
           <div className="mt-6">
-            <div className="flex justify-between text-sm text-muted mb-2">
-              <span>{progress.message || progress.status}</span>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm text-muted">
+              <div className="flex min-w-0 items-center gap-2">
+                <ProgressStage stage={progress.stage} status={progress.status} />
+                <span className="break-words">{progress.message || progress.status}</span>
+              </div>
               <span>{progress.elapsed_s ? `${progressLabel} · Elapsed ${formatElapsed(progress.elapsed_s)}` : progressLabel}</span>
             </div>
             <div className="h-3 rounded-full bg-surface-2 border border-border overflow-hidden">
