@@ -810,6 +810,65 @@ function DebugLogStatus({ attempt }) {
   )
 }
 
+const ANALYSIS_SOURCE_LABEL = {
+  llm: 'Copilot analysis',
+  stub: 'Offline placeholder',
+  cached: 'Reused in batch',
+  'local-cache': 'Saved analysis',
+}
+
+const CONTEXT_SOURCE_LABEL = {
+  debug_excerpt: 'DebugLog excerpt',
+  ftrunner_snippet: 'FTRunner snippet',
+  error_message: 'Error message only',
+}
+
+function EvidenceQuality({ attempt }) {
+  const weakReasons = []
+  if (attempt.analysis_source === 'stub') weakReasons.push('Offline placeholder, not a live diagnosis')
+  if (attempt.analysis_context_source === 'error_message') weakReasons.push('Only the error message was available')
+  if (attempt.knowledge_match_status && attempt.knowledge_match_status !== 'matched') {
+    weakReasons.push('No matching product knowledge')
+  }
+  if (
+    attempt.debuglog_status &&
+    !['excerpt', 'not_applicable'].includes(attempt.debuglog_status)
+  ) {
+    weakReasons.push(attempt.debuglog_message || 'DebugLog evidence was unavailable')
+  }
+  const unknownAcronyms = attempt.unknown_acronyms || []
+
+  return (
+    <div className="mb-4 border-y border-border/60 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone={weakReasons.length ? 'warn' : 'pass'}>
+          {weakReasons.length ? 'Weak evidence' : 'Grounded evidence'}
+        </Badge>
+        <Badge tone={attempt.analysis_source === 'stub' ? 'warn' : 'muted'}>
+          {ANALYSIS_SOURCE_LABEL[attempt.analysis_source] || attempt.analysis_source || 'Pending analysis'}
+        </Badge>
+        <Badge tone="muted">
+          {CONTEXT_SOURCE_LABEL[attempt.analysis_context_source] || 'Context source unavailable'}
+        </Badge>
+        {attempt.knowledge_match_status === 'matched' && <Badge tone="pass">Product knowledge matched</Badge>}
+      </div>
+      {weakReasons.length > 0 && (
+        <ul className="mt-2 space-y-1 text-xs text-warning">
+          {weakReasons.map((reason) => <li key={reason}>{reason}</li>)}
+        </ul>
+      )}
+      {unknownAcronyms.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted">
+          <span>Review acronyms:</span>
+          {unknownAcronyms.map((acronym) => (
+            <Badge key={acronym} tone="warn">{acronym}</Badge>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache }) {
   const canClearCache =
     !!onClearCache &&
@@ -844,6 +903,7 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
 
       <KnowledgeBadge attempt={attempt} />
       <DebugLogStatus attempt={attempt} />
+      <EvidenceQuality attempt={attempt} />
 
       <div className="text-xs uppercase tracking-wide text-muted mb-1">
         Root cause
