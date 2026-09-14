@@ -175,10 +175,11 @@ function LlmMetricsPanel({ metrics }) {
           <p className="text-xs font-semibold uppercase tracking-wide text-muted">LLM usage</p>
           <h2 className="mt-1 font-display text-2xl font-extrabold text-ink">Model cost and size metrics</h2>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[28rem]">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 lg:min-w-[34rem]">
           <SummaryMetric label="Provider" value={providerLabel(metrics.provider)} />
           <SummaryMetric label="Live calls" value={formatNumber(metrics.total_calls)} />
           <SummaryMetric label="Cache hits" value={formatNumber(metrics.cache_hits)} />
+          <SummaryMetric label="Playbook hits" value={formatNumber(metrics.playbook_hits || 0)} />
           <SummaryMetric label="Credits" value={formatCredits(metrics.total_estimated_credits)} />
         </div>
       </div>
@@ -213,6 +214,7 @@ const PROGRESS_STAGE = {
   checking_cache: { label: 'Checking saved analysis', tone: 'muted' },
   analyzing: { label: 'Analyzing with Copilot', tone: 'accent' },
   loaded_cache: { label: 'Loaded from cache', tone: 'pass' },
+  playbook: { label: 'Known failure matched', tone: 'pass' },
   complete: { label: 'Complete', tone: 'pass' },
   cancelled: { label: 'Cancelled', tone: 'warn' },
   error: { label: 'Failed', tone: 'fail' },

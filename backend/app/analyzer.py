@@ -80,6 +80,7 @@ def analyze_job(
     cache: object | None = None,
     knowledge_retriever: object | None = None,
     acronym_glossary: object | None = None,
+    playbook_store: object | None = None,
 ) -> None:
     """Populate root cause / solution for all failed units, using the cache.
 
@@ -129,6 +130,7 @@ def analyze_job(
             cache=cache,
             knowledge_retriever=knowledge_retriever,
             acronym_glossary=acronym_glossary,
+            playbook_store=playbook_store,
             progress_callback=(
                 lambda message, stage: progress_callback(
                     len(completed_signatures),
@@ -149,7 +151,9 @@ def analyze_job(
                     len(completed_signatures),
                     total_signatures,
                     _analysis_progress_message(len(completed_signatures), total_signatures, "done", source),
-                    "loaded_cache" if source in ("cached", "local-cache") else "analyzing",
+                    "playbook" if source == "playbook" else (
+                        "loaded_cache" if source in ("cached", "local-cache") else "analyzing"
+                    ),
                 )
     log.info("Analysis finished for job %s: %s cached signatures.", job.job_id[:8], len(job.signature_cache))
 
@@ -165,6 +169,8 @@ def _analysis_progress_message(done: int, total: int, state: str, source: str | 
         return f"Analyzing uncached failure signature {done}/{total}"
     if source in ("cached", "local-cache"):
         return f"Loaded saved analysis for failure signature {done}/{total}"
+    if source == "playbook":
+        return f"Matched known failure for signature {done}/{total}"
     return f"Analyzed failure signature {done}/{total}"
 
 
@@ -180,6 +186,7 @@ def _analyze_unit(
     cache: object | None = None,
     knowledge_retriever: object | None = None,
     acronym_glossary: object | None = None,
+    playbook_store: object | None = None,
 ) -> str:
     from . import analysis_cache as _ac_module  # avoid circular at import time
     _cache: object = cache if cache is not None else _ac_module._default_cache
@@ -188,6 +195,27 @@ def _analyze_unit(
     err_msg, snippet, context_source = _redacted_context(rec)
     rec.redacted_snippet = snippet
     rec.analysis_context_source = context_source
+
+    playbook = _find_reviewed_playbook(playbook_store, sig, rec.product_code)
+    if playbook is not None:
+        existing = job.signature_cache.get(sig)
+        cached_analysis = _coerce_cached_analysis(existing) if existing is not None else None
+        if not cached_analysis or cached_analysis.playbook_id != playbook.playbook_id:
+            cached_analysis = AnalysisResult(
+                root_cause=playbook.root_cause or _insufficient_root_cause(rec.error_code, err_msg),
+                suggested_solution=playbook.corrective_action or _insufficient_solution(),
+                source="playbook",
+                playbook_id=playbook.playbook_id,
+            )
+        job.signature_cache[sig] = cached_analysis
+        rec.analysis_cache_key = None
+        _apply_analysis_to_record(rec, cached_analysis)
+        job.llm_metrics.record_playbook_hit()
+        return "playbook"
+
+    stale_analysis = job.signature_cache.get(sig)
+    if stale_analysis is not None and _coerce_cached_analysis(stale_analysis).source == "playbook":
+        job.signature_cache.pop(sig, None)
 
     knowledge = _retrieve_knowledge(rec, knowledge_retriever)
     glossary = _resolve_glossary(rec, acronym_glossary, snippet)
@@ -441,6 +469,7 @@ def _apply_analysis_to_record(
     record.root_cause = analysis.root_cause
     record.suggested_solution = analysis.suggested_solution
     record.analysis_source = source or analysis.source
+    record.playbook_id = analysis.playbook_id
     record.confidence = analysis.confidence
     record.root_cause_category = analysis.root_cause_category
     record.evidence_summary = analysis.evidence_summary
@@ -463,6 +492,20 @@ def _cache_confidence(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return min(1.0, max(0.0, confidence))
+
+
+def _find_reviewed_playbook(
+    store: object | None,
+    signature: str,
+    product_code: str | None,
+):
+    if store is None:
+        return None
+    try:
+        return store.find_reviewed(signature=signature, product_code=product_code)
+    except Exception:  # noqa: BLE001 - playbook lookup must not block diagnosis
+        log.exception("Playbook lookup failed for signature %s.", signature)
+        return None
 
 
 def _apply_exact_knowledge_fallback(
@@ -535,6 +578,7 @@ def reanalyze_unit(
     analyze_failure: AnalyzeFailure = llm_client.analyze_with_metrics,
     knowledge_retriever: object | None = None,
     acronym_glossary: object | None = None,
+    playbook_store: object | None = None,
 ) -> UnitRecord | None:
     """Force a fresh per-unit LLM call, bypassing the signature cache."""
     for rec in job.records:
@@ -547,6 +591,7 @@ def reanalyze_unit(
                 analyze_failure=analyze_failure,
                 knowledge_retriever=knowledge_retriever,
                 acronym_glossary=acronym_glossary,
+                playbook_store=playbook_store,
             )
             return rec
     return None
@@ -572,11 +617,13 @@ class AnalyzerService:
         cache: object | None = None,
         knowledge_retriever: object | None = None,
         acronym_glossary: object | None = None,
+        playbook_store: object | None = None,
     ) -> None:
         self._analyze_failure: AnalyzeFailure = analyze_failure or llm_client.analyze_with_metrics
         self._cache = cache  # None ⇒ module default inside analyze_job/_analyze_unit
         self._knowledge_retriever = knowledge_retriever
         self._acronym_glossary = acronym_glossary
+        self._playbook_store = playbook_store
 
     def analyze_job(
         self,
@@ -591,6 +638,7 @@ class AnalyzerService:
             cache=self._cache,
             knowledge_retriever=self._knowledge_retriever,
             acronym_glossary=self._acronym_glossary,
+            playbook_store=self._playbook_store,
         )
 
     def reanalyze_unit(self, job: Job, unit_id: str) -> UnitRecord | None:
@@ -606,6 +654,7 @@ class AnalyzerService:
                     cache=self._cache,
                     knowledge_retriever=self._knowledge_retriever,
                     acronym_glossary=self._acronym_glossary,
+                    playbook_store=self._playbook_store,
                 )
                 return rec
         return None

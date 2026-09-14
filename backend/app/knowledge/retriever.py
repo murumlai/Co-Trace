@@ -20,6 +20,7 @@ from ..config import settings
 from ..models import UnitRecord
 from . import summarizer as summarizer_mod
 from .models import (
+    AdminPlaybookEntry,
     KnowledgeContext,
     KnowledgeIndex,
     KnowledgeManifest,
@@ -39,8 +40,9 @@ _MAX_FALLBACK_SECTIONS = 2    # product context when no lexical overlap
 class LexicalKnowledgeRetriever:
     """Loads the pack (cached by mtime) and retrieves per-failure context."""
 
-    def __init__(self, store: KnowledgeStore | None = None) -> None:
+    def __init__(self, store: KnowledgeStore | None = None, playbook_store: object | None = None) -> None:
         self._store = store or KnowledgeStore()
+        self._playbook_store = playbook_store
         self._lock = threading.Lock()
         self._index: KnowledgeIndex | None = None
         self._manifest: KnowledgeManifest | None = None
@@ -55,10 +57,15 @@ class LexicalKnowledgeRetriever:
         product_code = record.product_code
         if not product_code:
             return KnowledgeContext(match_status="no_product_code")
+        admin_playbooks = self._admin_playbooks(product_code)
 
         index, manifest = self._ensure_loaded()
         if index is None or manifest is None:
-            return KnowledgeContext(product_code=product_code, match_status="no_product_knowledge")
+            return KnowledgeContext(
+                product_code=product_code,
+                match_status="no_product_knowledge",
+                admin_playbooks=admin_playbooks,
+            )
 
         # Build the candidate entry list: exact product-code match first, then
         # canonical suffix aliases (e.g. AAN32828-201 -> N32828-201), then RFC
@@ -94,6 +101,7 @@ class LexicalKnowledgeRetriever:
                 product_code=product_code,
                 knowledge_hash=_knowledge_hash_for(manifest, product_candidates),
                 match_status="no_product_knowledge",
+                admin_playbooks=admin_playbooks,
             )
 
         knowledge_hash = _knowledge_hash_for(manifest, product_candidates)
@@ -107,12 +115,24 @@ class LexicalKnowledgeRetriever:
         if scored:
             top = scored[: settings.PRODUCT_KNOWLEDGE_TOP_K]
             matches = self._read_matches(top)
-            return self._context(product_code, knowledge_hash, matches, matched=True)
+            return self._context(
+                product_code,
+                knowledge_hash,
+                matches,
+                matched=True,
+                admin_playbooks=admin_playbooks,
+            )
 
         # No lexical overlap: still surface a little product context.
         top = fallback[:_MAX_FALLBACK_SECTIONS]
         matches = self._read_matches(top)
-        ctx = self._context(product_code, knowledge_hash, matches, matched=False)
+        ctx = self._context(
+            product_code,
+            knowledge_hash,
+            matches,
+            matched=False,
+            admin_playbooks=admin_playbooks,
+        )
         ctx.match_status = "no_match"
         ctx.matched_section_ids = []
         ctx.matched_categories = []
@@ -174,6 +194,7 @@ class LexicalKnowledgeRetriever:
         knowledge_hash: str,
         matches: list[RetrievalMatch],
         matched: bool,
+        admin_playbooks: list[AdminPlaybookEntry] | None = None,
     ) -> KnowledgeContext:
         context_text, debug_text = _assemble_context(matches)
         return KnowledgeContext(
@@ -186,7 +207,20 @@ class LexicalKnowledgeRetriever:
             matches=matches,
             context_text=context_text,
             debug_learning_text=debug_text,
+            admin_playbooks=admin_playbooks or [],
         )
+
+    def _admin_playbooks(self, product_code: str) -> list[AdminPlaybookEntry]:
+        if self._playbook_store is None:
+            return []
+        try:
+            return self._playbook_store.list_entries(
+                product_code=product_code,
+                review_status="reviewed",
+            )
+        except Exception:  # noqa: BLE001 - optional playbooks must not block retrieval
+            log.exception("Could not load admin playbooks for %s.", product_code)
+            return []
 
     # --- pack loading (mtime-cached) ----------------------------------------
 

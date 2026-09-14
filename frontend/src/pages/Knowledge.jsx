@@ -345,6 +345,7 @@ export default function Knowledge({ jobId, reviewFilter, onClearReview }) {
         />
       )}
 
+      <PlaybookManager canEdit={isAdmin} focusId={reviewFilter?.playbookId} />
       {manifest?.generated_at && (
         <p className="text-xs text-muted mb-4">
           Generated {manifest.generated_at.replace('T', ' ').slice(0, 19)} · hash{' '}
@@ -449,6 +450,81 @@ export default function Knowledge({ jobId, reviewFilter, onClearReview }) {
         </div>
       )}
     </div>
+  )
+}
+
+const EMPTY_PLAYBOOK = {
+  product_code: '', log_signature: '', symptom: '', failing_step: '', root_cause: '',
+  corrective_action: '', station_check: '', confidence: '', applies_to: '', review_status: 'draft',
+}
+const PLAYBOOK_FILTERS = [['', 'All'], ['draft', 'Draft'], ['reviewed', 'Reviewed'], ['retired', 'Retired']]
+
+function PlaybookManager({ canEdit, focusId }) {
+  const [entries, setEntries] = useState([])
+  const [statusFilter, setStatusFilter] = useState('')
+  const [form, setForm] = useState(EMPTY_PLAYBOOK)
+  const [editingId, setEditingId] = useState(null)
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  const load = async () => {
+    try {
+      const data = await api.playbooks(null, statusFilter)
+      setEntries(data.entries || [])
+      setError('')
+    } catch (err) { setError(err.message) }
+  }
+  useEffect(() => { load() }, [statusFilter])
+  const reset = () => { setForm(EMPTY_PLAYBOOK); setEditingId(null) }
+  const save = async (event) => {
+    event.preventDefault()
+    if (!form.product_code.trim() || !form.log_signature.trim() || !form.root_cause.trim() || !form.corrective_action.trim()) {
+      setError('Product, signature, root cause, and corrective action are required.')
+      return
+    }
+    setBusy(editingId || 'create')
+    try {
+      const payload = Object.fromEntries(Object.entries(form).map(([key, value]) => [key, value.trim() || null]))
+      if (editingId) await api.updatePlaybook(editingId, payload)
+      else await api.createPlaybook(payload)
+      reset()
+      await load()
+    } catch (err) { setError(err.message) } finally { setBusy('') }
+  }
+  const edit = (entry) => {
+    setEditingId(entry.playbook_id)
+    setForm(Object.fromEntries(Object.keys(EMPTY_PLAYBOOK).map((key) => [key, entry[key] ?? EMPTY_PLAYBOOK[key]])))
+  }
+  const changeStatus = async (entry, status) => {
+    setBusy(entry.playbook_id)
+    try {
+      if (status === 'retired') await api.retirePlaybook(entry.playbook_id)
+      else await api.updatePlaybook(entry.playbook_id, { review_status: status })
+      await load()
+    } catch (err) { setError(err.message) } finally { setBusy('') }
+  }
+  return (
+    <section className="mt-8" aria-labelledby="playbooks-heading">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div><h2 id="playbooks-heading" className="font-display text-xl font-bold text-ink">Known-failure playbooks</h2><p className="mt-1 text-sm text-muted">Reviewed exact signatures provide deterministic guidance before Copilot or cache lookup.</p></div>
+        <SegmentedControl options={PLAYBOOK_FILTERS} value={statusFilter} onChange={setStatusFilter} />
+      </div>
+      {error && <Panel className="mb-4 border-danger/30 bg-danger/5 p-3 text-sm text-danger">{error}</Panel>}
+      {canEdit && (
+        <Panel className="mb-4 p-4"><form onSubmit={save} className="space-y-3">
+          <div className="grid gap-3 md:grid-cols-3"><Input placeholder="Product code" value={form.product_code} onChange={(event) => setForm({ ...form, product_code: event.target.value })} /><Input placeholder="16-character failure signature" value={form.log_signature} onChange={(event) => setForm({ ...form, log_signature: event.target.value })} /><Input placeholder="Failing step (optional)" value={form.failing_step} onChange={(event) => setForm({ ...form, failing_step: event.target.value })} /></div>
+          <Input placeholder="Symptom (optional)" value={form.symptom} onChange={(event) => setForm({ ...form, symptom: event.target.value })} />
+          <div className="grid gap-3 md:grid-cols-2"><textarea className="min-h-24 rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink focus-ring" placeholder="Confirmed root cause" value={form.root_cause} onChange={(event) => setForm({ ...form, root_cause: event.target.value })} /><textarea className="min-h-24 rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink focus-ring" placeholder="Corrective action" value={form.corrective_action} onChange={(event) => setForm({ ...form, corrective_action: event.target.value })} /></div>
+          <div className="grid gap-3 md:grid-cols-3"><Input placeholder="Station check (optional)" value={form.station_check} onChange={(event) => setForm({ ...form, station_check: event.target.value })} /><Input placeholder="Confidence (optional)" value={form.confidence} onChange={(event) => setForm({ ...form, confidence: event.target.value })} /><select className="rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink focus-ring" value={form.review_status} onChange={(event) => setForm({ ...form, review_status: event.target.value })}><option value="draft">Draft</option><option value="reviewed">Reviewed</option></select></div>
+          <div className="flex gap-2"><Button type="submit" variant="primary" disabled={!!busy}>{busy ? 'Saving…' : editingId ? 'Update playbook' : 'Create playbook'}</Button>{editingId && <Button type="button" onClick={reset}>Cancel</Button>}</div>
+        </form></Panel>
+      )}
+      <div className="space-y-3">{entries.length ? entries.map((entry) => (
+        <Panel key={entry.playbook_id} className={entry.playbook_id === focusId ? 'border-accent bg-accent/5 p-4' : 'p-4'}>
+          <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap gap-2"><Badge tone="accent">{entry.product_code}</Badge><Badge tone={entry.review_status === 'reviewed' ? 'pass' : entry.review_status === 'retired' ? 'muted' : 'warn'}>{entry.review_status}</Badge><code className="text-xs text-muted">{entry.log_signature}</code></div><p className="mt-3 font-semibold text-ink">{entry.root_cause}</p><p className="mt-1 text-sm text-ink-2">{entry.corrective_action}</p><p className="mt-2 text-xs text-muted">Owner: {entry.owner || 'admin'} · Updated {entry.updated_at?.replace('T', ' ').slice(0, 19)}</p></div>
+          {canEdit && <div className="flex flex-wrap gap-2"><Button variant="ghost" className="px-2 py-1" onClick={() => edit(entry)}>Edit</Button>{entry.review_status === 'draft' && <Button variant="ghost" className="px-2 py-1" disabled={busy === entry.playbook_id} onClick={() => changeStatus(entry, 'reviewed')}>Review</Button>}{entry.review_status !== 'retired' && <Button variant="ghost" className="px-2 py-1 text-danger" disabled={busy === entry.playbook_id} onClick={() => changeStatus(entry, 'retired')}>Retire</Button>}</div>}</div>
+        </Panel>
+      )) : <Panel className="p-6 text-center text-sm text-muted">No playbooks in this status.</Panel>}</div>
+    </section>
   )
 }
 

@@ -37,9 +37,11 @@ from .dependencies import (
     get_knowledge_retriever,
     get_knowledge_store,
     get_orchestrator,
+    get_playbook_store,
     get_registry,
 )
 from .knowledge import parsing
+from .knowledge.models import PlaybookCreateRequest, PlaybookUpdateRequest
 from .knowledge.summarizer import ProductKnowledgeError, is_llm_backend_available
 from .logging_config import setup_backend_logging, write_frontend_log
 from .models import AcronymUpsertRequest, AdminLoginRequest, FeedbackCreateRequest, FeedbackEntry, FrontendLogRequest
@@ -579,6 +581,44 @@ def knowledge_section(section_id: str,
         if section.section_id == section_id:
             return section.model_dump()
     raise HTTPException(404, "Section not found")
+
+
+@app.get("/api/knowledge/playbooks")
+def list_playbooks(product: str | None = None, status: str | None = None,
+                   user: AuthenticatedUser = Depends(require_user),  # noqa: ARG001
+                   store: Any = Depends(get_playbook_store)) -> dict:
+    return {"entries": [
+        entry.model_dump()
+        for entry in store.list_entries(product_code=product, review_status=status)
+    ]}
+
+
+@app.post("/api/knowledge/playbooks")
+def create_playbook(req: PlaybookCreateRequest,
+                    user: AuthenticatedUser = Depends(require_admin),
+                    store: Any = Depends(get_playbook_store)) -> dict:
+    entry = store.create(uuid.uuid4().hex, req, owner=user.login)
+    return entry.model_dump()
+
+
+@app.patch("/api/knowledge/playbooks/{playbook_id}")
+def update_playbook(playbook_id: str, req: PlaybookUpdateRequest,
+                    user: AuthenticatedUser = Depends(require_admin),  # noqa: ARG001
+                    store: Any = Depends(get_playbook_store)) -> dict:
+    entry = store.update(playbook_id, req)
+    if entry is None:
+        raise HTTPException(404, "Playbook not found")
+    return entry.model_dump()
+
+
+@app.delete("/api/knowledge/playbooks/{playbook_id}")
+def retire_playbook(playbook_id: str,
+                    user: AuthenticatedUser = Depends(require_admin),  # noqa: ARG001
+                    store: Any = Depends(get_playbook_store)) -> dict:
+    entry = store.retire(playbook_id)
+    if entry is None:
+        raise HTTPException(404, "Playbook not found")
+    return entry.model_dump()
 
 
 @app.get("/api/knowledge/acronyms")

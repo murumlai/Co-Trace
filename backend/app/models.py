@@ -66,9 +66,10 @@ class UnitRecord(BaseModel):
     root_cause: Optional[str] = None
     suggested_solution: Optional[str] = None
     redacted_snippet: Optional[str] = None
-    analysis_source: Optional[str] = None  # "llm" | "stub" | "cached" | "local-cache"
+    analysis_source: Optional[str] = None  # "llm" | "stub" | "cached" | "local-cache" | "playbook"
     analysis_context_source: Optional[str] = None  # "debug_excerpt" | "ftrunner_snippet" | "error_message"
     analysis_cache_key: Optional[str] = None
+    playbook_id: Optional[str] = None
     confidence: Optional[float] = None
     root_cause_category: Optional[str] = None
     evidence_summary: Optional[str] = None
@@ -157,6 +158,7 @@ class LlmUsageMetrics(BaseModel):
     local_cache_hits: int = 0
     disk_cache_hits: int = 0
     calls_skipped_by_cache: int = 0
+    playbook_hits: int = 0
     mini: LlmModelMetrics = Field(default_factory=LlmModelMetrics)
     reasoning: LlmModelMetrics = Field(default_factory=LlmModelMetrics)
     total_calls: int = 0
@@ -169,6 +171,10 @@ class LlmUsageMetrics(BaseModel):
             self.disk_cache_hits += 1
         else:
             self.local_cache_hits += 1
+
+    def record_playbook_hit(self) -> None:
+        self.playbook_hits += 1
+        self.calls_skipped_by_cache += 1
 
     def add_model_call(
         self,
@@ -205,6 +211,7 @@ class LlmUsageMetrics(BaseModel):
         self.local_cache_hits += other.local_cache_hits
         self.disk_cache_hits += other.disk_cache_hits
         self.calls_skipped_by_cache += other.calls_skipped_by_cache
+        self.playbook_hits += other.playbook_hits
         self.mini.merge(other.mini)
         self.reasoning.merge(other.reasoning)
         self._refresh_totals()
@@ -221,6 +228,7 @@ class AnalysisResult(BaseModel):
     root_cause: str
     suggested_solution: str
     source: str
+    playbook_id: Optional[str] = None
     confidence: Optional[float] = None
     root_cause_category: Optional[str] = None
     evidence_summary: Optional[str] = None

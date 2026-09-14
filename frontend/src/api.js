@@ -70,6 +70,18 @@ export const api = {
   knowledgeScan: () => request('/api/knowledge/scan'),
   knowledgeSections: (product) =>
     request(`/api/knowledge/sections${product ? `?product=${encodeURIComponent(product)}` : ''}`),
+  playbooks: (product, status) => {
+    const params = new URLSearchParams()
+    if (product) params.set('product', product)
+    if (status) params.set('status', status)
+    const query = params.toString()
+    return request(`/api/knowledge/playbooks${query ? `?${query}` : ''}`)
+  },
+  createPlaybook: (payload) => request('/api/knowledge/playbooks', { method: 'POST', body: payload }),
+  updatePlaybook: (playbookId, payload) =>
+    request(`/api/knowledge/playbooks/${playbookId}`, { method: 'PATCH', body: payload }),
+  retirePlaybook: (playbookId) =>
+    request(`/api/knowledge/playbooks/${playbookId}`, { method: 'DELETE' }),
   knowledgeUploadCheck: (filename) =>
     request(`/api/knowledge/upload/check?filename=${encodeURIComponent(filename)}`),
   knowledgeJob: (jobId) => request(`/api/knowledge/jobs/${jobId}`),

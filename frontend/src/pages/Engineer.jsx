@@ -995,6 +995,7 @@ const ANALYSIS_SOURCE_LABEL = {
   stub: 'Offline placeholder',
   cached: 'Reused in batch',
   'local-cache': 'Saved analysis',
+  playbook: 'Reviewed playbook',
 }
 
 const CONTEXT_SOURCE_LABEL = {
@@ -1024,7 +1025,7 @@ function EvidenceQuality({ attempt }) {
         <Badge tone={weakReasons.length ? 'warn' : 'pass'}>
           {weakReasons.length ? 'Weak evidence' : 'Grounded evidence'}
         </Badge>
-        <Badge tone={attempt.analysis_source === 'stub' ? 'warn' : 'muted'}>
+        <Badge tone={attempt.analysis_source === 'stub' ? 'warn' : attempt.analysis_source === 'playbook' ? 'pass' : 'muted'}>
           {ANALYSIS_SOURCE_LABEL[attempt.analysis_source] || attempt.analysis_source || 'Pending analysis'}
         </Badge>
         <Badge tone="muted">
@@ -1100,7 +1101,9 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
   const canClearCache =
     !!onClearCache &&
     attempt.analysis_cache_key && ['llm', 'local-cache'].includes(attempt.analysis_source)
-  const sourceLabel = attempt.cache_cleared ? 'cache cleared' : attempt.analysis_source
+  const sourceLabel = attempt.cache_cleared
+    ? 'cache cleared'
+    : ANALYSIS_SOURCE_LABEL[attempt.analysis_source] || attempt.analysis_source
   const when = attempt.start_time ? attempt.start_time.replace('T', ' ').slice(0, 19) : null
 
   return (
@@ -1131,6 +1134,21 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
       <KnowledgeBadge attempt={attempt} />
       <DebugLogStatus attempt={attempt} />
       <EvidenceQuality attempt={attempt} />
+      {attempt.analysis_source === 'playbook' && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 border-l-2 border-teal pl-3">
+          <Badge tone="pass">Deterministic playbook guidance</Badge>
+          <Button
+            variant="ghost"
+            className="px-2 py-1"
+            onClick={() => onReviewKnowledge?.({
+              productCode: attempt.product_code,
+              playbookId: attempt.playbook_id,
+            })}
+          >
+            Open playbook
+          </Button>
+        </div>
+      )}
       <StructuredRca attempt={attempt} />
       <FeedbackControls
         attempt={attempt}
@@ -1192,6 +1210,7 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
             onClick={() => onReviewKnowledge?.({
               productCode: attempt.product_code,
               acronym: attempt.unknown_acronyms?.[0] || null,
+              playbookId: attempt.playbook_id,
             })}
           >
             Review knowledge

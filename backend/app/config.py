@@ -127,6 +127,9 @@ class Settings:
     PRODUCT_KNOWLEDGE_SECTIONS_FILE: str = os.getenv(
         "PRODUCT_KNOWLEDGE_SECTIONS_FILE", _repo_path("product_knowledge_sections.jsonl")
     )
+    PRODUCT_KNOWLEDGE_PLAYBOOKS_FILE: str = os.getenv(
+        "PRODUCT_KNOWLEDGE_PLAYBOOKS_FILE", _repo_path("admin_playbooks.json")
+    )
     # Source folders scanned for supporting product documents. Both are optional.
     PRODUCT_KNOWLEDGE_SOURCE_DIRS: list[str] = [
         p for p in os.getenv(

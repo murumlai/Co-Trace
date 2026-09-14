@@ -54,6 +54,44 @@ class KnownFailureEntry(BaseModel):
     confidence: Optional[str] = None
     applies_to: Optional[str] = None
     rfc_references: list["RfcReference"] = Field(default_factory=list)
+    owner: Optional[str] = None
+    review_status: Optional[Literal["draft", "reviewed", "retired"]] = None
+    source: Literal["document", "admin"] = "document"
+    updated_at: Optional[str] = None
+
+
+class AdminPlaybookEntry(KnownFailureEntry):
+    playbook_id: str
+    product_code: str
+    review_status: Literal["draft", "reviewed", "retired"] = "draft"
+    source: Literal["admin"] = "admin"
+    created_at: str
+
+
+class PlaybookCreateRequest(BaseModel):
+    product_code: str = Field(min_length=1, max_length=120)
+    log_signature: str = Field(min_length=16, max_length=16)
+    symptom: Optional[str] = None
+    failing_step: Optional[str] = None
+    root_cause: str
+    corrective_action: str
+    station_check: Optional[str] = None
+    confidence: Optional[str] = None
+    applies_to: Optional[str] = None
+    review_status: Literal["draft", "reviewed"] = "draft"
+
+
+class PlaybookUpdateRequest(BaseModel):
+    product_code: Optional[str] = None
+    log_signature: Optional[str] = Field(default=None, min_length=16, max_length=16)
+    symptom: Optional[str] = None
+    failing_step: Optional[str] = None
+    root_cause: Optional[str] = None
+    corrective_action: Optional[str] = None
+    station_check: Optional[str] = None
+    confidence: Optional[str] = None
+    applies_to: Optional[str] = None
+    review_status: Optional[Literal["draft", "reviewed", "retired"]] = None
 
 
 class AcronymDefinition(BaseModel):
@@ -232,3 +270,4 @@ class KnowledgeContext(BaseModel):
     # Curated summaries assembled for the LLM prompt (never raw doc text).
     context_text: str = ""
     debug_learning_text: str = ""
+    admin_playbooks: list[AdminPlaybookEntry] = Field(default_factory=list)

@@ -183,6 +183,8 @@ def _attempt_lines(record: UnitRecord, index: int) -> list[str]:
         f"- Analysis source: {_field(record.analysis_source)}",
         f"- Context source: {_field(record.analysis_context_source)}",
     ]
+    if record.playbook_id:
+        lines.append(f"- Playbook: {_field(record.playbook_id)}")
     optional_fields = [
         ("Root cause", record.root_cause),
         ("Suggested solution", record.suggested_solution),

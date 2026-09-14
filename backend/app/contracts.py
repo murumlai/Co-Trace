@@ -204,6 +204,21 @@ class FeedbackStore(Protocol):
         ...
 
 
+class PlaybookStore(Protocol):
+    """Persists and resolves admin-authored known-failure playbooks."""
+
+    def list_entries(
+        self,
+        *,
+        product_code: str | None = None,
+        review_status: str | None = None,
+    ) -> list[Any]:
+        ...
+
+    def find_reviewed(self, *, signature: str, product_code: str | None) -> Any | None:
+        ...
+
+
 class FailureAnalyzer(Protocol):
     """Orchestrates per-job failure analysis using a cache and LLM provider."""
 

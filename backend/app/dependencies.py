@@ -11,6 +11,7 @@ from .analyzer import AnalyzerService
 from .feedback_store import DiskFeedbackStore
 from .job_registry import JobRegistry, registry as _registry
 from .knowledge.acronym_glossary import AcronymGlossaryService, AcronymGlossaryStore
+from .knowledge.playbook_store import AdminPlaybookStore
 from .knowledge.retriever import LexicalKnowledgeRetriever
 from .knowledge.service import KnowledgeIngestionService
 from .knowledge.storage import KnowledgeStore
@@ -22,8 +23,9 @@ from .orchestrator import JobOrchestrator, _default_orchestrator as _orchestrato
 
 _analysis_cache = DiskAnalysisCache()
 _feedback_store = DiskFeedbackStore()
+_playbook_store = AdminPlaybookStore()
 _knowledge_store = KnowledgeStore()
-_knowledge_retriever = LexicalKnowledgeRetriever(_knowledge_store)
+_knowledge_retriever = LexicalKnowledgeRetriever(_knowledge_store, _playbook_store)
 _knowledge_ingestion = KnowledgeIngestionService(_knowledge_store)
 _acronym_glossary_store = AcronymGlossaryStore()
 _acronym_glossary_store.dedupe()  # self-heal any duplicate entries on startup
@@ -31,6 +33,7 @@ _acronym_glossary_service = AcronymGlossaryService(_acronym_glossary_store)
 _analyzer_service = AnalyzerService(
     knowledge_retriever=_knowledge_retriever,
     acronym_glossary=_acronym_glossary_service,
+    playbook_store=_playbook_store,
 )
 
 # Normal uploads run through the default orchestrator, which was built at import
@@ -66,6 +69,11 @@ def get_analysis_cache() -> DiskAnalysisCache:
 def get_feedback_store() -> DiskFeedbackStore:
     """Provide the owner-scoped engineer feedback store."""
     return _feedback_store
+
+
+def get_playbook_store() -> AdminPlaybookStore:
+    """Provide the persistent admin-authored playbook store."""
+    return _playbook_store
 
 
 def get_knowledge_retriever() -> LexicalKnowledgeRetriever:
