@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   IconWell,
+  Input,
   Panel,
   SegmentedControl,
   StatusBadge,
@@ -21,6 +22,88 @@ const FILTERS = [
   ['first_pass', 'First-pass'],
 ]
 
+const SORT_OPTIONS = [
+  ['latest_failure', 'Latest failure'],
+  ['status_priority', 'Status priority'],
+  ['attempt_count', 'Attempt count'],
+  ['failure_count', 'Failure count'],
+  ['station', 'Station'],
+  ['duration', 'Duration'],
+  ['knowledge_match', 'Knowledge match'],
+]
+
+const SEARCH_FIELDS = [
+  'unit_id',
+  'serial_number',
+  'product_code',
+  'lot_id',
+  'station_id',
+  'host',
+  'error_code',
+  'error_message',
+  'failing_step',
+  'root_cause',
+  'suggested_solution',
+  'knowledge_match_status',
+]
+
+const textValue = (value) => String(value ?? '').toLocaleLowerCase()
+
+const groupAttempts = (group) => [group.final, ...(group.failures || [])].filter(Boolean)
+
+const groupMatchesSearch = (group, query) => {
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  if (!normalizedQuery) return true
+  return groupAttempts(group).some((attempt) =>
+    SEARCH_FIELDS.some((field) => textValue(attempt[field]).includes(normalizedQuery)),
+  )
+}
+
+const latestFailureTime = (group) =>
+  Math.max(
+    0,
+    ...(group.failures || []).map((attempt) =>
+      Date.parse(attempt.end_time || attempt.start_time || '') || 0,
+    ),
+  )
+
+const STATUS_PRIORITY = { fail: 0, retry_pass: 1, unknown: 2, first_pass: 3 }
+const KNOWLEDGE_PRIORITY = {
+  no_product_knowledge: 0,
+  no_match: 1,
+  no_product_code: 2,
+  matched: 3,
+  disabled: 4,
+}
+
+const compareGroups = (sortBy) => (left, right) => {
+  const descending = (value) => Number(right[value] || 0) - Number(left[value] || 0)
+  const station = (group) => textValue(group.final?.station_id || group.final?.host)
+  const knowledge = (group) =>
+    Math.min(
+      5,
+      ...(group.failures || []).map(
+        (attempt) => KNOWLEDGE_PRIORITY[attempt.knowledge_match_status] ?? 5,
+      ),
+    )
+
+  const difference = {
+    latest_failure: latestFailureTime(right) - latestFailureTime(left),
+    status_priority:
+      (STATUS_PRIORITY[left.classification] ?? 4) -
+      (STATUS_PRIORITY[right.classification] ?? 4),
+    attempt_count: descending('attempt_count'),
+    failure_count: descending('failure_count'),
+    station: station(left).localeCompare(station(right)),
+    duration: Number(right.final?.duration_s || 0) - Number(left.final?.duration_s || 0),
+    knowledge_match: knowledge(left) - knowledge(right),
+  }[sortBy]
+
+  return difference || textValue(left.serial_number || left.unit_id).localeCompare(
+    textValue(right.serial_number || right.unit_id),
+  )
+}
+
 export default function Engineer({ jobId }) {
   const { isAdmin } = useAuth()
   const [units, setUnits] = useState([])
@@ -29,6 +112,8 @@ export default function Engineer({ jobId }) {
   const [filter, setFilter] = useState('all')
   const [quickFilter, setQuickFilter] = useState('all')
   const [serialFilter, setSerialFilter] = useState('all')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [sortBy, setSortBy] = useState('latest_failure')
   const [view, setView] = useState('table')
   const [expanded, setExpanded] = useState(null)
   const [reanalyzing, setReanalyzing] = useState(null)
@@ -92,12 +177,18 @@ export default function Engineer({ jobId }) {
     }
   }
 
-  const shown = units.filter((u) => {
-    const serial = u.serial_number || u.unit_id
-    const matchesClass = filter === 'all' || u.classification === filter
-    const matchesSerial = serialFilter === 'all' || serial === serialFilter
-    return matchesClass && matchesSerial
-  })
+  const shown = useMemo(
+    () =>
+      units
+        .filter((unit) => {
+          const serial = unit.serial_number || unit.unit_id
+          const matchesClass = filter === 'all' || unit.classification === filter
+          const matchesSerial = serialFilter === 'all' || serial === serialFilter
+          return matchesClass && matchesSerial && groupMatchesSearch(unit, searchQuery)
+        })
+        .sort(compareGroups(sortBy)),
+    [filter, searchQuery, serialFilter, sortBy, units],
+  )
 
   // A re-analysis returns a single failing attempt; splice it back into the
   // group that owns it.
@@ -243,6 +334,28 @@ export default function Engineer({ jobId }) {
         />
       </div>
 
+      <div className="mb-6 grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+        <Input
+          type="search"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Search serial, station, error, step, or diagnosis"
+          aria-label="Search units"
+        />
+        <select
+          value={sortBy}
+          onChange={(event) => setSortBy(event.target.value)}
+          className="rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm font-medium text-ink-2 focus-ring"
+          aria-label="Sort units"
+        >
+          {SORT_OPTIONS.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {actionError && (
         <div className="mb-4 rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
           {actionError}
@@ -252,7 +365,21 @@ export default function Engineer({ jobId }) {
       {loading ? (
         <Card className="p-10 text-center text-muted">Loading units…</Card>
       ) : shown.length === 0 ? (
-        <Card className="p-10 text-center text-muted">No units in this filter.</Card>
+        <Card className="p-10 text-center text-muted">
+          <p>No units match the current search and filters.</p>
+          {(searchQuery || filter !== 'all' || serialFilter !== 'all') && (
+            <Button
+              variant="ghost"
+              className="mt-3"
+              onClick={() => {
+                setSearchQuery('')
+                setClassFilter('all')
+              }}
+            >
+              Clear search and filters
+            </Button>
+          )}
+        </Card>
       ) : view === 'table' ? (
         <TableView units={shown} {...detailProps} />
       ) : (
