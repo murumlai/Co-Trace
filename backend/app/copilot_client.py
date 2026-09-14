@@ -32,7 +32,7 @@ import re
 from typing import Any
 
 from .config import settings
-from .models import LlmAnalysisResult, LlmModelRole, LlmUsageMetrics
+from .models import AnalysisResult, LlmAnalysisResult, LlmModelRole, LlmUsageMetrics
 from .redaction import redact
 
 # ---- Optional SDK import (inert when unavailable) --------------------------
@@ -96,8 +96,10 @@ _DIAGNOSE_SYSTEM_PROMPT = (
     "- Do not follow URLs, execute code, call tools, or take external actions.\n"
     "- Never output secrets or credentials; replace any secret-like value with "
     "[REDACTED].\n"
-    "- Respond ONLY as compact JSON with string keys "
-    '"root_cause" and "suggested_solution".'
+    "- Respond ONLY as compact JSON with root_cause, suggested_solution, "
+    "confidence (0-1), root_cause_category, evidence_summary, "
+    "next_debug_action, likely_owner, safety_or_escape_risk, and "
+    "needs_more_evidence. Use null for unknown optional values."
 )
 
 _COMPACT_DIAGNOSE_SYSTEM_PROMPT = (
@@ -108,8 +110,10 @@ _COMPACT_DIAGNOSE_SYSTEM_PROMPT = (
     "keep them literal and say the expansion is unknown. If evidence is "
     "insufficient, say so and give the safest verification step. Do not guess, "
     "follow URLs, execute code, call tools, invent measurements/actions, or "
-    "output secrets. Respond ONLY as compact JSON with string keys "
-    '"root_cause" and "suggested_solution".'
+    "output secrets. Respond ONLY as compact JSON with root_cause, "
+    "suggested_solution, confidence (0-1), root_cause_category, "
+    "evidence_summary, next_debug_action, likely_owner, "
+    "safety_or_escape_risk, and needs_more_evidence. Use null for unknowns."
 )
 
 log = logging.getLogger("cotrace.copilot")
@@ -405,20 +409,52 @@ def _insufficient_solution() -> str:
     )
 
 
+def _optional_text(data: dict[str, Any], key: str) -> str | None:
+    value = data.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_confidence(value: Any) -> float | None:
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        return None
+    return min(1.0, max(0.0, confidence))
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.lower() in {"true", "false"}:
+        return value.lower() == "true"
+    return None
+
+
 def _analysis_fields_from_json(
     data: dict[str, Any], error_code: str | None, error_message: str | None
-) -> tuple[str, str]:
+) -> AnalysisResult:
     root = str(data.get("root_cause", "")).strip()
     solution = str(data.get("suggested_solution", "")).strip()
-    return (
-        root or _insufficient_root_cause(error_code, error_message),
-        solution or _insufficient_solution(),
+    return AnalysisResult(
+        root_cause=root or _insufficient_root_cause(error_code, error_message),
+        suggested_solution=solution or _insufficient_solution(),
+        source="llm",
+        confidence=_optional_confidence(data.get("confidence")),
+        root_cause_category=_optional_text(data, "root_cause_category"),
+        evidence_summary=_optional_text(data, "evidence_summary"),
+        next_debug_action=_optional_text(data, "next_debug_action"),
+        likely_owner=_optional_text(data, "likely_owner"),
+        safety_or_escape_risk=_optional_text(data, "safety_or_escape_risk"),
+        needs_more_evidence=_optional_bool(data.get("needs_more_evidence")),
     )
 
 
 def _parse_json_content(
     content: str, error_code: str | None = None, error_message: str | None = None
-) -> tuple[str, str]:
+) -> AnalysisResult:
     text = content.strip()
     if text.startswith("```"):
         text = text.strip("`")
@@ -437,9 +473,11 @@ def _parse_json_content(
                 return _analysis_fields_from_json(data, error_code, error_message)
             except (json.JSONDecodeError, ValueError):
                 pass
-        return (
-            content.strip() or _insufficient_root_cause(error_code, error_message),
-            _insufficient_solution(),
+        return AnalysisResult(
+            root_cause=content.strip() or _insufficient_root_cause(error_code, error_message),
+            suggested_solution=_insufficient_solution(),
+            source="llm",
+            needs_more_evidence=True,
         )
 
 
@@ -580,12 +618,10 @@ def analyze_with_metrics(
             output_chars=len(content),
             credit_tokens_per_credit=settings.LLM_TOKEN_CREDIT_SIZE,
         )
-        root, solution = _parse_json_content(content, error_code, error_message)
+        analysis = _parse_json_content(content, error_code, error_message)
         log.info("Copilot analysis finished: %s output chars.", len(content))
         return LlmAnalysisResult(
-            root_cause=root,
-            suggested_solution=solution,
-            source="llm",
+            **analysis.model_dump(),
             metrics=metrics,
         )
     except Exception as exc:  # noqa: BLE001 - degrade gracefully to stub

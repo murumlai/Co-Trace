@@ -182,6 +182,13 @@ class AnalysisCache(Protocol):
         suggested_solution: str,
         source: str,
         metadata: dict[str, Any],
+        confidence: float | None = None,
+        root_cause_category: str | None = None,
+        evidence_summary: str | None = None,
+        next_debug_action: str | None = None,
+        likely_owner: str | None = None,
+        safety_or_escape_risk: str | None = None,
+        needs_more_evidence: bool | None = None,
     ) -> None:
         """Store an analysis result (only for ``source == "llm"`` entries)."""
         ...

@@ -14,7 +14,7 @@ from . import analysis_cache, llm_client, redaction
 from .job_registry import Job
 from .knowledge.acronym_glossary import AcronymGlossaryContext
 from .knowledge.models import KnowledgeContext
-from .models import LlmAnalysisResult, UnitRecord
+from .models import AnalysisResult, LlmAnalysisResult, UnitRecord
 from .record_views import _normalize_msg, signature_for
 log = logging.getLogger("cotrace.analyzer")
 
@@ -208,12 +208,19 @@ def _analyze_unit(
     rec.analysis_cache_key = cache_key
 
     if reuse_signature_cache and sig in job.signature_cache:
-        root, solution, _src = job.signature_cache[sig]
-        root, solution = _apply_exact_knowledge_fallback(rec, knowledge, root, solution)
-        job.signature_cache[sig] = (root, solution, _src)
-        rec.root_cause = root
-        rec.suggested_solution = solution
-        rec.analysis_source = "local-cache" if _src == "local-cache" else "cached"
+        cached_analysis = _coerce_cached_analysis(job.signature_cache[sig])
+        root, solution = _apply_exact_knowledge_fallback(
+            rec,
+            knowledge,
+            cached_analysis.root_cause,
+            cached_analysis.suggested_solution,
+        )
+        cached_analysis = cached_analysis.model_copy(
+            update={"root_cause": root, "suggested_solution": solution}
+        )
+        job.signature_cache[sig] = cached_analysis
+        display_source = "local-cache" if cached_analysis.source == "local-cache" else "cached"
+        _apply_analysis_to_record(rec, cached_analysis, source=display_source)
         job.llm_metrics.record_cache_hit(rec.analysis_source)
         log.debug("Used cached analysis for unit %s (signature %s).", rec.unit_id, sig)
         return rec.analysis_source
@@ -224,10 +231,24 @@ def _analyze_unit(
             root = str(cached_entry.get("root_cause") or "").strip() or _insufficient_root_cause(rec.error_code, err_msg)
             solution = str(cached_entry.get("suggested_solution") or "").strip() or _insufficient_solution()
             root, solution = _apply_exact_knowledge_fallback(rec, knowledge, root, solution)
-            job.signature_cache[sig] = (root, solution, "local-cache")
-            rec.root_cause = root
-            rec.suggested_solution = solution
-            rec.analysis_source = "local-cache"
+            cached_analysis = AnalysisResult(
+                root_cause=root,
+                suggested_solution=solution,
+                source="local-cache",
+                confidence=_cache_confidence(cached_entry.get("confidence")),
+                root_cause_category=_cache_text(cached_entry.get("root_cause_category")),
+                evidence_summary=_cache_text(cached_entry.get("evidence_summary")),
+                next_debug_action=_cache_text(cached_entry.get("next_debug_action")),
+                likely_owner=_cache_text(cached_entry.get("likely_owner")),
+                safety_or_escape_risk=_cache_text(cached_entry.get("safety_or_escape_risk")),
+                needs_more_evidence=(
+                    cached_entry.get("needs_more_evidence")
+                    if isinstance(cached_entry.get("needs_more_evidence"), bool)
+                    else None
+                ),
+            )
+            job.signature_cache[sig] = cached_analysis
+            _apply_analysis_to_record(rec, cached_analysis)
             job.llm_metrics.record_cache_hit(rec.analysis_source)
             log.info("Used saved analysis cache for unit %s (cache %s).", rec.unit_id, cache_key[:8])
             return rec.analysis_source
@@ -253,15 +274,23 @@ def _analyze_unit(
     root, solution, source = analysis_result.as_tuple()
     root, solution = _apply_exact_knowledge_fallback(rec, knowledge, root, solution)
     job.llm_metrics.merge(analysis_result.metrics)
-    job.signature_cache[sig] = (root, solution, source)
-    rec.root_cause = root
-    rec.suggested_solution = solution
-    rec.analysis_source = source
+    cached_analysis = analysis_result.without_metrics().model_copy(
+        update={"root_cause": root, "suggested_solution": solution}
+    )
+    job.signature_cache[sig] = cached_analysis
+    _apply_analysis_to_record(rec, cached_analysis)
     _cache.put(
         cache_key,
         root_cause=root,
         suggested_solution=solution,
         source=source,
+        confidence=cached_analysis.confidence,
+        root_cause_category=cached_analysis.root_cause_category,
+        evidence_summary=cached_analysis.evidence_summary,
+        next_debug_action=cached_analysis.next_debug_action,
+        likely_owner=cached_analysis.likely_owner,
+        safety_or_escape_risk=cached_analysis.safety_or_escape_risk,
+        needs_more_evidence=cached_analysis.needs_more_evidence,
         metadata={
             "created_by": getattr(job, "owner_id", ""),
             "created_by_login": getattr(job, "owner_login", ""),
@@ -392,6 +421,48 @@ def _coerce_analysis_result(result: AnalysisReturn) -> LlmAnalysisResult:
         return result
     root, solution, source = result
     return LlmAnalysisResult(root_cause=root, suggested_solution=solution, source=source)
+
+
+def _coerce_cached_analysis(result: object) -> AnalysisResult:
+    if isinstance(result, AnalysisResult):
+        return result
+    if isinstance(result, dict):
+        return AnalysisResult(**result)
+    root, solution, source = result
+    return AnalysisResult(root_cause=root, suggested_solution=solution, source=source)
+
+
+def _apply_analysis_to_record(
+    record: UnitRecord,
+    analysis: AnalysisResult,
+    *,
+    source: str | None = None,
+) -> None:
+    record.root_cause = analysis.root_cause
+    record.suggested_solution = analysis.suggested_solution
+    record.analysis_source = source or analysis.source
+    record.confidence = analysis.confidence
+    record.root_cause_category = analysis.root_cause_category
+    record.evidence_summary = analysis.evidence_summary
+    record.next_debug_action = analysis.next_debug_action
+    record.likely_owner = analysis.likely_owner
+    record.safety_or_escape_risk = analysis.safety_or_escape_risk
+    record.needs_more_evidence = analysis.needs_more_evidence
+
+
+def _cache_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _cache_confidence(value: object) -> float | None:
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        return None
+    return min(1.0, max(0.0, confidence))
 
 
 def _apply_exact_knowledge_fallback(

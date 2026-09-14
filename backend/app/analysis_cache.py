@@ -21,9 +21,9 @@ from .config import settings
 log = logging.getLogger("cotrace.cache")
 
 _CACHE_SCHEMA_VERSION = 1
-# Bumped to v4 so product-knowledge fallback repairs do not reuse earlier
-# insufficient Copilot responses for matching RFC/debug-learning sections.
-_CACHE_PROMPT_VERSION = "analysis-v4"
+# Bumped for the structured RCA output contract. Existing v4 entries remain
+# listable and admin-deletable but are unreachable from newly generated keys.
+_CACHE_PROMPT_VERSION = "analysis-v5"
 _lock = threading.Lock()
 
 
@@ -85,6 +85,13 @@ def set_entry(
     suggested_solution: str,
     source: str,
     metadata: dict[str, Any],
+    confidence: float | None = None,
+    root_cause_category: str | None = None,
+    evidence_summary: str | None = None,
+    next_debug_action: str | None = None,
+    likely_owner: str | None = None,
+    safety_or_escape_risk: str | None = None,
+    needs_more_evidence: bool | None = None,
 ) -> None:
     if not settings.ANALYSIS_CACHE_ENABLED:
         return
@@ -111,6 +118,13 @@ def set_entry(
             "root_cause": root_cause,
             "suggested_solution": suggested_solution,
             "source": source,
+            "confidence": confidence,
+            "root_cause_category": root_cause_category,
+            "evidence_summary": evidence_summary,
+            "next_debug_action": next_debug_action,
+            "likely_owner": likely_owner,
+            "safety_or_escape_risk": safety_or_escape_risk,
+            "needs_more_evidence": needs_more_evidence,
             "provider": (settings.LLM_PROVIDER or "").lower(),
             "model_identity": _model_identity(),
             "prompt_version": _CACHE_PROMPT_VERSION,
@@ -325,6 +339,13 @@ class DiskAnalysisCache:
         suggested_solution: str,
         source: str,
         metadata: dict[str, Any],
+        confidence: float | None = None,
+        root_cause_category: str | None = None,
+        evidence_summary: str | None = None,
+        next_debug_action: str | None = None,
+        likely_owner: str | None = None,
+        safety_or_escape_risk: str | None = None,
+        needs_more_evidence: bool | None = None,
     ) -> None:
         """Store an analysis result (only persisted when source == "llm")."""
         set_entry(
@@ -333,6 +354,13 @@ class DiskAnalysisCache:
             suggested_solution=suggested_solution,
             source=source,
             metadata=metadata,
+            confidence=confidence,
+            root_cause_category=root_cause_category,
+            evidence_summary=evidence_summary,
+            next_debug_action=next_debug_action,
+            likely_owner=likely_owner,
+            safety_or_escape_risk=safety_or_escape_risk,
+            needs_more_evidence=needs_more_evidence,
         )
 
     # --- Administrative helpers (not in the core AnalysisCache protocol) ---

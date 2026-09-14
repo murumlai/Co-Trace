@@ -69,6 +69,13 @@ class UnitRecord(BaseModel):
     analysis_source: Optional[str] = None  # "llm" | "stub" | "cached" | "local-cache"
     analysis_context_source: Optional[str] = None  # "debug_excerpt" | "ftrunner_snippet" | "error_message"
     analysis_cache_key: Optional[str] = None
+    confidence: Optional[float] = None
+    root_cause_category: Optional[str] = None
+    evidence_summary: Optional[str] = None
+    next_debug_action: Optional[str] = None
+    likely_owner: Optional[str] = None
+    safety_or_escape_risk: Optional[str] = None
+    needs_more_evidence: Optional[bool] = None
 
     # Product-aware diagnosis metadata (populated during failure analysis)
     knowledge_used: bool = False
@@ -210,14 +217,27 @@ class LlmUsageMetrics(BaseModel):
         )
 
 
-class LlmAnalysisResult(BaseModel):
+class AnalysisResult(BaseModel):
     root_cause: str
     suggested_solution: str
     source: str
-    metrics: LlmUsageMetrics = Field(default_factory=LlmUsageMetrics)
+    confidence: Optional[float] = None
+    root_cause_category: Optional[str] = None
+    evidence_summary: Optional[str] = None
+    next_debug_action: Optional[str] = None
+    likely_owner: Optional[str] = None
+    safety_or_escape_risk: Optional[str] = None
+    needs_more_evidence: Optional[bool] = None
 
     def as_tuple(self) -> tuple[str, str, str]:
         return self.root_cause, self.suggested_solution, self.source
+
+
+class LlmAnalysisResult(AnalysisResult):
+    metrics: LlmUsageMetrics = Field(default_factory=LlmUsageMetrics)
+
+    def without_metrics(self) -> AnalysisResult:
+        return AnalysisResult(**self.model_dump(exclude={"metrics"}))
 
 
 def _estimate_tokens(char_count: int) -> int:

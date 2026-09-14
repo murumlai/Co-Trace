@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .config import settings
-from .models import JobProgress, JobState, JobStatus, LlmUsageMetrics, UnitRecord
+from .models import AnalysisResult, JobProgress, JobState, JobStatus, LlmUsageMetrics, UnitRecord
 from .upload_storage import cleanup_job_workdir
 
 log = logging.getLogger(__name__)
@@ -43,8 +43,8 @@ class Job:
     warnings: list[str] = field(default_factory=list)
     cancel_requested: bool = False
     llm_metrics: LlmUsageMetrics = field(default_factory=LlmUsageMetrics)
-    # signature -> (root_cause, suggested_solution, analysis_source)
-    signature_cache: dict[str, tuple[str, str, str]] = field(default_factory=dict)
+    # signature -> complete analysis result reused within the current job
+    signature_cache: dict[str, AnalysisResult] = field(default_factory=dict)
     # Injected by the registry so save() does not hard-code disk paths.
     # init=False keeps it out of __init__; compare=False / repr=False keep it
     # invisible to equality checks and string representations.
@@ -108,7 +108,10 @@ def _inline_save(job: Job) -> None:
         "cancel_requested": job.cancel_requested,
         "llm_metrics": job.llm_metrics.model_dump(),
         "records": [r.model_dump() for r in job.records],
-        "signature_cache": job.signature_cache,
+        "signature_cache": {
+            signature: _coerce_cached_result(result).model_dump()
+            for signature, result in job.signature_cache.items()
+        },
     }
     path = os.path.join(job.workdir, "job_state.json")
     tmp = path + ".tmp"
@@ -170,6 +173,7 @@ class DiskJobStateStore:
                     force_refresh=state.get("force_refresh", False),
                     status=state.get("status", "error"),
                     message=state.get("message", ""),
+                    stage=state.get("stage", "pending"),
                     processed=state.get("processed", 0),
                     total=state.get("total", 0),
                     created_at=created_at,
@@ -180,7 +184,10 @@ class DiskJobStateStore:
                     cancel_requested=state.get("cancel_requested", False),
                     llm_metrics=LlmUsageMetrics(**state.get("llm_metrics", {})),
                     records=[UnitRecord(**r) for r in state.get("records", [])],
-                    signature_cache=state.get("signature_cache", {}),
+                    signature_cache={
+                        signature: _coerce_cached_result(result)
+                        for signature, result in state.get("signature_cache", {}).items()
+                    },
                 )
                 if job.status == "running":
                     job.status = "error"
@@ -196,6 +203,19 @@ class DiskJobStateStore:
         if job.workdir and os.path.isdir(job.workdir):
             shutil.rmtree(job.workdir, ignore_errors=True)
             log.info("Evicted and deleted job dir: %s", job.workdir)
+
+
+def _coerce_cached_result(value: Any) -> AnalysisResult:
+    if isinstance(value, AnalysisResult):
+        return value
+    if isinstance(value, dict):
+        return AnalysisResult(**value)
+    root_cause, suggested_solution, source = value
+    return AnalysisResult(
+        root_cause=root_cause,
+        suggested_solution=suggested_solution,
+        source=source,
+    )
 
 
 class JobRegistry:

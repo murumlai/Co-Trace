@@ -1,6 +1,8 @@
 """Tests for persisted analysis cache visibility and deletion policy."""
 from __future__ import annotations
 
+import json
+
 from app import analysis_cache
 
 
@@ -95,3 +97,36 @@ def test_user_save_does_not_overwrite_admin_protected_entry(isolated_settings):
     assert protected["created_by_role"] == "admin"
     assert revision["root_cause"] == "user root"
     assert revision["created_by"] == "42"
+
+
+def test_analysis_v4_entry_remains_listable_but_v5_lookup_misses(
+    isolated_settings, monkeypatch
+):
+    key_args = {
+        "error_code": "E1",
+        "error_message": "failure",
+        "context": "context",
+        "context_source": "error_message",
+        "signature": "sig",
+    }
+    monkeypatch.setattr(analysis_cache, "_CACHE_PROMPT_VERSION", "analysis-v4")
+    old_key = analysis_cache.make_key(**key_args)
+    monkeypatch.setattr(analysis_cache, "_CACHE_PROMPT_VERSION", "analysis-v5")
+    current_key = analysis_cache.make_key(**key_args)
+    with open(analysis_cache.settings.ANALYSIS_CACHE_FILE, "w", encoding="utf-8") as handle:
+        json.dump({
+            "schema_version": 1,
+            "entries": {
+                old_key: {
+                    "cache_key": old_key,
+                    "root_cause": "v4 root",
+                    "suggested_solution": "v4 solution",
+                    "source": "llm",
+                    "prompt_version": "analysis-v4",
+                }
+            },
+        }, handle)
+
+    assert old_key != current_key
+    assert analysis_cache.get_entry(current_key) is None
+    assert analysis_cache.list_entries(actor_is_admin=True)[0]["prompt_version"] == "analysis-v4"

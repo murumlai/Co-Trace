@@ -8,7 +8,7 @@ import pytest
 
 from app.analyzer import analyze_job, signature_for, build_llm_context, reanalyze_unit
 from app.job_registry import Job
-from app.models import UnitRecord
+from app.models import LlmAnalysisResult, UnitRecord
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +310,7 @@ class TestAnalyzeJobDedup:
         assert calls["n"] == 1
         assert r1.root_cause == "fresh root"
         assert r2.root_cause == "fresh root"
-        assert job.signature_cache[sig] == ("fresh root", "fresh solution", "stub")
+        assert job.signature_cache[sig].as_tuple() == ("fresh root", "fresh solution", "stub")
 
     def test_analysis_source_set_on_records(self, monkeypatch):
         monkeypatch.setattr("app.analysis_cache.get_entry", lambda *a, **kw: None)
@@ -375,3 +375,52 @@ class TestReanalyzeUnit:
         result = reanalyze_unit(job, "u1", analyze_failure=_stub_analyze)
         assert result is rec
         assert rec.root_cause is None  # PASS units stay untouched
+
+    def test_reanalyze_populates_structured_fields(self, monkeypatch):
+        monkeypatch.setattr("app.analysis_cache.get_entry", lambda *a, **kw: None)
+        monkeypatch.setattr("app.analysis_cache.set_entry", lambda *a, **kw: None)
+
+        def structured_stub(ec, em, snippet):  # noqa: ANN001, ARG001
+            return LlmAnalysisResult(
+                root_cause="fixture contact",
+                suggested_solution="reseat fixture",
+                source="llm",
+                confidence=0.91,
+                root_cause_category="fixture",
+                evidence_summary="Contact resistance increased.",
+                next_debug_action="Inspect pogo pins.",
+                likely_owner="fixture team",
+                safety_or_escape_risk="low",
+                needs_more_evidence=False,
+            )
+
+        rec = _fail_rec("u1")
+        job = _make_job([rec])
+
+        reanalyze_unit(job, "u1", analyze_failure=structured_stub)
+
+        assert rec.confidence == 0.91
+        assert rec.root_cause_category == "fixture"
+        assert rec.next_debug_action == "Inspect pogo pins."
+
+
+def test_persistent_cache_hit_restores_structured_fields(monkeypatch):
+    monkeypatch.setattr(
+        "app.analysis_cache.get_entry",
+        lambda *a, **kw: {
+            "root_cause": "cached root",
+            "suggested_solution": "cached solution",
+            "confidence": 0.75,
+            "root_cause_category": "station",
+            "needs_more_evidence": False,
+        },
+    )
+    monkeypatch.setattr("app.analysis_cache.set_entry", lambda *a, **kw: None)
+    rec = _fail_rec("u1")
+
+    analyze_job(_make_job([rec]), analyze_failure=_stub_analyze)
+
+    assert rec.analysis_source == "local-cache"
+    assert rec.confidence == 0.75
+    assert rec.root_cause_category == "station"
+    assert rec.needs_more_evidence is False
