@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 
 from .models import UnitRecord
-from .record_views import latest_records_by_serial
+from .record_views import latest_records_by_serial, signature_for
 
 
 def _first_attempts(records: list[UnitRecord]) -> list[UnitRecord]:
@@ -71,24 +71,72 @@ def compute_trend(records: list[UnitRecord]) -> list[dict]:
 
 def compute_pareto(records: list[UnitRecord], top: int = 10) -> list[dict]:
     counter: Counter[str] = Counter()
+    labels: dict[str, str] = {}
     for r in records:
         if r.result == "FAIL":
+            signature = signature_for(r)
             label = r.error_code or "UNKNOWN"
             if r.error_message:
                 label = f"{r.error_code or 'FAIL'}: {r.error_message[:60]}"
-            counter[label] += 1
+            counter[signature] += 1
+            labels.setdefault(signature, label)
     total = sum(counter.values())
     out = []
     cum = 0
-    for label, count in counter.most_common(top):
+    for signature, count in counter.most_common(top):
         cum += count
         out.append({
-            "reason": label,
+            "signature": signature,
+            "reason": labels[signature],
             "count": count,
             "pct": round(count / total * 100.0, 2) if total else 0.0,
             "cum_pct": round(cum / total * 100.0, 2) if total else 0.0,
         })
     return out
+
+
+def compute_failure_clusters(records: list[UnitRecord]) -> list[dict]:
+    buckets: dict[str, list[UnitRecord]] = defaultdict(list)
+    for record in records:
+        if record.result == "FAIL":
+            buckets[signature_for(record)].append(record)
+
+    clusters: list[dict] = []
+    for signature, failures in buckets.items():
+        representative = failures[0]
+        times = [
+            timestamp
+            for record in failures
+            for timestamp in (record.start_time, record.end_time)
+            if timestamp
+        ]
+        clusters.append({
+            "signature": signature,
+            "count": len(failures),
+            "affected_serials": sorted({
+                record.serial_number or record.unit_id for record in failures
+            }),
+            "stations": sorted({record.station_id for record in failures if record.station_id}),
+            "lots": sorted({record.lot_id for record in failures if record.lot_id}),
+            "product_codes": sorted({
+                record.product_code for record in failures if record.product_code
+            }),
+            "first_seen": min(times) if times else None,
+            "last_seen": max(times) if times else None,
+            "error_code": representative.error_code,
+            "error_message": representative.error_message,
+            "failing_step": representative.failing_step,
+            "analysis_context_source": representative.analysis_context_source,
+            "knowledge_status_summary": dict(Counter(
+                record.knowledge_match_status or "unknown" for record in failures
+            )),
+            "analysis_source_summary": dict(Counter(
+                record.analysis_source or "unanalyzed" for record in failures
+            )),
+        })
+
+    clusters.sort(key=lambda cluster: (cluster["count"], cluster["last_seen"] or ""), reverse=True)
+    return clusters
 
 
 def compute_station_breakdown(records: list[UnitRecord]) -> list[dict]:

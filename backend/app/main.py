@@ -334,6 +334,13 @@ def units(job_id: str, user: AuthenticatedUser = Depends(require_user),
     }
 
 
+@app.get("/api/jobs/{job_id}/clusters")
+def clusters(job_id: str, user: AuthenticatedUser = Depends(require_user),
+             reg: Any = Depends(get_registry)) -> dict:
+    job = _get_owned_job(job_id, user, reg)
+    return {"clusters": aggregator.compute_failure_clusters(job.records)}
+
+
 @app.post("/api/jobs/{job_id}/units/{unit_id}/reanalyze")
 def reanalyze(job_id: str, unit_id: str, user: AuthenticatedUser = Depends(require_user),
               reg: Any = Depends(get_registry),

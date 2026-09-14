@@ -1,9 +1,26 @@
 """Derived record views used by API/artifact surfaces."""
 from __future__ import annotations
 
+import hashlib
+import re
 from collections import defaultdict
 
 from .models import Classification, SerialUnitGroup, UnitRecord
+
+_WS = re.compile(r"\s+")
+_NUM = re.compile(r"\d+")
+
+
+def _normalize_msg(message: str | None) -> str:
+    if not message:
+        return ""
+    text = _NUM.sub("#", message.lower())
+    return _WS.sub(" ", text).strip()
+
+
+def signature_for(record: UnitRecord) -> str:
+    basis = f"{record.error_code or 'FAIL'}|{_normalize_msg(record.error_message)}"
+    return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
 
 
 def latest_records_by_serial(records: list[UnitRecord]) -> list[UnitRecord]:

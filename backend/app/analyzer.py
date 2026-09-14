@@ -6,10 +6,8 @@ unique signature and the result is cached on the job.
 """
 from __future__ import annotations
 
-import hashlib
 import inspect
 import logging
-import re
 from collections.abc import Callable
 
 from . import analysis_cache, llm_client, redaction
@@ -17,26 +15,12 @@ from .job_registry import Job
 from .knowledge.acronym_glossary import AcronymGlossaryContext
 from .knowledge.models import KnowledgeContext
 from .models import LlmAnalysisResult, UnitRecord
-
-_WS = re.compile(r"\s+")
-_NUM = re.compile(r"\d+")
+from .record_views import _normalize_msg, signature_for
 log = logging.getLogger("cotrace.analyzer")
 
 AnalysisReturn = tuple[str, str, str] | LlmAnalysisResult
 AnalyzeFailure = Callable[..., AnalysisReturn]
 AnalysisProgress = Callable[[int, int, str], None]
-
-
-def _normalize_msg(msg: str | None) -> str:
-    if not msg:
-        return ""
-    text = _NUM.sub("#", msg.lower())
-    return _WS.sub(" ", text).strip()
-
-
-def signature_for(record: UnitRecord) -> str:
-    basis = f"{record.error_code or 'FAIL'}|{_normalize_msg(record.error_message)}"
-    return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
 
 
 def build_llm_context(record: UnitRecord) -> tuple[str, str]:
