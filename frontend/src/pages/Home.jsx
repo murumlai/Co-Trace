@@ -217,6 +217,7 @@ const PROGRESS_STAGE = {
   loaded_cache: { label: 'Loaded from cache', tone: 'pass' },
   playbook: { label: 'Known failure matched', tone: 'pass' },
   complete: { label: 'Complete', tone: 'pass' },
+  monitoring_error: { label: 'Connection paused', tone: 'warn' },
   cancelled: { label: 'Cancelled', tone: 'warn' },
   error: { label: 'Failed', tone: 'fail' },
 }
@@ -229,7 +230,7 @@ function ProgressStage({ stage, status }) {
   return <Badge tone={meta.tone}>{meta.label}</Badge>
 }
 
-export default function Home({ onStartBatch, onStopBatch, processing, progress, batchError, llmMetrics, files, setFiles }) {
+export default function Home({ onStartBatch, onStopBatch, onResumeBatch, processing, monitoringPaused, progress, batchError, llmMetrics, files, setFiles }) {
   const [dragging, setDragging] = useState(false)
   const [localError, setLocalError] = useState('')
   const [forceRefresh, setForceRefresh] = useState(false)
@@ -456,17 +457,20 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
             <input
               type="checkbox"
               checked={forceRefresh}
-              disabled={processing}
+              disabled={processing || monitoringPaused}
               onChange={(event) => setForceRefresh(event.target.checked)}
               className="h-4 w-4 rounded border-border accent-[var(--accent)]"
             />
             <span>Run fresh analysis</span>
           </label>
           <div className="flex flex-wrap justify-center gap-3">
-            <Button variant="primary" onClick={start} disabled={!files.length || processing}>
+            <Button variant="primary" onClick={start} disabled={!files.length || processing || monitoringPaused}>
               {processing ? 'Processing…' : 'Process batch'}
             </Button>
-            {processing && (
+            {monitoringPaused && (
+              <Button variant="primary" onClick={onResumeBatch}>Retry status</Button>
+            )}
+            {(processing || monitoringPaused) && (
               <Button onClick={onStopBatch}>Stop batch</Button>
             )}
           </div>

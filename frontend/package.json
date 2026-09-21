@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node scripts/dev-server.mjs",
     "dev:debug": "node scripts/dev-server.mjs --debug",
-    "test": "node --test src/unitAttempts.test.js src/uploadSelection.test.js",
+    "test": "node --test src/jobMonitoring.test.js src/unitAttempts.test.js src/uploadSelection.test.js",
     "build": "vite build",
     "preview": "vite preview"
   },

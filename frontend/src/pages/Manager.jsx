@@ -45,23 +45,59 @@ function ChartCard({ title, subtitle, children }) {
 export default function Manager({ jobId, onDrillDown }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [reload, setReload] = useState(0)
 
   useEffect(() => {
-    if (!jobId) return
-    setLoading(true)
-    api.manager(jobId).then((d) => {
-      setData(d)
+    if (!jobId) {
       setLoading(false)
+      return undefined
+    }
+    let active = true
+    setLoading(true)
+    setData(null)
+    setError('')
+    api.manager(jobId).then(
+      (nextData) => {
+        if (active) setData(nextData)
+      },
+      (requestError) => {
+        if (active) setError(requestError.message)
+      },
+    ).finally(() => {
+      if (active) setLoading(false)
     })
-  }, [jobId])
+    return () => {
+      active = false
+    }
+  }, [jobId, reload])
 
   if (!jobId) return <EmptyState />
-  if (loading || !data)
+  if (loading)
     return (
       <div className="mx-auto max-w-6xl px-6 py-12">
-        <Card className="p-10 text-center text-muted">Loading metrics…</Card>
+        <Card role="status" className="p-10 text-center text-muted">Loading metrics…</Card>
       </div>
     )
+  if (error) {
+    return (
+      <div className="mx-auto max-w-2xl px-6 py-24 text-center">
+        <IconWell className="h-16 w-16 mx-auto mb-6">
+          <span className="font-display text-xl font-bold text-danger">!</span>
+        </IconWell>
+        <h2 className="font-display text-2xl font-bold text-ink">Manager metrics unavailable</h2>
+        <p role="alert" className="mt-2 text-muted">{error}</p>
+        <button
+          type="button"
+          onClick={() => setReload((value) => value + 1)}
+          className="mt-6 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-accent-hover focus-ring"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+  if (!data || !data.summary?.total_runs) return <EmptyMetricsState />
 
   const s = data.summary
   const topFailure = data.pareto && data.pareto.length ? data.pareto[0] : null
@@ -240,6 +276,18 @@ function EmptyState() {
       </IconWell>
       <h2 className="font-display text-2xl font-bold text-ink">No batch loaded</h2>
       <p className="mt-2 text-muted">Upload logs on the Home tab to see yield metrics.</p>
+    </div>
+  )
+}
+
+function EmptyMetricsState() {
+  return (
+    <div className="mx-auto max-w-2xl px-6 py-24 text-center">
+      <IconWell className="h-16 w-16 mx-auto mb-6">
+        <span className="font-display text-xl font-bold text-muted">0</span>
+      </IconWell>
+      <h2 className="font-display text-2xl font-bold text-ink">No metrics in this batch</h2>
+      <p className="mt-2 text-muted">No PASS, FAIL, or UNKNOWN test runs were available to summarize.</p>
     </div>
   )
 }

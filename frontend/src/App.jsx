@@ -8,6 +8,7 @@ import Manager from './pages/Manager'
 import Knowledge from './pages/Knowledge'
 import About from './pages/About'
 import { debugLog, log } from './logger'
+import { monitorJob } from './jobMonitoring'
 
 const TABS = [
   ['home', 'Home'],
@@ -113,9 +114,11 @@ function Shell() {
   }
 
   const pollBatch = async (id, token) => {
-    while (runToken.current === token) {
-      const status = await api.status(id)
-      if (runToken.current !== token) return
+    const result = await monitorJob({
+      jobId: id,
+      getStatus: api.status,
+      isCurrent: () => runToken.current === token,
+      onStatus: (status) => {
       setBatchProgress({
         status: status.status,
         stage: status.progress.stage,
@@ -125,18 +128,48 @@ function Shell() {
         elapsed_s: status.elapsed_s || 0,
       })
       setLlmMetrics(status.llm_metrics || null)
-      if (status.status === 'done') {
-        setBatchRunning(false)
-        onJobReady(id, status.warnings || [])
-        return
-      }
-      if (status.status === 'error' || status.status === 'cancelled') {
-        setBatchRunning(false)
-        setBatchError(status.status === 'cancelled' ? '' : status.message)
-        return
-      }
-      await new Promise((resolve) => setTimeout(resolve, 700))
+      },
+      onReconnect: ({ attempt, maxAttempts }) => {
+        setBatchProgress((current) => ({
+          ...(current || {}),
+          message: `Connection interrupted. Reconnecting (${attempt}/${maxAttempts - 1})`,
+        }))
+      },
+    })
+
+    if (result.kind === 'stale') return
+    setBatchRunning(false)
+    if (result.kind === 'done') {
+      onJobReady(id, result.status.warnings || [])
+      return
     }
+    if (result.kind === 'error' || result.kind === 'cancelled') {
+      setBatchError(result.kind === 'cancelled' ? '' : result.status.message)
+      return
+    }
+    if (result.kind === 'paused') {
+      setBatchError(`Status monitoring paused: ${result.error.message}. The server job may still be running.`)
+      setBatchProgress((current) => ({
+        ...(current || {}),
+        status: 'monitoring_error',
+        stage: 'monitoring_error',
+        message: 'Status monitoring paused',
+      }))
+    }
+  }
+
+  const resumeBatch = async () => {
+    if (!activeJobId) return
+    const token = runToken.current + 1
+    runToken.current = token
+    setBatchRunning(true)
+    setBatchError('')
+    setBatchProgress((current) => ({
+      ...(current || {}),
+      status: 'running',
+      message: 'Reconnecting to the existing batch',
+    }))
+    await pollBatch(activeJobId, token)
   }
 
   const stopBatch = async () => {
@@ -155,6 +188,7 @@ function Shell() {
     }
     try {
       await api.stop(id)
+      if (!batchRunning) await resumeBatch()
     } catch (err) {
       setBatchError(err.message)
     }
@@ -219,6 +253,8 @@ function Shell() {
     )
   }
 
+  const monitoringPaused = batchProgress?.status === 'monitoring_error' && !!activeJobId
+
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-20 border-b border-border bg-surface/80 backdrop-blur">
@@ -239,7 +275,7 @@ function Shell() {
 
             <div className="hidden md:flex items-center gap-3">
               <ThemeSwitch />
-              {batchRunning && (
+              {(batchRunning || monitoringPaused) && (
                 <button
                   onClick={stopBatch}
                   className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-danger transition-colors duration-150 hover:border-danger hover:bg-danger/5 focus-ring"
@@ -270,7 +306,7 @@ function Shell() {
               {TABS.map(([id, label]) => (
                 <NavButton key={id} id={id} label={label} />
               ))}
-              {batchRunning && (
+              {(batchRunning || monitoringPaused) && (
                 <button
                   onClick={stopBatch}
                   className="rounded-lg border border-border bg-surface px-4 py-2.5 text-sm text-danger focus-ring"
@@ -317,7 +353,9 @@ function Shell() {
           <Home
             onStartBatch={startBatch}
             onStopBatch={stopBatch}
+            onResumeBatch={resumeBatch}
             processing={batchRunning}
+            monitoringPaused={monitoringPaused}
             progress={batchProgress}
             batchError={batchError}
             llmMetrics={llmMetrics}

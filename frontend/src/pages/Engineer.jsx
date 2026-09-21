@@ -120,6 +120,12 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
   const [feedbackEntries, setFeedbackEntries] = useState([])
   const [runCount, setRunCount] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [unitsError, setUnitsError] = useState('')
+  const [clustersError, setClustersError] = useState('')
+  const [feedbackError, setFeedbackError] = useState('')
+  const [unitsReload, setUnitsReload] = useState(0)
+  const [clustersReload, setClustersReload] = useState(0)
+  const [feedbackReload, setFeedbackReload] = useState(0)
   const [filter, setFilter] = useState('all')
   const [quickFilter, setQuickFilter] = useState('all')
   const [serialFilter, setSerialFilter] = useState('all')
@@ -137,23 +143,71 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
   const [actionError, setActionError] = useState('')
 
   useEffect(() => {
-    if (!jobId) return
-    setLoading(true)
-    setActiveSignature(null)
-    Promise.all([
-      api.units(jobId),
-      api.clusters(jobId).catch(() => ({ clusters: [] })),
-      api.feedback(jobId).catch(() => ({ entries: [] })),
-    ]).then(
-      ([unitData, clusterData, feedbackData]) => {
-      setUnits(unitData.units)
-      setClusters(clusterData.clusters || [])
-      setFeedbackEntries(feedbackData.entries || [])
-      setRunCount(unitData.run_count ?? unitData.units.length)
+    if (!jobId) {
       setLoading(false)
+      return undefined
+    }
+    let active = true
+    setLoading(true)
+    setUnitsError('')
+    setActiveSignature(null)
+    api.units(jobId).then(
+      (unitData) => {
+        if (!active) return
+      setUnits(unitData.units)
+      setRunCount(unitData.run_count ?? unitData.units.length)
+      },
+      (error) => {
+        if (!active) return
+        setUnits([])
+        setRunCount(0)
+        setUnitsError(error.message)
+      },
+    ).finally(() => {
+      if (active) setLoading(false)
+    })
+    return () => {
+      active = false
+    }
+  }, [jobId, unitsReload])
+
+  useEffect(() => {
+    if (!jobId) return undefined
+    let active = true
+    setClusters([])
+    setClustersError('')
+    api.clusters(jobId).then(
+      (clusterData) => {
+        if (!active) return
+        setClusters(clusterData.clusters || [])
+      },
+      (error) => {
+        if (active) setClustersError(error.message)
       },
     )
-  }, [jobId])
+    return () => {
+      active = false
+    }
+  }, [clustersReload, jobId])
+
+  useEffect(() => {
+    if (!jobId) return undefined
+    let active = true
+    setFeedbackEntries([])
+    setFeedbackError('')
+    api.feedback(jobId).then(
+      (feedbackData) => {
+        if (!active) return
+        setFeedbackEntries(feedbackData.entries || [])
+      },
+      (error) => {
+        if (active) setFeedbackError(error.message)
+      },
+    )
+    return () => {
+      active = false
+    }
+  }, [feedbackReload, jobId])
 
   useEffect(() => {
     if (drillDown?.signature) setActiveSignature(drillDown.signature)
@@ -428,9 +482,19 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
     exporting,
     onExport: exportPacket,
     onReviewKnowledge,
-    feedbackEntries,
+    feedbackEntries: feedbackError ? null : feedbackEntries,
     feedbackBusy,
     onFeedback: submitFeedback,
+  }
+
+  if (unitsError) {
+    return (
+      <ResourceErrorState
+        title="Unit diagnostics unavailable"
+        message={unitsError}
+        onRetry={() => setUnitsReload((value) => value + 1)}
+      />
+    )
   }
 
   return (
@@ -446,6 +510,22 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
           </p>
         )}
       </div>
+
+      {clustersError && (
+        <ResourceNotice
+          title="Failure families unavailable"
+          message={clustersError}
+          onRetry={() => setClustersReload((value) => value + 1)}
+        />
+      )}
+
+      {feedbackError && (
+        <ResourceNotice
+          title="Engineer feedback unavailable"
+          message={feedbackError}
+          onRetry={() => setFeedbackReload((value) => value + 1)}
+        />
+      )}
 
       {!loading && (
         <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
@@ -936,7 +1016,7 @@ function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearing
           exporting={exporting}
           onExport={onExport}
           onReviewKnowledge={onReviewKnowledge}
-          feedbackEntries={feedbackEntries.filter((entry) => entry.unit_id === attempt.unit_id)}
+          feedbackEntries={feedbackEntries?.filter((entry) => entry.unit_id === attempt.unit_id) ?? null}
           feedbackBusy={feedbackBusy}
           onFeedback={onFeedback}
         />
@@ -1315,6 +1395,13 @@ const FEEDBACK_ACTIONS = [
 
 function FeedbackControls({ attempt, entries, busy, onSubmit }) {
   const [note, setNote] = useState('')
+  if (entries === null) {
+    return (
+      <div className="mb-4 border-y border-border/60 py-3 text-sm text-warning">
+        Existing feedback is unavailable. Retry the feedback request above before adding a response.
+      </div>
+    )
+  }
   const submit = async (action) => {
     try {
       await onSubmit(attempt, action, note)
@@ -1358,6 +1445,31 @@ function FeedbackControls({ attempt, entries, busy, onSubmit }) {
           </Button>
         ))}
       </div>
+    </div>
+  )
+}
+
+function ResourceNotice({ title, message, onRetry }) {
+  return (
+    <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3">
+      <div>
+        <p className="text-sm font-semibold text-warning">{title}</p>
+        <p className="mt-0.5 text-xs text-muted">{message}</p>
+      </div>
+      <Button variant="ghost" className="px-3 py-1.5" onClick={onRetry}>Retry</Button>
+    </div>
+  )
+}
+
+function ResourceErrorState({ title, message, onRetry }) {
+  return (
+    <div className="mx-auto max-w-2xl px-6 py-24 text-center">
+      <IconWell className="h-16 w-16 mx-auto mb-6">
+        <span className="font-display text-xl font-bold text-danger">!</span>
+      </IconWell>
+      <h2 className="font-display text-2xl font-bold text-ink">{title}</h2>
+      <p role="alert" className="mt-2 text-muted">{message}</p>
+      <Button variant="primary" className="mt-6" onClick={onRetry}>Retry</Button>
     </div>
   )
 }
