@@ -510,10 +510,30 @@ def clear_job_cache(job_id: str, user: AuthenticatedUser = Depends(require_admin
 # Manager view
 # --------------------------------------------------------------------------
 @app.get("/api/jobs/{job_id}/manager")
-def manager(job_id: str, user: AuthenticatedUser = Depends(require_user),
-            reg: Any = Depends(get_registry)) -> dict:
+def manager(
+    job_id: str,
+    product: list[str] = Query(default=[]),
+    lot: list[str] = Query(default=[]),
+    station: list[str] = Query(default=[]),
+    start_time: str | None = Query(default=None),
+    end_time: str | None = Query(default=None),
+    user: AuthenticatedUser = Depends(require_user),
+    reg: Any = Depends(get_registry),
+) -> dict:
     job = _get_owned_job(job_id, user, reg)
-    return aggregator.build_manager_view(job.records)
+    try:
+        view = aggregator.build_manager_view(
+            job.records,
+            product_codes=set(product),
+            lot_ids=set(lot),
+            station_keys=set(station),
+            start_time=start_time,
+            end_time=end_time,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    view["batch"] = job.batch.model_dump()
+    return view
 
 
 @app.post("/api/logs/frontend")

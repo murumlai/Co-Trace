@@ -1,10 +1,99 @@
 """Manager Aggregator — pure computation over per-unit records. No LLM."""
 from __future__ import annotations
 
+import hashlib
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 
 from .models import UnitRecord
 from .record_views import latest_records_by_serial, signature_for
+
+_MISSING = "__missing__"
+
+
+def _unit_id(record: UnitRecord) -> str:
+    return record.serial_number or record.unit_id
+
+
+def station_key(record: UnitRecord) -> str:
+    value = f"{record.host or ''}\0{record.station_id or ''}".encode("utf-8")
+    return hashlib.sha1(value).hexdigest()[:16]
+
+
+def _option_value(value: str | None) -> str:
+    return value if value else _MISSING
+
+
+def _parse_time(value: str) -> datetime:
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValueError(f"Invalid ISO timestamp: {value}") from exc
+
+
+def _comparable_time(value: str, boundary: datetime) -> datetime | None:
+    try:
+        timestamp = _parse_time(value)
+    except ValueError:
+        return None
+    if boundary.tzinfo is None:
+        return timestamp.replace(tzinfo=None)
+    if timestamp.tzinfo is None:
+        return None
+    return timestamp.astimezone(timezone.utc)
+
+
+def filter_records(
+    records: list[UnitRecord],
+    *,
+    product_codes: set[str] | None = None,
+    lot_ids: set[str] | None = None,
+    station_keys: set[str] | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
+) -> tuple[list[UnitRecord], int]:
+    products = product_codes or set()
+    lots = lot_ids or set()
+    stations = station_keys or set()
+    start = _parse_time(start_time) if start_time else None
+    end = _parse_time(end_time) if end_time else None
+    if start and end:
+        if (start.tzinfo is None) != (end.tzinfo is None):
+            raise ValueError("Start and end timestamps must use the same timezone style")
+        comparable_end = end if end.tzinfo is None else end.astimezone(timezone.utc)
+        comparable_start = start if start.tzinfo is None else start.astimezone(timezone.utc)
+        if comparable_start > comparable_end:
+            raise ValueError("Start timestamp must not be after end timestamp")
+
+    selected: list[UnitRecord] = []
+    missing_timestamp_excluded = 0
+    for record in records:
+        if products and _option_value(record.product_code) not in products:
+            continue
+        if lots and _option_value(record.lot_id) not in lots:
+            continue
+        if stations and station_key(record) not in stations:
+            continue
+        if start or end:
+            source_time = record.start_time or record.end_time
+            if not source_time:
+                missing_timestamp_excluded += 1
+                continue
+            boundary = start or end
+            assert boundary is not None
+            comparable = _comparable_time(source_time, boundary)
+            if comparable is None:
+                missing_timestamp_excluded += 1
+                continue
+            comparable_start = start if start is None or start.tzinfo is None else start.astimezone(timezone.utc)
+            comparable_end = end if end is None or end.tzinfo is None else end.astimezone(timezone.utc)
+            if comparable_start and comparable < comparable_start:
+                continue
+            if comparable_end and comparable > comparable_end:
+                continue
+        selected.append(record)
+    return selected, missing_timestamp_excluded
 
 
 def _first_attempts(records: list[UnitRecord]) -> list[UnitRecord]:
@@ -60,11 +149,17 @@ def compute_trend(records: list[UnitRecord]) -> list[dict]:
     for day in sorted(buckets):
         p, f = buckets[day]["pass"], buckets[day]["fail"]
         tot = p + f
+        matching = [
+            record for record in records
+            if (record.start_time or "")[:10] == day and record.result in {"PASS", "FAIL"}
+        ]
         out.append({
             "date": day,
             "pass": p,
             "fail": f,
             "yield": round(p / tot * 100.0, 2) if tot else 0.0,
+            "attempt_ids": [record.unit_id for record in matching],
+            "unit_ids": sorted({_unit_id(record) for record in matching}),
         })
     return out
 
@@ -72,6 +167,7 @@ def compute_trend(records: list[UnitRecord]) -> list[dict]:
 def compute_pareto(records: list[UnitRecord], top: int = 10) -> list[dict]:
     counter: Counter[str] = Counter()
     labels: dict[str, str] = {}
+    grouped: dict[str, list[UnitRecord]] = defaultdict(list)
     for r in records:
         if r.result == "FAIL":
             signature = signature_for(r)
@@ -79,6 +175,7 @@ def compute_pareto(records: list[UnitRecord], top: int = 10) -> list[dict]:
             if r.error_message:
                 label = f"{r.error_code or 'FAIL'}: {r.error_message[:60]}"
             counter[signature] += 1
+            grouped[signature].append(r)
             labels.setdefault(signature, label)
     total = sum(counter.values())
     out = []
@@ -91,6 +188,8 @@ def compute_pareto(records: list[UnitRecord], top: int = 10) -> list[dict]:
             "count": count,
             "pct": round(count / total * 100.0, 2) if total else 0.0,
             "cum_pct": round(cum / total * 100.0, 2) if total else 0.0,
+            "attempt_ids": [record.unit_id for record in grouped[signature]],
+            "unit_ids": sorted({_unit_id(record) for record in grouped[signature]}),
         })
     return out
 
@@ -144,6 +243,8 @@ def compute_station_breakdown(records: list[UnitRecord]) -> list[dict]:
         lambda: {"pass": 0, "fail": 0}
     )
     for r in records:
+        if r.result not in {"PASS", "FAIL"}:
+            continue
         key = (r.station_id, r.host)
         if r.result == "PASS":
             buckets[key]["pass"] += 1
@@ -153,6 +254,11 @@ def compute_station_breakdown(records: list[UnitRecord]) -> list[dict]:
     for station_id, host in sorted(buckets, key=lambda key: (key[1] or "", key[0] or "")):
         p, f = buckets[(station_id, host)]["pass"], buckets[(station_id, host)]["fail"]
         tot = p + f
+        matching = [
+            record for record in records
+            if (record.station_id, record.host) == (station_id, host)
+            and record.result in {"PASS", "FAIL"}
+        ]
         out.append({
             "station": f"{host or 'unknown'} / ST{station_id or '?'}",
             "station_id": station_id,
@@ -161,6 +267,9 @@ def compute_station_breakdown(records: list[UnitRecord]) -> list[dict]:
             "fail": f,
             "total": tot,
             "yield": round(p / tot * 100.0, 2) if tot else 0.0,
+            "key": station_key(matching[0]),
+            "attempt_ids": [record.unit_id for record in matching],
+            "unit_ids": sorted({_unit_id(record) for record in matching}),
         })
     return out
 
@@ -168,6 +277,8 @@ def compute_station_breakdown(records: list[UnitRecord]) -> list[dict]:
 def compute_lot_comparison(records: list[UnitRecord]) -> list[dict]:
     buckets: dict[str, dict[str, int]] = defaultdict(lambda: {"pass": 0, "fail": 0})
     for r in records:
+        if r.result not in {"PASS", "FAIL"}:
+            continue
         key = r.lot_id or "unknown"
         if r.result == "PASS":
             buckets[key]["pass"] += 1
@@ -177,21 +288,76 @@ def compute_lot_comparison(records: list[UnitRecord]) -> list[dict]:
     for key in sorted(buckets):
         p, f = buckets[key]["pass"], buckets[key]["fail"]
         tot = p + f
+        matching = [
+            record for record in records
+            if (record.lot_id or "unknown") == key and record.result in {"PASS", "FAIL"}
+        ]
         out.append({
             "lot": key,
             "pass": p,
             "fail": f,
             "total": tot,
             "yield": round(p / tot * 100.0, 2) if tot else 0.0,
+            "attempt_ids": [record.unit_id for record in matching],
+            "unit_ids": sorted({_unit_id(record) for record in matching}),
         })
     return out
 
 
-def build_manager_view(records: list[UnitRecord]) -> dict:
+def build_manager_view(
+    records: list[UnitRecord],
+    *,
+    product_codes: set[str] | None = None,
+    lot_ids: set[str] | None = None,
+    station_keys: set[str] | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
+) -> dict:
+    selected, missing_timestamp_excluded = filter_records(
+        records,
+        product_codes=product_codes,
+        lot_ids=lot_ids,
+        station_keys=station_keys,
+        start_time=start_time,
+        end_time=end_time,
+    )
+    product_options = sorted({_option_value(record.product_code) for record in records})
+    lot_options = sorted({_option_value(record.lot_id) for record in records})
+    station_records: dict[str, UnitRecord] = {}
+    for record in records:
+        station_records.setdefault(station_key(record), record)
     return {
-        "summary": compute_summary(records),
-        "trend": compute_trend(records),
-        "pareto": compute_pareto(records),
-        "stations": compute_station_breakdown(records),
-        "lots": compute_lot_comparison(records),
+        "summary": compute_summary(selected),
+        "trend": compute_trend(selected),
+        "pareto": compute_pareto(selected),
+        "stations": compute_station_breakdown(selected),
+        "lots": compute_lot_comparison(selected),
+        "scope": {
+            "selected_attempt_count": len(selected),
+            "selected_unit_count": len({_unit_id(record) for record in selected}),
+            "missing_timestamp_excluded": missing_timestamp_excluded,
+            "attempt_ids": [record.unit_id for record in selected],
+            "unit_ids": sorted({_unit_id(record) for record in selected}),
+            "filters": {
+                "products": sorted(product_codes or []),
+                "lots": sorted(lot_ids or []),
+                "stations": sorted(station_keys or []),
+                "start_time": start_time,
+                "end_time": end_time,
+            },
+            "options": {
+                "products": [{"value": value, "label": "Unknown" if value == _MISSING else value} for value in product_options],
+                "lots": [{"value": value, "label": "Unknown" if value == _MISSING else value} for value in lot_options],
+                "stations": [
+                    {
+                        "value": key,
+                        "station_id": record.station_id,
+                        "host": record.host,
+                        "label": f"{record.host or 'unknown'} / ST{record.station_id or '?'}",
+                    }
+                    for key, record in sorted(station_records.items())
+                ],
+            },
+            "time_semantics": "Attempt start time, falling back to end time; naive filters compare source wall time.",
+        },
     }

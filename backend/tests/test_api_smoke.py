@@ -239,6 +239,37 @@ class TestJobOwnership:
 
         assert resp.status_code == 400
 
+    def test_manager_route_applies_repeated_scope_filters(self, client, registry_with_owned_job):
+        from app.models import BatchMetadata, UnitRecord
+
+        job = registry_with_owned_job.get("owned-job")
+        assert job is not None
+        job.batch = BatchMetadata(display_name="Scoped batch", product_codes=["P1", "P2"])
+        job.records = [
+            UnitRecord(unit_id="p1", serial_number="SN1", result="PASS", product_code="P1"),
+            UnitRecord(unit_id="p2", serial_number="SN2", result="FAIL", product_code="P2"),
+        ]
+
+        resp = client.get(
+            "/api/jobs/owned-job/manager?product=P1&product=NO-MATCH",
+            headers=auth_headers(login="octocat", github_id="42"),
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["scope"]["attempt_ids"] == ["p1"]
+        assert body["scope"]["filters"]["products"] == ["NO-MATCH", "P1"]
+        assert body["batch"]["display_name"] == "Scoped batch"
+
+    def test_manager_route_rejects_invalid_time_scope(self, client, registry_with_owned_job):
+        resp = client.get(
+            "/api/jobs/owned-job/manager?start_time=not-a-time",
+            headers=auth_headers(login="octocat", github_id="42"),
+        )
+
+        assert resp.status_code == 400
+        assert "Invalid ISO timestamp" in resp.json()["detail"]
+
     @pytest.mark.parametrize(
         ("method", "path"),
         [
