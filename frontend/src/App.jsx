@@ -7,6 +7,7 @@ import Engineer from './pages/Engineer'
 import Manager from './pages/Manager'
 import Knowledge from './pages/Knowledge'
 import About from './pages/About'
+import RecentBatches from './components/RecentBatches'
 import { debugLog, log } from './logger'
 import { monitorJob } from './jobMonitoring'
 import {
@@ -29,6 +30,8 @@ function relPath(file) {
   return file.webkitRelativePath || file.name
 }
 
+const preferredViewKey = (username) => `cotrace-results-view:${String(username || '').toLocaleLowerCase()}`
+
 function Shell() {
   const { checking, isAuthed, username, logout } = useAuth()
   const [theme, setTheme] = useState(() => localStorage.getItem('cotrace-theme') || 'light')
@@ -49,6 +52,11 @@ function Shell() {
   const [warnings, setWarnings] = useState([])
   const [llmMetrics, setLlmMetrics] = useState(null)
   const [selectedFiles, setSelectedFiles] = useState([])
+  const [recentJobs, setRecentJobs] = useState([])
+  const [recentJobsCursor, setRecentJobsCursor] = useState(null)
+  const [recentJobsLoading, setRecentJobsLoading] = useState(false)
+  const [recentJobsError, setRecentJobsError] = useState('')
+  const [preferredResultsView, setPreferredResultsView] = useState('engineer')
   const runToken = useRef(0)
   const uploadAbort = useRef(null)
   const workspaceOwner = useRef(null)
@@ -69,6 +77,8 @@ function Shell() {
     }
     if (workspaceOwner.current === username) return
     workspaceOwner.current = username
+    const savedView = localStorage.getItem(preferredViewKey(username))
+    setPreferredResultsView(savedView === 'manager' ? 'manager' : 'engineer')
     const restored = loadWorkspaceState(sessionStorage, username, window.location.search)
     setTab(restored.tab)
     setEngineerViewState(restored.engineer)
@@ -76,6 +86,7 @@ function Shell() {
     setRestoreCandidateId(restored.jobId)
     setWorkspaceReady(true)
     if (restored.jobId) restoreWorkspaceJob(restored.jobId)
+    loadRecentJobs({ replace: true })
   }, [checking, isAuthed, username])
 
   useEffect(() => {
@@ -128,7 +139,8 @@ function Shell() {
     setEngineerDrillDown(null)
     setEngineerViewState({ ...DEFAULT_ENGINEER_VIEW_STATE })
     setWarnings(jobWarnings)
-    setTab('engineer')
+    setTab(preferredResultsView)
+    loadRecentJobs({ replace: true })
     log('info', 'Job ready', { jobId: id, warningCount: jobWarnings.length })
   }
 
@@ -320,6 +332,39 @@ function Shell() {
     setMenuOpen(false)
   }
 
+  async function loadRecentJobs({ replace = false } = {}) {
+    if (!username) return
+    setRecentJobsLoading(true)
+    setRecentJobsError('')
+    try {
+      const response = await api.jobs({ cursor: replace ? null : recentJobsCursor })
+      setRecentJobs((current) => replace ? response.items : [...current, ...response.items])
+      setRecentJobsCursor(response.next_cursor || null)
+    } catch (error) {
+      setRecentJobsError(error.message)
+    } finally {
+      setRecentJobsLoading(false)
+    }
+  }
+
+  const setResultsViewPreference = (nextView) => {
+    const value = nextView === 'manager' ? 'manager' : 'engineer'
+    setPreferredResultsView(value)
+    localStorage.setItem(preferredViewKey(username), value)
+  }
+
+  const openRecentJob = async (job) => {
+    setEngineerDrillDown(null)
+    setEngineerViewState({ ...DEFAULT_ENGINEER_VIEW_STATE })
+    setRestoreCandidateId(job.job_id)
+    navigateToTab(preferredResultsView, {
+      jobId: job.job_id,
+      drillDown: null,
+      engineer: DEFAULT_ENGINEER_VIEW_STATE,
+    })
+    await restoreWorkspaceJob(job.job_id)
+  }
+
   const workspaceSnapshot = (overrides = {}) => ({
     tab,
     jobId: jobId || restoreCandidateId,
@@ -405,6 +450,19 @@ function Shell() {
   }
 
   const monitoringPaused = batchProgress?.status === 'monitoring_error' && !!activeJobId
+  const recentBatchProps = {
+    jobs: recentJobs,
+    activeJobId: jobId || activeJobId || restoreCandidateId,
+    loading: recentJobsLoading,
+    error: recentJobsError,
+    hasMore: !!recentJobsCursor,
+    preferredView: preferredResultsView,
+    onPreferredViewChange: setResultsViewPreference,
+    onOpen: openRecentJob,
+    onNew: clearRestoredWorkspace,
+    onRefresh: () => loadRecentJobs({ replace: true }),
+    onLoadMore: () => loadRecentJobs(),
+  }
 
   return (
     <div className="min-h-screen">
@@ -425,6 +483,7 @@ function Shell() {
             </nav>
 
             <div className="hidden md:flex items-center gap-3">
+              <RecentBatches {...recentBatchProps} />
               <ThemeSwitch />
               {(batchRunning || monitoringPaused) && (
                 <button
@@ -457,6 +516,7 @@ function Shell() {
               {TABS.map(([id, label]) => (
                 <NavButton key={id} id={id} label={label} />
               ))}
+              <RecentBatches {...recentBatchProps} mobile />
               {(batchRunning || monitoringPaused) && (
                 <button
                   onClick={stopBatch}

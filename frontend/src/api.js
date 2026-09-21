@@ -47,6 +47,11 @@ export const api = {
     request('/api/auth/admin/login', { method: 'POST', body: payload, authOptional: true }),
   logout: () => request('/api/logout', { method: 'POST', authOptional: true }),
   upload: (formData, options = {}) => request('/api/upload', { method: 'POST', body: formData, ...options }),
+  jobs: ({ limit = 20, cursor } = {}) => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (cursor) params.set('cursor', cursor)
+    return request(`/api/jobs?${params}`)
+  },
   status: (jobId) => request(`/api/jobs/${jobId}/status`),
   stop: (jobId) => request(`/api/jobs/${jobId}/stop`, { method: 'POST' }),
   units: (jobId) => request(`/api/jobs/${jobId}/units`),
