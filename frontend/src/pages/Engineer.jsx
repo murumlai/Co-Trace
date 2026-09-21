@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
 import { useAuth } from '../auth'
+import { groupAttempts } from '../unitAttempts'
 import {
   Badge,
   Button,
@@ -58,8 +59,6 @@ const SEARCH_FIELDS = [
 ]
 
 const textValue = (value) => String(value ?? '').toLocaleLowerCase()
-
-const groupAttempts = (group) => [group.final, ...(group.failures || [])].filter(Boolean)
 
 const groupMatchesSearch = (group, query) => {
   const normalizedQuery = query.trim().toLocaleLowerCase()
