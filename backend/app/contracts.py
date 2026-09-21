@@ -214,6 +214,19 @@ class FeedbackStore(Protocol):
         ...
 
 
+class InvestigationActionStore(Protocol):
+    """Persists owner-scoped, versioned investigation actions."""
+
+    def create(self, entry: Any) -> Any:
+        ...
+
+    def list_for_job(self, job_id: str, owner_id: str) -> list[Any]:
+        ...
+
+    def update(self, action_id: str, owner_id: str, expected_version: int, **changes: Any) -> Any:
+        ...
+
+
 class PlaybookStore(Protocol):
     """Persists and resolves admin-authored known-failure playbooks."""
 

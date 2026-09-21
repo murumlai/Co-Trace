@@ -35,6 +35,7 @@ from .dependencies import (
     get_analyzer_service,
     get_acronym_glossary_store,
     get_feedback_store,
+    get_investigation_action_store,
     get_knowledge_ingestion,
     get_knowledge_retriever,
     get_knowledge_store,
@@ -46,7 +47,8 @@ from .knowledge import parsing
 from .knowledge.models import PlaybookCreateRequest, PlaybookUpdateRequest
 from .knowledge.summarizer import ProductKnowledgeError, is_llm_backend_available
 from .logging_config import setup_backend_logging, write_frontend_log
-from .models import AcronymUpsertRequest, AdminLoginRequest, BatchMetadata, FeedbackCreateRequest, FeedbackEntry, FrontendLogRequest, JobListResponse, JobSummary
+from .models import AcronymUpsertRequest, AdminLoginRequest, BatchMetadata, FeedbackCreateRequest, FeedbackEntry, FrontendLogRequest, InvestigationActionCreateRequest, InvestigationActionEntry, InvestigationActionEvent, InvestigationActionUpdateRequest, JobListResponse, JobSummary
+from .investigation_action_store import ActionNotFound, ActionVersionConflict
 from .redaction import redact
 from .record_views import build_debug_packet, group_units_by_serial
 from .upload_storage import UploadStorageError, save_uploads
@@ -470,6 +472,106 @@ def create_feedback(req: FeedbackCreateRequest, job_id: str,
     )
     store.add(entry)
     return entry.model_dump()
+
+
+@app.get("/api/jobs/{job_id}/actions")
+def list_investigation_actions(
+    job_id: str,
+    user: AuthenticatedUser = Depends(require_user),
+    reg: Any = Depends(get_registry),
+    store: Any = Depends(get_investigation_action_store),
+) -> dict:
+    _get_owned_job(job_id, user, reg)
+    return {"entries": [entry.model_dump() for entry in store.list_for_job(job_id, user.github_id)]}
+
+
+@app.post("/api/jobs/{job_id}/actions")
+def create_investigation_action(
+    request: InvestigationActionCreateRequest,
+    job_id: str,
+    user: AuthenticatedUser = Depends(require_user),
+    reg: Any = Depends(get_registry),
+    store: Any = Depends(get_investigation_action_store),
+) -> dict:
+    job = _get_owned_job(job_id, user, reg)
+    if bool(request.unit_id) == bool(request.signature):
+        raise HTTPException(400, "Provide exactly one unit_id or signature")
+    matching = [
+        record for record in job.records
+        if record.result == "FAIL" and (
+            (request.unit_id and record.unit_id == request.unit_id) or
+            (request.signature and record.signature == request.signature)
+        )
+    ]
+    if not matching:
+        raise HTTPException(404, "Failed attempt or failure family not found")
+    now = datetime.now(timezone.utc).isoformat()
+    next_action = redact(request.next_action)[:2000].strip()
+    if not next_action:
+        raise HTTPException(400, "Next action is empty after redaction")
+    assignee = redact(request.assignee)[:120].strip() or None
+    representative = matching[0]
+    event = InvestigationActionEvent(
+        version=1,
+        actor_id=user.github_id,
+        actor_login=user.login,
+        changed_at=now,
+        status=request.status,
+        assignee=assignee,
+        next_action=next_action,
+    )
+    entry = InvestigationActionEntry(
+        action_id=uuid.uuid4().hex,
+        job_id=job_id,
+        owner_id=user.github_id,
+        owner_login=user.login,
+        unit_id=request.unit_id,
+        signature=request.signature,
+        product_code=representative.product_code,
+        error_code=representative.error_code,
+        assignee=assignee,
+        next_action=next_action,
+        status=request.status,
+        created_at=now,
+        updated_at=now,
+        expires_at=job.created_at + settings.JOB_TTL_S,
+        history=[event],
+    )
+    return store.create(entry).model_dump()
+
+
+@app.patch("/api/jobs/{job_id}/actions/{action_id}")
+def update_investigation_action(
+    request: InvestigationActionUpdateRequest,
+    job_id: str,
+    action_id: str,
+    user: AuthenticatedUser = Depends(require_user),
+    reg: Any = Depends(get_registry),
+    store: Any = Depends(get_investigation_action_store),
+) -> dict:
+    _get_owned_job(job_id, user, reg)
+    fields_set = set(request.model_fields_set)
+    next_action = redact(request.next_action)[:2000].strip() if request.next_action is not None else None
+    assignee = redact(request.assignee)[:120].strip() if request.assignee is not None else None
+    if "next_action" in fields_set and not next_action:
+        raise HTTPException(400, "Next action is empty after redaction")
+    try:
+        updated = store.update(
+            action_id,
+            user.github_id,
+            request.expected_version,
+            actor_id=user.github_id,
+            actor_login=user.login,
+            assignee=assignee,
+            next_action=next_action,
+            status=request.status,
+            fields_set=fields_set,
+        )
+    except ActionNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ActionVersionConflict as exc:
+        raise HTTPException(409, {"message": str(exc), "current": exc.current.model_dump()}) from exc
+    return updated.model_dump()
 
 
 @app.post("/api/jobs/{job_id}/units/{unit_id}/reanalyze")

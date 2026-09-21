@@ -9,6 +9,7 @@ from __future__ import annotations
 from .analysis_cache import DiskAnalysisCache
 from .analyzer import AnalyzerService
 from .feedback_store import DiskFeedbackStore
+from .investigation_action_store import DiskInvestigationActionStore
 from .job_registry import JobRegistry, registry as _registry
 from .knowledge.acronym_glossary import AcronymGlossaryService, AcronymGlossaryStore
 from .knowledge.playbook_store import AdminPlaybookStore
@@ -23,6 +24,7 @@ from .orchestrator import JobOrchestrator, _default_orchestrator as _orchestrato
 
 _analysis_cache = DiskAnalysisCache()
 _feedback_store = DiskFeedbackStore()
+_investigation_action_store = DiskInvestigationActionStore()
 _playbook_store = AdminPlaybookStore()
 _knowledge_store = KnowledgeStore()
 _knowledge_retriever = LexicalKnowledgeRetriever(_knowledge_store, _playbook_store)
@@ -69,6 +71,11 @@ def get_analysis_cache() -> DiskAnalysisCache:
 def get_feedback_store() -> DiskFeedbackStore:
     """Provide the owner-scoped engineer feedback store."""
     return _feedback_store
+
+
+def get_investigation_action_store() -> DiskInvestigationActionStore:
+    """Provide the owner-scoped investigation action store."""
+    return _investigation_action_store
 
 
 def get_playbook_store() -> AdminPlaybookStore:

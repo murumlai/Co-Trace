@@ -376,6 +376,56 @@ class FeedbackEntry(BaseModel):
     expires_at: float
 
 
+InvestigationActionStatus = Literal["open", "in_progress", "blocked", "resolved"]
+
+
+class InvestigationActionCreateRequest(BaseModel):
+    unit_id: Optional[str] = None
+    signature: Optional[str] = None
+    assignee: Optional[str] = Field(default=None, max_length=120)
+    next_action: str = Field(min_length=1, max_length=2000)
+    status: InvestigationActionStatus = "open"
+
+
+class InvestigationActionUpdateRequest(BaseModel):
+    expected_version: int = Field(ge=1)
+    assignee: Optional[str] = Field(default=None, max_length=120)
+    next_action: Optional[str] = Field(default=None, max_length=2000)
+    status: Optional[InvestigationActionStatus] = None
+
+
+class InvestigationActionEvent(BaseModel):
+    version: int
+    actor_id: str
+    actor_login: str
+    changed_at: str
+    previous_status: Optional[InvestigationActionStatus] = None
+    status: InvestigationActionStatus
+    previous_assignee: Optional[str] = None
+    assignee: Optional[str] = None
+    previous_next_action: Optional[str] = None
+    next_action: str
+
+
+class InvestigationActionEntry(BaseModel):
+    action_id: str
+    job_id: str
+    owner_id: str
+    owner_login: str
+    unit_id: Optional[str] = None
+    signature: Optional[str] = None
+    product_code: Optional[str] = None
+    error_code: Optional[str] = None
+    assignee: Optional[str] = None
+    next_action: str
+    status: InvestigationActionStatus = "open"
+    version: int = 1
+    created_at: str
+    updated_at: str
+    expires_at: float
+    history: list[InvestigationActionEvent] = Field(default_factory=list)
+
+
 class AcronymUpsertRequest(BaseModel):
     """Create/update a glossary entry from the review UI."""
 
