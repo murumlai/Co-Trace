@@ -120,6 +120,16 @@ def compute_summary(records: list[UnitRecord]) -> dict:
     passed = sum(1 for r in latest if r.result == "PASS")
     failed = sum(1 for r in latest if r.result == "FAIL")
     unknown = sum(1 for r in latest if r.result == "UNKNOWN")
+    latest_total = passed + failed
+    latest_yield = (passed / latest_total * 100.0) if latest_total else 0.0
+    first_by_unit = {_unit_id(record): record for record in firsts}
+    recovered_after_retry = sum(
+        1
+        for record in latest
+        if record.result == "PASS" and first_by_unit[_unit_id(record)].result == "FAIL"
+    )
+    retests = total - len(firsts)
+    additional_attempt_share = (retests / total * 100.0) if total else 0.0
 
     return {
         "total_runs": total,
@@ -130,7 +140,12 @@ def compute_summary(records: list[UnitRecord]) -> dict:
         "fpy": round(fpy, 2),
         "fpy_pass": fpy_pass,
         "fpy_total": fpy_total,
-        "retests": total - len(firsts),
+        "retests": retests,
+        "latest_yield": round(latest_yield, 2),
+        "latest_yield_pass": passed,
+        "latest_yield_total": latest_total,
+        "recovered_after_retry": recovered_after_retry,
+        "additional_attempt_share": round(additional_attempt_share, 2),
     }
 
 

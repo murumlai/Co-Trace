@@ -73,6 +73,11 @@ def test_product_filter_calculates_first_and_latest_within_selection():
         "fpy_pass": 0,
         "fpy_total": 1,
         "retests": 1,
+        "latest_yield": 100.0,
+        "latest_yield_pass": 1,
+        "latest_yield_total": 1,
+        "recovered_after_retry": 1,
+        "additional_attempt_share": 50.0,
     }
     assert view["scope"]["attempt_ids"] == ["p1-fail", "p1-pass"]
     assert view["scope"]["unit_ids"] == ["SN-1"]

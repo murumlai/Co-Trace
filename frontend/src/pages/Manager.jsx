@@ -13,7 +13,7 @@ import {
 } from 'recharts'
 import { api } from '../api'
 import { Button, Card, IconWell, MetricCard } from '../components/ui'
-import { firstObservedPassMetric, formatRate } from '../managerMetrics'
+import { additionalAttemptMetric, firstObservedPassMetric, formatRate, latestObservedYieldMetric } from '../managerMetrics'
 import { DEFAULT_MANAGER_SCOPE } from '../workspaceState'
 
 const AXIS = { fill: 'rgb(var(--color-muted))', fontSize: 12, fontFamily: 'DM Sans' }
@@ -103,6 +103,8 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
   const s = data.summary
   const topFailure = data.pareto && data.pareto.length ? data.pareto[0] : null
   const firstObservedPass = firstObservedPassMetric(s)
+  const latestObservedYield = latestObservedYieldMetric(s)
+  const additionalAttempts = additionalAttemptMetric(s)
   const batch = data.batch || {}
   const scoped = data.scope || { options: { products: [], lots: [], stations: [] } }
   const activeScopeCount = scope.products.length + scope.lots.length + scope.stations.length + (scope.startTime ? 1 : 0) + (scope.endTime ? 1 : 0)
@@ -152,10 +154,12 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
           tone="accent"
           hint={firstObservedPass.hint}
         />
+        <MetricCard label="Latest observed unit yield" value={latestObservedYield.value} tone="pass" hint={latestObservedYield.hint} />
+        <MetricCard label="Still-failing units" value={s.failed} tone="fail" hint={`${s.failed}/${s.unique_units} observed units`} />
+        <MetricCard label="Additional-attempt share" value={additionalAttempts.value} tone="warn" hint={additionalAttempts.hint} />
         <MetricCard label="Test attempts" value={s.total_runs} hint={`${s.retests} additional attempts`} />
         <MetricCard label="Observed units" value={s.unique_units} />
-        <MetricCard label="Latest passed units" value={s.passed} tone="pass" hint={`${s.passed}/${s.unique_units} observed units`} />
-        <MetricCard label="Latest failing units" value={s.failed} tone="fail" hint={`${s.failed}/${s.unique_units} observed units`} />
+        <MetricCard label="Recovered after retry" value={s.recovered_after_retry || 0} tone="pass" hint="Latest outcome passed after an observed first failure" />
         <MetricCard label="Latest unknown units" value={s.unknown || 0} hint={`${s.unknown || 0}/${s.unique_units} observed units`} />
         {topFailure && (
           <MetricCard
