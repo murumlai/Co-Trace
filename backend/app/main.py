@@ -46,7 +46,7 @@ from .knowledge import parsing
 from .knowledge.models import PlaybookCreateRequest, PlaybookUpdateRequest
 from .knowledge.summarizer import ProductKnowledgeError, is_llm_backend_available
 from .logging_config import setup_backend_logging, write_frontend_log
-from .models import AcronymUpsertRequest, AdminLoginRequest, FeedbackCreateRequest, FeedbackEntry, FrontendLogRequest, JobListResponse, JobSummary
+from .models import AcronymUpsertRequest, AdminLoginRequest, BatchMetadata, FeedbackCreateRequest, FeedbackEntry, FrontendLogRequest, JobListResponse, JobSummary
 from .redaction import redact
 from .record_views import build_debug_packet, group_units_by_serial
 from .upload_storage import UploadStorageError, save_uploads
@@ -298,10 +298,26 @@ async def upload(
         owner_login=user.login,
         owner_role="admin" if user.is_admin else "user",
         force_refresh=force_refresh,
+        batch=BatchMetadata(
+            display_name=_batch_display_name(paths, files, job_id),
+            source_file_count=saved.file_count,
+            source_zip_count=saved.zip_count,
+        ),
     )
     background.add_task(orch.run_job, job_id)
     log.info("Upload queued for processing (job %s).", job_id[:8])
     return {"job_id": job_id}
+
+
+def _batch_display_name(paths: list[str], files: list[UploadFile], job_id: str) -> str:
+    normalized = [path.replace("\\", "/").strip("/") for path in paths if path]
+    roots = {path.split("/", 1)[0] for path in normalized if "/" in path}
+    if len(roots) == 1:
+        return next(iter(roots))[:120]
+    filenames = [os.path.basename(path) for path in normalized] or [upload.filename or "" for upload in files]
+    if len(filenames) == 1 and filenames[0]:
+        return filenames[0][:120]
+    return f"Batch {job_id[:8]}"
 
 
 @app.get("/api/jobs/{job_id}/status")
@@ -344,7 +360,7 @@ def list_jobs(
     items = [
         JobSummary(
             job_id=job.job_id,
-            display_name=f"Batch {job.job_id[:8]}",
+            display_name=job.batch.display_name or f"Batch {job.job_id[:8]}",
             status=job.status,
             progress=job.to_status().progress,
             message=job.message,
@@ -352,6 +368,7 @@ def list_jobs(
             completed_at=job.completed_at,
             result_available=job.status == "done",
             unit_count=len(job.records),
+            batch=job.batch,
         )
         for job in jobs
     ]

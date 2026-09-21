@@ -11,7 +11,7 @@ import time
 import pytest
 
 from app.job_registry import Job, JobRegistry
-from app.models import UnitRecord
+from app.models import BatchMetadata, UnitRecord
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +62,7 @@ class TestJobSave:
         job = Job(job_id="abc123", owner_id="42", owner_login="octocat",
                   workdir=workdir, status="done",
                   message="Completed: 1 unit runs", processed=1, total=1,
-                  records=[rec])
+                  records=[rec], batch=BatchMetadata(display_name="Factory folder"))
         job.save()
 
         path = os.path.join(workdir, "job_state.json")
@@ -77,6 +77,7 @@ class TestJobSave:
         assert state["processed"] == 1
         assert len(state["records"]) == 1
         assert state["records"][0]["unit_id"] == "u1"
+        assert state["batch"]["display_name"] == "Factory folder"
 
     def test_save_skips_when_no_workdir(self):
         """Job with empty workdir must not raise or create files."""
@@ -128,6 +129,7 @@ class TestLoadFromDisk:
             owner_role="admin",
             force_refresh=True,
             status="done",
+            batch={"display_name": "Saved batch", "product_codes": ["P1"]},
         )
 
         reg = JobRegistry()
@@ -140,6 +142,22 @@ class TestLoadFromDisk:
         assert job.owner_role == "admin"
         assert job.force_refresh is True
         assert job.status == "done"
+        assert job.batch.display_name == "Saved batch"
+        assert job.batch.product_codes == ["P1"]
+
+    def test_old_state_without_batch_metadata_loads_as_unavailable(self, tmp_path, isolated_settings):
+        job_id = "legacy01"
+        workdir = str(tmp_path / "work" / job_id)
+        _make_state_file(workdir, job_id=job_id, status="done")
+
+        reg = JobRegistry()
+        reg.load_from_disk()
+
+        job = reg.get(job_id)
+        assert job is not None
+        assert job.batch.display_name is None
+        assert job.batch.included_run_count is None
+        assert job.batch.timestamp_timezone == "unavailable"
 
     def test_restores_error_job(self, tmp_path, monkeypatch, isolated_settings):
         job_id = "errjob01"

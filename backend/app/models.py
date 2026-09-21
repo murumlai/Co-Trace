@@ -280,6 +280,22 @@ class JobProgress(BaseModel):
     stage: Optional[str] = None
 
 
+class BatchMetadata(BaseModel):
+    display_name: Optional[str] = None
+    source_file_count: Optional[int] = None
+    source_zip_count: Optional[int] = None
+    discovered_run_count: Optional[int] = None
+    included_run_count: Optional[int] = None
+    parse_excluded_count: Optional[int] = None
+    incomplete_folder_count: Optional[int] = None
+    unknown_result_count: Optional[int] = None
+    missing_debuglog_count: Optional[int] = None
+    product_codes: list[str] = Field(default_factory=list)
+    observed_start_time: Optional[str] = None
+    observed_end_time: Optional[str] = None
+    timestamp_timezone: Literal["offset", "unspecified", "mixed", "unavailable"] = "unavailable"
+
+
 class JobStatus(BaseModel):
     job_id: str
     status: JobState = "pending"
@@ -289,6 +305,7 @@ class JobStatus(BaseModel):
     unit_count: int = 0
     warnings: list[str] = Field(default_factory=list)
     llm_metrics: LlmUsageMetrics = Field(default_factory=LlmUsageMetrics)
+    batch: BatchMetadata = Field(default_factory=BatchMetadata)
 
 
 class JobSummary(BaseModel):
@@ -301,6 +318,7 @@ class JobSummary(BaseModel):
     completed_at: Optional[float] = None
     result_available: bool = False
     unit_count: int = 0
+    batch: BatchMetadata = Field(default_factory=BatchMetadata)
 
 
 class JobListResponse(BaseModel):

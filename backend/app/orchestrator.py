@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from collections.abc import Callable
 from typing import Any
@@ -20,6 +21,7 @@ from .analyzer import AnalyzerService
 from .config import settings
 from .contracts import ArtifactWriter, FailureAnalyzer, JobRepository, PayloadCleaner, Preprocessor
 from .job_registry import registry
+from .models import BatchMetadata
 from .preprocessor import FtrunnerPreprocessor, get_preprocessor, write_product_jsons
 from .upload_storage import cleanup_job_workdir, get_job_input_root
 
@@ -121,6 +123,7 @@ class JobOrchestrator:
             ]
             if job.warnings:
                 log.warning("Job %s completed with %s folder warnings.", job_id[:8], len(job.warnings))
+            job.batch = _batch_metadata(job.batch, run_folders, records, incomplete)
             job.save()
             _raise_if_cancelled(job)
 
@@ -229,6 +232,48 @@ def _analysis_progress_updater(job: Any) -> Callable[[int, int, str], None]:
 def _raise_if_cancelled(job: Any) -> None:
     if job.cancel_requested:
         raise JobCancelled()
+
+
+_TIMEZONE_SUFFIX = re.compile(r"(?:Z|[+-]\d{2}:?\d{2})$")
+
+
+def _batch_metadata(
+    current: BatchMetadata,
+    run_folders: list[str],
+    records: list[Any],
+    incomplete: list[str],
+) -> BatchMetadata:
+    timestamps = [
+        value
+        for record in records
+        for value in (record.start_time, record.end_time)
+        if value
+    ]
+    timezone_flags = {_TIMEZONE_SUFFIX.search(value) is not None for value in timestamps}
+    timezone = "unavailable"
+    if timezone_flags == {True}:
+        timezone = "offset"
+    elif timezone_flags == {False}:
+        timezone = "unspecified"
+    elif timezone_flags:
+        timezone = "mixed"
+    missing_debuglog = sum(
+        1
+        for record in records
+        if record.result == "FAIL" and record.debuglog_status not in {"excerpt", "not_applicable"}
+    )
+    return current.model_copy(update={
+        "discovered_run_count": len(run_folders),
+        "included_run_count": len(records),
+        "parse_excluded_count": max(0, len(run_folders) - len(records)),
+        "incomplete_folder_count": len(incomplete),
+        "unknown_result_count": sum(1 for record in records if record.result == "UNKNOWN"),
+        "missing_debuglog_count": missing_debuglog,
+        "product_codes": sorted({record.product_code for record in records if record.product_code}),
+        "observed_start_time": min(timestamps) if timestamps else None,
+        "observed_end_time": max(timestamps) if timestamps else None,
+        "timestamp_timezone": timezone,
+    })
 
 
 # Legacy private helper kept for external callers that imported it directly.

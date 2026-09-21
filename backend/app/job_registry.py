@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .config import settings
-from .models import AnalysisResult, JobProgress, JobState, JobStatus, LlmUsageMetrics, UnitRecord
+from .models import AnalysisResult, BatchMetadata, JobProgress, JobState, JobStatus, LlmUsageMetrics, UnitRecord
 from .upload_storage import cleanup_job_workdir
 
 log = logging.getLogger(__name__)
@@ -43,6 +43,7 @@ class Job:
     warnings: list[str] = field(default_factory=list)
     cancel_requested: bool = False
     llm_metrics: LlmUsageMetrics = field(default_factory=LlmUsageMetrics)
+    batch: BatchMetadata = field(default_factory=BatchMetadata)
     # signature -> complete analysis result reused within the current job
     signature_cache: dict[str, AnalysisResult] = field(default_factory=dict)
     # Injected by the registry so save() does not hard-code disk paths.
@@ -60,6 +61,7 @@ class Job:
             unit_count=len(self.records),
             warnings=self.warnings,
             llm_metrics=self.llm_metrics,
+            batch=self.batch,
         )
 
     def elapsed_s(self) -> float:
@@ -107,6 +109,7 @@ def _inline_save(job: Job) -> None:
         "warnings": job.warnings,
         "cancel_requested": job.cancel_requested,
         "llm_metrics": job.llm_metrics.model_dump(),
+        "batch": job.batch.model_dump(),
         "records": [r.model_dump() for r in job.records],
         "signature_cache": {
             signature: _coerce_cached_result(result).model_dump()
@@ -183,6 +186,7 @@ class DiskJobStateStore:
                     warnings=state.get("warnings", []),
                     cancel_requested=state.get("cancel_requested", False),
                     llm_metrics=LlmUsageMetrics(**state.get("llm_metrics", {})),
+                    batch=BatchMetadata(**state.get("batch", {})),
                     records=[UnitRecord(**r) for r in state.get("records", [])],
                     signature_cache={
                         signature: _coerce_cached_result(result)
@@ -232,6 +236,7 @@ class JobRegistry:
         owner_login: str = "",
         owner_role: str = "user",
         force_refresh: bool = False,
+        batch: BatchMetadata | None = None,
     ) -> Job:
         with self._lock:
             job = Job(
@@ -240,6 +245,7 @@ class JobRegistry:
                 owner_login=owner_login,
                 owner_role=owner_role,
                 force_refresh=force_refresh,
+                batch=batch or BatchMetadata(),
                 workdir=workdir,
             )
             job._state_store = self._store

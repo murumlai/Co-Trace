@@ -42,7 +42,7 @@ class JobRepository(Protocol):
         """Return the job for ``job_id``, or ``None`` if absent or expired."""
         ...
 
-    def create(self, job_id: str, workdir: str) -> Any:
+    def create(self, job_id: str, workdir: str, **kwargs: Any) -> Any:
         """Create, persist, and return a new pending job."""
         ...
 

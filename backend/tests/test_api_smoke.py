@@ -322,3 +322,6 @@ class TestUploadOptions:
         assert job is not None
         assert job.force_refresh is True
         assert job.owner_id == "42"
+        assert job.batch.display_name == "test.txt"
+        assert job.batch.source_file_count == 1
+        assert job.batch.source_zip_count == 0
