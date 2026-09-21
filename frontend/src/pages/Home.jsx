@@ -170,7 +170,11 @@ function MetricRow({ label, value }) {
 function LlmMetricsPanel({ metrics }) {
   if (!metrics) return null
   return (
-    <Card className="mt-6 p-6">
+    <details className="mt-6 rounded-panel border border-border bg-surface shadow-sm">
+      <summary className="cursor-pointer list-none px-5 py-4 text-sm font-medium text-muted hover:text-ink focus-ring">
+        Processing details · {formatNumber(metrics.total_calls)} model calls · {formatCredits(metrics.total_estimated_credits)} estimated credits
+      </summary>
+      <div className="border-t border-border p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-muted">LLM usage</p>
@@ -194,7 +198,8 @@ function LlmMetricsPanel({ metrics }) {
         <span>{metrics.credit_basis || 'Estimated token credits.'}</span>
         <span>{formatNumber(metrics.calls_skipped_by_cache)} call{metrics.calls_skipped_by_cache === 1 ? '' : 's'} skipped by cache.</span>
       </div>
-    </Card>
+      </div>
+    </details>
   )
 }
 

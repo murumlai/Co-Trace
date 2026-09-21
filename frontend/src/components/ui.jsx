@@ -52,7 +52,7 @@ const BUTTON_VARIANTS = {
 export function Button({ variant = 'secondary', className = '', children, ...rest }) {
   const base =
     'inline-flex items-center justify-center gap-2 font-body font-medium rounded-lg px-4 py-2.5 ' +
-    'text-sm transition-colors duration-150 focus-ring disabled:opacity-50 disabled:cursor-not-allowed'
+    'min-h-10 text-sm transition-colors duration-150 focus-ring disabled:opacity-50 disabled:cursor-not-allowed'
   return (
     <button className={[base, BUTTON_VARIANTS[variant] || BUTTON_VARIANTS.secondary, className].join(' ')} {...rest}>
       {children}
@@ -65,7 +65,7 @@ export function ToolbarButton({ active = false, className = '', children, ...res
   return (
     <button
       className={[
-        'inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors duration-150 focus-ring',
+        'inline-flex min-h-10 items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors duration-150 focus-ring',
         active
           ? 'bg-accent/10 text-accent border border-accent/30'
           : 'bg-surface text-ink-2 border border-border hover:bg-surface-2 hover:text-ink',

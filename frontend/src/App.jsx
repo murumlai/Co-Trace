@@ -83,6 +83,15 @@ function Shell() {
   }, [engineerFeedbackDrafts])
 
   useEffect(() => {
+    if (!menuOpen) return undefined
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [menuOpen])
+
+  useEffect(() => {
     if (checking) return
     if (!isAuthed || !username) {
       workspaceOwner.current = null
@@ -509,13 +518,13 @@ function Shell() {
               <span className="font-display font-bold text-ink hidden sm:block">Co-Trace</span>
             </div>
 
-            <nav className="hidden md:flex items-center gap-1">
+            <nav className="hidden lg:flex items-center gap-1">
               {TABS.map(([id, label]) => (
                 <NavButton key={id} id={id} label={label} />
               ))}
             </nav>
 
-            <div className="hidden md:flex items-center gap-3">
+            <div className="hidden lg:flex items-center gap-3">
               <RecentBatches {...recentBatchProps} />
               <ThemeSwitch />
               {(batchRunning || monitoringPaused) && (
@@ -536,16 +545,18 @@ function Shell() {
             </div>
 
             <button
-              className="md:hidden flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface text-ink focus-ring"
+              className="lg:hidden flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface text-ink focus-ring"
               onClick={() => setMenuOpen((o) => !o)}
               aria-label="Toggle menu"
+              aria-expanded={menuOpen}
+              aria-controls="mobile-navigation"
             >
               {menuOpen ? '✕' : '☰'}
             </button>
           </div>
 
           {menuOpen && (
-            <div className="md:hidden mb-3 rounded-panel border border-border bg-surface shadow-md p-4 flex flex-col gap-2">
+            <div id="mobile-navigation" className="lg:hidden mb-3 rounded-panel border border-border bg-surface shadow-md p-4 flex flex-col gap-2">
               {TABS.map(([id, label]) => (
                 <NavButton key={id} id={id} label={label} />
               ))}
