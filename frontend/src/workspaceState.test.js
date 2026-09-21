@@ -30,6 +30,7 @@ test('restores identifiers and preferences without persisting free-text search',
       activeSignature: 'signature-1',
       view: 'cards',
       expanded: 'attempt-9',
+      columns: ['product', 'failure'],
     },
     drillDown: { lot_id: 'LOT-A' },
     managerScope: {
@@ -48,6 +49,7 @@ test('restores identifiers and preferences without persisting free-text search',
   assert.equal(restored.engineer.serialFilter, 'SERIAL-123')
   assert.equal(restored.engineer.searchQuery, '')
   assert.equal(restored.engineer.expanded, 'attempt-9')
+  assert.deepEqual(restored.engineer.columns, ['product', 'failure'])
   assert.equal(restored.drillDown.lot_id, 'LOT-A')
   assert.deepEqual(restored.managerScope.products, ['P1'])
 })

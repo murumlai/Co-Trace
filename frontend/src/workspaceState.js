@@ -10,6 +10,7 @@ const SORTS = new Set([
   'knowledge_match',
 ])
 const VIEWS = new Set(['table', 'cards'])
+const ENGINEER_COLUMNS = new Set(['product', 'failure', 'evidence', 'action'])
 const URL_KEYS = ['job', 'tab', 'unit', 'family', 'drill_signature', 'station', 'host', 'lot', 'product', 'scope_lot', 'scope_station', 'start', 'end']
 
 export const DEFAULT_ENGINEER_VIEW_STATE = Object.freeze({
@@ -20,6 +21,7 @@ export const DEFAULT_ENGINEER_VIEW_STATE = Object.freeze({
   activeSignature: null,
   view: 'table',
   expanded: null,
+  columns: ['product', 'failure', 'evidence', 'action'],
 })
 
 export const DEFAULT_MANAGER_SCOPE = Object.freeze({
@@ -84,6 +86,9 @@ export function normalizeWorkspaceState(value = {}) {
       activeSignature: bounded(engineer.activeSignature),
       view: allowed(engineer.view, VIEWS, DEFAULT_ENGINEER_VIEW_STATE.view),
       expanded: bounded(engineer.expanded),
+      columns: engineer.columns == null
+        ? [...DEFAULT_ENGINEER_VIEW_STATE.columns]
+        : boundedList(engineer.columns).filter((value) => ENGINEER_COLUMNS.has(value)),
     },
     managerScope: normalizeManagerScope(value.managerScope),
     drillDown: normalizeDrillDown(value.drillDown),

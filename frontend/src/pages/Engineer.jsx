@@ -9,7 +9,6 @@ import {
   Card,
   IconWell,
   Input,
-  MetricCard,
   Panel,
   SegmentedControl,
   StatusBadge,
@@ -141,6 +140,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
   const [page, setPage] = useState(1)
   const [view, setView] = useState(initialView.view)
   const [expanded, setExpanded] = useState(initialView.expanded)
+  const [visibleColumns, setVisibleColumns] = useState(initialView.columns)
   const [reanalyzing, setReanalyzing] = useState(null)
   const [clearingCache, setClearingCache] = useState(null)
   const [clearingAll, setClearingAll] = useState(false)
@@ -224,6 +224,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
     setActiveSignature(next.activeSignature)
     setView(next.view)
     setExpanded(next.expanded)
+    setVisibleColumns(next.columns)
     setQuickFilter(
       next.serialFilter !== 'all'
         ? `serial:${next.serialFilter}`
@@ -240,8 +241,9 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
       activeSignature,
       view,
       expanded,
+      columns: visibleColumns,
     })
-  }, [activeSignature, expanded, filter, onViewStateChange, searchQuery, serialFilter, sortBy, view])
+  }, [activeSignature, expanded, filter, onViewStateChange, searchQuery, serialFilter, sortBy, view, visibleColumns])
 
   useEffect(() => {
     if (drillDown?.signature) setActiveSignature(drillDown.signature)
@@ -537,6 +539,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
     feedbackEntries: feedbackError ? null : feedbackEntries,
     feedbackBusy,
     onFeedback: submitFeedback,
+    visibleColumns,
   }
 
   if (unitsError) {
@@ -580,43 +583,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
       )}
 
       {!loading && (
-        <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          <MetricCard label="Still failing" value={triageSummary.failing} tone="fail" />
-          <MetricCard label="Retry-pass" value={triageSummary.retryPass} tone="warn" />
-          <MetricCard
-            label="Top failure"
-            value={triageSummary.topFailure}
-            className="[&_div:nth-child(2)]:break-words [&_div:nth-child(2)]:text-lg"
-          />
-          <MetricCard
-            label="DebugLog missing"
-            value={triageSummary.missingDebugLog}
-            tone="warn"
-          />
-          <MetricCard
-            label="Knowledge coverage"
-            value={triageSummary.knowledgeCoverage}
-            tone="accent"
-          />
-          <MetricCard
-            label="Newest failure"
-            value={triageSummary.newestFailure}
-            className="[&_div:nth-child(2)]:text-lg"
-          />
-        </div>
-      )}
-
-      {!loading && clusters.length > 0 && (
-        <ClusterPanel
-          clusters={clusters}
-          activeSignature={activeSignature}
-          exporting={exporting}
-          onExport={exportPacket}
-          onSelect={(signature) => {
-            onClearDrillDown?.()
-            setActiveSignature(signature)
-          }}
-        />
+        <TriageStrip summary={triageSummary} />
       )}
 
       {drillDown && drillDownStats && (
@@ -650,8 +617,30 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="mb-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+        <Input
+          type="search"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Search serial, station, error, step, or diagnosis"
+          aria-label="Search units"
+        />
+        <select
+          value={sortBy}
+          onChange={(event) => setSortBy(event.target.value)}
+          className="rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm font-medium text-ink-2 focus-ring"
+          aria-label="Sort units"
+        >
+          {SORT_OPTIONS.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
           {FILTERS.map(([key, label]) => (
             <ToolbarButton key={key} active={filter === key} onClick={() => setClassFilter(key)}>
               {label} <span className="opacity-60">({counts[key] ?? 0})</span>
@@ -665,7 +654,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
           <select
             value={quickFilter}
             onChange={(event) => setDropdownFilter(event.target.value)}
-            className="rounded-lg border border-border bg-surface px-3.5 py-2 text-sm font-medium text-ink-2 focus-ring"
+            className="min-w-0 max-w-full rounded-lg border border-border bg-surface px-3.5 py-2 text-sm font-medium text-ink-2 focus-ring"
           >
             <option value="all">All units</option>
             <option value="class:fail">Failing units</option>
@@ -688,6 +677,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
             {clearingAll ? 'Clearing…' : 'Clear cached results'}
             {cachedKeyCount > 0 && <span className="opacity-60">({cachedKeyCount})</span>}
           </ToolbarButton>
+          <ColumnChooser columns={visibleColumns} onChange={setVisibleColumns} />
         </div>
 
         <SegmentedControl
@@ -699,28 +689,6 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
           onChange={setView}
           className="shrink-0"
         />
-      </div>
-
-      <div className="mb-6 grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
-        <Input
-          type="search"
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder="Search serial, station, error, step, or diagnosis"
-          aria-label="Search units"
-        />
-        <select
-          value={sortBy}
-          onChange={(event) => setSortBy(event.target.value)}
-          className="rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm font-medium text-ink-2 focus-ring"
-          aria-label="Sort units"
-        >
-          {SORT_OPTIONS.map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
       </div>
 
       {actionError && (
@@ -772,6 +740,18 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
           total={shown.length}
           onChange={setPage}
           className="mt-4"
+        />
+      )}
+      {!loading && clusters.length > 0 && (
+        <ClusterPanel
+          clusters={clusters}
+          activeSignature={activeSignature}
+          exporting={exporting}
+          onExport={exportPacket}
+          onSelect={(signature) => {
+            onClearDrillDown?.()
+            setActiveSignature(signature)
+          }}
         />
       )}
     </div>
@@ -829,27 +809,78 @@ function PaginationControls({ page, pageCount, pageSize, total, onChange, classN
   )
 }
 
-function ClusterPanel({ clusters, activeSignature, exporting, onSelect, onExport }) {
+function TriageStrip({ summary }) {
+  const items = [
+    ['Still failing', summary.failing, 'text-danger'],
+    ['Retry-pass', summary.retryPass, 'text-warning'],
+    ['Top failed attempts', summary.topFailure, 'text-ink'],
+    ['DebugLog missing', summary.missingDebugLog, 'text-warning'],
+    ['Knowledge coverage', summary.knowledgeCoverage, 'text-accent'],
+    ['Newest failure', summary.newestFailure, 'text-ink'],
+  ]
   return (
-    <section className="mb-6" aria-labelledby="failure-families-heading">
-      <div className="mb-3 flex items-end justify-between gap-4">
+    <dl className="mb-5 grid border-y border-border bg-surface/50 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      {items.map(([label, value, tone]) => (
+        <div key={label} className="min-w-0 border-b border-border px-3 py-2 last:border-b-0 sm:border-r lg:border-b-0">
+          <dt className="text-[0.68rem] font-medium uppercase tracking-wide text-muted">{label}</dt>
+          <dd className={`mt-1 truncate text-sm font-bold ${tone}`} title={String(value)}>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+const COLUMN_OPTIONS = [
+  ['product', 'Product'],
+  ['failure', 'Failure / step'],
+  ['evidence', 'Evidence'],
+  ['action', 'Next action'],
+]
+
+function ColumnChooser({ columns, onChange }) {
+  const toggle = (column) => {
+    onChange(columns.includes(column)
+      ? columns.filter((value) => value !== column)
+      : [...columns, column])
+  }
+  return (
+    <details className="relative">
+      <summary className="cursor-pointer list-none rounded-lg border border-border bg-surface px-3.5 py-2 text-sm font-medium text-ink-2 hover:bg-surface-2 focus-ring">
+        Columns
+      </summary>
+      <div className="absolute left-0 top-11 z-10 min-w-44 rounded-lg border border-border bg-surface p-2 shadow-md">
+        {COLUMN_OPTIONS.map(([value, label]) => (
+          <label key={value} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-ink-2 hover:bg-surface-2">
+            <input type="checkbox" checked={columns.includes(value)} onChange={() => toggle(value)} className="accent-[var(--accent)]" />
+            {label}
+          </label>
+        ))}
+      </div>
+    </details>
+  )
+}
+
+function ClusterPanel({ clusters, activeSignature, exporting, onSelect, onExport }) {
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    if (activeSignature) setOpen(true)
+  }, [activeSignature])
+  return (
+    <section className="mt-6 border-t border-border pt-5" aria-labelledby="failure-families-heading">
+      <div className="flex items-center justify-between gap-4">
         <div>
-          <h2 id="failure-families-heading" className="font-display text-lg font-bold text-ink">
+          <h2 id="failure-families-heading" className="font-display text-base font-bold text-ink">
             Failure families
           </h2>
-          <p className="text-sm text-muted">Grouped by normalized error signature.</p>
+          <p className="text-xs text-muted">Ranked by failed attempts; select a family to filter the worklist above.</p>
         </div>
-        <span className="text-xs text-muted">{clusters.length} families</span>
+        <Button variant="ghost" className="px-3 py-1.5" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+          {open ? 'Collapse' : `Show ${clusters.length}`}
+        </Button>
       </div>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {open && <div className="mt-3 overflow-hidden rounded-lg border border-border bg-surface">
         {clusters.map((cluster) => {
           const selected = activeSignature === cluster.signature
-          const knowledge = Object.entries(cluster.knowledge_status_summary || {})
-            .map(([status, count]) => `${count} ${status.replaceAll('_', ' ')}`)
-            .join(', ')
-          const sources = Object.entries(cluster.analysis_source_summary || {})
-            .map(([source, count]) => `${count} ${source}`)
-            .join(', ')
           const lastSeen = cluster.last_seen
             ? new Date(cluster.last_seen).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
             : 'Unknown'
@@ -857,38 +888,28 @@ function ClusterPanel({ clusters, activeSignature, exporting, onSelect, onExport
             <div
               key={cluster.signature}
               className={[
-                'min-w-0 rounded-panel border p-4 text-left transition-colors',
+                'flex min-w-0 items-center gap-3 border-b border-border px-3 py-2 last:border-b-0',
                 selected
-                  ? 'border-accent bg-accent/10'
-                  : 'border-border bg-surface hover:border-border-strong hover:bg-surface-2',
+                  ? 'bg-accent/10'
+                  : 'hover:bg-surface-2',
               ].join(' ')}
             >
               <button
                 type="button"
                 onClick={() => onSelect(selected ? null : cluster.signature)}
-                className="block w-full text-left focus-ring"
+                className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 text-left focus-ring sm:grid-cols-[auto_minmax(0,1fr)_auto_auto]"
               >
-              <div className="flex items-start justify-between gap-3">
+                <Badge tone="fail">{cluster.count} failed</Badge>
                 <div className="min-w-0">
-                  <div className="font-semibold text-ink break-words [overflow-wrap:anywhere]">
-                    {cluster.error_code || 'Unknown failure'}
-                  </div>
-                  <div className="mt-1 line-clamp-2 text-sm text-muted break-words [overflow-wrap:anywhere]">
-                    {cluster.error_message || 'No error message'}
-                  </div>
+                  <p className="truncate text-sm font-semibold text-ink">{cluster.error_code || 'Unknown failure'} · {cluster.error_message || 'No error message'}</p>
+                  <p className="truncate text-xs text-muted">{cluster.stations?.join(', ') || 'No station'} · {cluster.lots?.join(', ') || 'No lot'}</p>
                 </div>
-                <Badge tone="fail">{cluster.count}</Badge>
-              </div>
-              <div className="mt-3 space-y-1 text-xs text-muted">
-                <div>{cluster.stations?.join(', ') || 'No station'} · {cluster.lots?.join(', ') || 'No lot'}</div>
-                <div>{knowledge || 'Knowledge status unavailable'}</div>
-                <div>{sources || 'Analysis source unavailable'}</div>
-                <div>Latest: {lastSeen}</div>
-              </div>
+                <span className="hidden text-xs text-muted sm:block">{cluster.affected_serials?.length || 0} units</span>
+                <span className="hidden text-xs text-muted sm:block">Latest {lastSeen}</span>
               </button>
               <Button
                 variant="ghost"
-                className="mt-3 px-2 py-1"
+                className="shrink-0 px-2 py-1"
                 disabled={exporting === cluster.signature}
                 onClick={() => onExport({
                   signature: cluster.signature,
@@ -900,7 +921,7 @@ function ClusterPanel({ clusters, activeSignature, exporting, onSelect, onExport
             </div>
           )
         })}
-      </div>
+      </div>}
     </section>
   )
 }
@@ -908,23 +929,34 @@ function ClusterPanel({ clusters, activeSignature, exporting, onSelect, onExport
 const attemptsLabel = (u) =>
   u.failure_count > 0 ? `${u.attempt_count} · ${u.failure_count} failed` : `${u.attempt_count}`
 
+const latestFailedAttempt = (unit) => unit.failures?.[unit.failures.length - 1] || null
 
-function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback }) {
+function evidenceLabel(attempt) {
+  if (!attempt) return 'No failure evidence'
+  const source = {
+    debug_excerpt: 'DebugLog excerpt',
+    ftrunner_snippet: 'FTRunner snippet',
+    error_message: 'Error message only',
+  }[attempt.analysis_context_source] || 'Evidence unavailable'
+  return attempt.debuglog_status && !['excerpt', 'not_applicable'].includes(attempt.debuglog_status)
+    ? `${source} · DebugLog missing`
+    : source
+}
+
+
+function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, visibleColumns }) {
+  const columnCount = 6 + visibleColumns.length
   return (
-    <TableShell tableClassName="table-fixed min-w-[760px]">
-      <colgroup>
-        <col className="w-[14%]" />
-        <col className="w-[24%]" />
-        <col className="w-[18%]" />
-        <col className="w-[14%]" />
-        <col className="w-[14%]" />
-        <col className="w-[16%]" />
-      </colgroup>
+    <TableShell tableClassName="min-w-[1100px] table-fixed">
       <thead>
         <tr className="border-b border-border bg-surface-2 text-left text-muted">
           <th className="px-4 py-3 font-medium">Status</th>
           <th className="px-4 py-3 font-medium">Serial</th>
+          {visibleColumns.includes('product') && <th className="px-4 py-3 font-medium">Product</th>}
           <th className="px-4 py-3 font-medium">Station</th>
+          {visibleColumns.includes('failure') && <th className="px-4 py-3 font-medium">Failure / step</th>}
+          {visibleColumns.includes('evidence') && <th className="px-4 py-3 font-medium">Evidence</th>}
+          {visibleColumns.includes('action') && <th className="px-4 py-3 font-medium">Next action</th>}
           <th className="px-4 py-3 font-medium text-right">Attempts</th>
           <th className="px-4 py-3 font-medium text-right">Duration</th>
           <th className="px-4 py-3 font-medium text-right">Actions</th>
@@ -933,6 +965,7 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
       <tbody>
         {units.map((u) => {
           const hasDetails = u.failure_count > 0
+          const failure = latestFailedAttempt(u)
           return (
             <Fragment key={u.unit_id}>
               <tr className="border-b border-border/60 text-ink transition-colors hover:bg-surface-2/60">
@@ -942,7 +975,22 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                 <td className="px-4 py-3 whitespace-nowrap font-medium">
                   {u.serial_number || u.unit_id}
                 </td>
+                {visibleColumns.includes('product') && (
+                  <td className="px-4 py-3"><span className="block truncate" title={u.final.product_code || ''}>{u.final.product_code || '—'}</span></td>
+                )}
                 <td className="px-4 py-3 whitespace-nowrap">{u.final.station_id || '—'}</td>
+                {visibleColumns.includes('failure') && (
+                  <td className="px-4 py-3">
+                    <span className="block truncate font-medium" title={failure?.error_message || ''}>{failure?.error_code || failure?.error_message || '—'}</span>
+                    <span className="block truncate text-xs text-muted" title={failure?.failing_step || ''}>{failure?.failing_step || 'No failing step'}</span>
+                  </td>
+                )}
+                {visibleColumns.includes('evidence') && (
+                  <td className="px-4 py-3"><span className="block truncate text-xs" title={evidenceLabel(failure)}>{evidenceLabel(failure)}</span></td>
+                )}
+                {visibleColumns.includes('action') && (
+                  <td className="px-4 py-3"><span className="block truncate text-xs" title={failure?.next_debug_action || failure?.suggested_solution || ''}>{failure?.next_debug_action || failure?.suggested_solution || '—'}</span></td>
+                )}
                 <td className="px-4 py-3 text-right whitespace-nowrap">{attemptsLabel(u)}</td>
                 <td className="px-4 py-3 text-right whitespace-nowrap">
                   {u.final.duration_s ? `${u.final.duration_s.toFixed(1)}s` : '—'}
@@ -962,7 +1010,7 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
               </tr>
               {hasDetails && expanded === u.unit_id && (
                 <tr>
-                  <td colSpan={6} className="max-w-0 overflow-hidden bg-surface-2 px-4 pb-5 pt-1">
+                  <td colSpan={columnCount} className="max-w-0 overflow-hidden bg-surface-2 px-4 pb-5 pt-1">
                     <div className="min-w-0 max-w-full overflow-hidden">
                       <UnitDetails
                         u={u}
@@ -994,6 +1042,7 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
     <div className="space-y-4">
       {units.map((u) => {
         const hasDetails = u.failure_count > 0
+        const failure = latestFailedAttempt(u)
         return (
           <Card key={u.unit_id} className="p-6">
             <div className="flex items-start justify-between gap-4">
@@ -1005,10 +1054,18 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                   </span>
                 </div>
                 <div className="mt-2 text-sm text-muted flex flex-wrap gap-x-6 gap-y-1">
+                  <span>Product: {u.final.product_code || '—'}</span>
                   <span>Station: {u.final.station_id || '—'}</span>
                   <span>Attempts: {attemptsLabel(u)}</span>
                   {u.final.duration_s ? <span>{u.final.duration_s.toFixed(1)}s</span> : null}
                 </div>
+                {failure && (
+                  <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
+                    <p className="truncate" title={failure.error_message || ''}><span className="text-muted">Failure:</span> {failure.error_code || failure.error_message || '—'}</p>
+                    <p className="truncate" title={evidenceLabel(failure)}><span className="text-muted">Evidence:</span> {evidenceLabel(failure)}</p>
+                    <p className="truncate" title={failure.next_debug_action || failure.suggested_solution || ''}><span className="text-muted">Next:</span> {failure.next_debug_action || failure.suggested_solution || '—'}</p>
+                  </div>
+                )}
               </div>
               {hasDetails && (
                 <button
