@@ -113,7 +113,7 @@ const compareGroups = (sortBy) => (left, right) => {
   )
 }
 
-export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewKnowledge, initialViewState, onViewStateChange }) {
+export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewKnowledge, initialViewState, onViewStateChange, feedbackDrafts = {}, onFeedbackDraftsChange }) {
   const { isAdmin } = useAuth()
   const initialView = { ...DEFAULT_ENGINEER_VIEW_STATE, ...(initialViewState || {}) }
   const [units, setUnits] = useState([])
@@ -381,6 +381,8 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
   const visibleUnits = pageCount > 1
     ? shown.slice((activePage - 1) * pageSize, activePage * pageSize)
     : shown
+  const selectedIndex = expanded ? shown.findIndex((unit) => unit.unit_id === expanded) : -1
+  const selectedUnit = selectedIndex >= 0 ? shown[selectedIndex] : null
 
   useEffect(() => {
     setPage(1)
@@ -516,6 +518,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
         note: note.trim() || null,
       })
       setFeedbackEntries((current) => [...current, entry])
+      onFeedbackDraftsChange?.((current) => ({ ...current, [attempt.unit_id]: '' }))
     } catch (err) {
       setActionError(err.message)
       throw err
@@ -540,6 +543,14 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
     feedbackBusy,
     onFeedback: submitFeedback,
     visibleColumns,
+    feedbackDrafts,
+    onFeedbackDraftChange: (attemptId, value) => onFeedbackDraftsChange?.((current) => ({ ...current, [attemptId]: value })),
+  }
+
+  const selectUnitAt = (index) => {
+    if (index < 0 || index >= shown.length) return
+    setExpanded(shown[index].unit_id)
+    if (pageCount > 1) setPage(Math.floor(index / pageSize) + 1)
   }
 
   if (unitsError) {
@@ -727,6 +738,18 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
             </Button>
           )}
         </Card>
+      ) : selectedUnit ? (
+        <InspectionWorkspace
+          units={visibleUnits}
+          selected={selectedUnit}
+          selectedIndex={selectedIndex}
+          total={shown.length}
+          onSelect={(unitId) => setExpanded(unitId)}
+          onBack={() => setExpanded(null)}
+          onPrevious={() => selectUnitAt(selectedIndex - 1)}
+          onNext={() => selectUnitAt(selectedIndex + 1)}
+          detailProps={detailProps}
+        />
       ) : view === 'table' ? (
         <TableView units={visibleUnits} {...detailProps} />
       ) : (
@@ -943,8 +966,60 @@ function evidenceLabel(attempt) {
     : source
 }
 
+function InspectionWorkspace({ units, selected, selectedIndex, total, onSelect, onBack, onPrevious, onNext, detailProps }) {
+  const failure = latestFailedAttempt(selected)
+  return (
+    <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(18rem,0.72fr)_minmax(0,1.28fr)]">
+      <aside className="hidden max-h-[75vh] overflow-y-auto rounded-panel border border-border bg-surface lg:block" aria-label="Filtered unit queue">
+        <div className="sticky top-0 border-b border-border bg-surface-2 px-3 py-2 text-xs font-medium text-muted">
+          {units.length} units on this page · {total} filtered
+        </div>
+        {units.map((unit) => {
+          const itemFailure = latestFailedAttempt(unit)
+          return (
+            <button
+              key={unit.unit_id}
+              type="button"
+              aria-current={unit.unit_id === selected.unit_id ? 'true' : undefined}
+              onClick={() => onSelect(unit.unit_id)}
+              className={[
+                'block w-full border-b border-border px-3 py-3 text-left last:border-b-0 focus-ring',
+                unit.unit_id === selected.unit_id ? 'bg-accent/10' : 'hover:bg-surface-2',
+              ].join(' ')}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-sm font-semibold text-ink">{unit.serial_number || unit.unit_id}</span>
+                <StatusBadge status={unit.classification} />
+              </div>
+              <p className="mt-1 truncate text-xs text-muted">{itemFailure?.error_code || itemFailure?.failing_step || 'No failure evidence'}</p>
+            </button>
+          )
+        })}
+      </aside>
 
-function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, visibleColumns }) {
+      <section className="min-w-0" aria-labelledby="selected-unit-heading">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <Button variant="ghost" className="px-2 py-1.5 lg:hidden" onClick={onBack}>Back</Button>
+            <div className="min-w-0">
+              <p className="text-xs text-muted">Unit {selectedIndex + 1} of {total}</p>
+              <h2 id="selected-unit-heading" className="truncate font-display text-lg font-bold text-ink">{selected.serial_number || selected.unit_id}</h2>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="ghost" className="px-3 py-1.5" disabled={selectedIndex <= 0} onClick={onPrevious}>Previous</Button>
+            <Button variant="ghost" className="px-3 py-1.5" disabled={selectedIndex >= total - 1} onClick={onNext}>Next</Button>
+          </div>
+        </div>
+        {failure && <p className="mb-3 truncate text-sm text-muted" title={failure.error_message || ''}>{failure.error_code || failure.error_message}</p>}
+        <UnitDetails u={selected} {...detailProps} />
+      </section>
+    </div>
+  )
+}
+
+
+function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, visibleColumns, feedbackDrafts, onFeedbackDraftChange }) {
   const columnCount = 6 + visibleColumns.length
   return (
     <TableShell tableClassName="min-w-[1100px] table-fixed">
@@ -1024,6 +1099,8 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                         feedbackEntries={feedbackEntries}
                         feedbackBusy={feedbackBusy}
                         onFeedback={onFeedback}
+                        feedbackDrafts={feedbackDrafts}
+                        onFeedbackDraftChange={onFeedbackDraftChange}
                       />
                     </div>
                   </td>
@@ -1037,7 +1114,7 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
   )
 }
 
-function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback }) {
+function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, feedbackDrafts, onFeedbackDraftChange }) {
   return (
     <div className="space-y-4">
       {units.map((u) => {
@@ -1092,6 +1169,8 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                   feedbackEntries={feedbackEntries}
                   feedbackBusy={feedbackBusy}
                   onFeedback={onFeedback}
+                  feedbackDrafts={feedbackDrafts}
+                  onFeedbackDraftChange={onFeedbackDraftChange}
                 />
               </div>
             )}
@@ -1102,7 +1181,7 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
   )
 }
 
-function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback }) {
+function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, feedbackDrafts = {}, onFeedbackDraftChange }) {
   const passedAfter =
     u.classification === 'retry_pass'
       ? `Passed after ${u.failure_count} failed attempt${u.failure_count === 1 ? '' : 's'}.`
@@ -1134,6 +1213,8 @@ function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearing
           feedbackEntries={feedbackEntries?.filter((entry) => entry.unit_id === attempt.unit_id) ?? null}
           feedbackBusy={feedbackBusy}
           onFeedback={onFeedback}
+          feedbackDraft={feedbackDrafts[attempt.unit_id] || ''}
+          onFeedbackDraftChange={(value) => onFeedbackDraftChange?.(attempt.unit_id, value)}
         />
       ))}
     </div>
@@ -1377,7 +1458,7 @@ function StructuredRca({ attempt }) {
   )
 }
 
-function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback }) {
+function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, feedbackDraft, onFeedbackDraftChange }) {
   const canClearCache =
     !!onClearCache &&
     attempt.analysis_cache_key && ['llm', 'local-cache'].includes(attempt.analysis_source)
@@ -1435,6 +1516,8 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
         entries={feedbackEntries}
         busy={feedbackBusy}
         onSubmit={onFeedback}
+        note={feedbackDraft}
+        onNoteChange={onFeedbackDraftChange}
       />
 
       <div className="text-xs uppercase tracking-wide text-muted mb-1">
@@ -1508,8 +1591,7 @@ const FEEDBACK_ACTIONS = [
   ['not_root_cause', 'Not root cause'],
 ]
 
-function FeedbackControls({ attempt, entries, busy, onSubmit }) {
-  const [note, setNote] = useState('')
+function FeedbackControls({ attempt, entries, busy, onSubmit, note, onNoteChange }) {
   if (entries === null) {
     return (
       <div className="mb-4 border-y border-border/60 py-3 text-sm text-warning">
@@ -1520,7 +1602,6 @@ function FeedbackControls({ attempt, entries, busy, onSubmit }) {
   const submit = async (action) => {
     try {
       await onSubmit(attempt, action, note)
-      setNote('')
     } catch {
       // The page-level action error carries the API message.
     }
@@ -1543,7 +1624,7 @@ function FeedbackControls({ attempt, entries, busy, onSubmit }) {
       <textarea
         value={note}
         maxLength={2000}
-        onChange={(event) => setNote(event.target.value)}
+        onChange={(event) => onNoteChange?.(event.target.value)}
         placeholder="Optional engineer note"
         className="mt-3 min-h-20 w-full resize-y rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink placeholder-placeholder outline-none focus:border-accent focus-ring"
       />

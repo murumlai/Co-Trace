@@ -48,6 +48,7 @@ function Shell() {
   const [batchError, setBatchError] = useState('')
   const [engineerDrillDown, setEngineerDrillDown] = useState(null)
   const [engineerViewState, setEngineerViewState] = useState({ ...DEFAULT_ENGINEER_VIEW_STATE })
+  const [engineerFeedbackDrafts, setEngineerFeedbackDrafts] = useState({})
   const [managerScope, setManagerScope] = useState({ ...DEFAULT_MANAGER_SCOPE })
   const [knowledgeReview, setKnowledgeReview] = useState(null)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -69,6 +70,17 @@ function Shell() {
     root.style.colorScheme = theme
     localStorage.setItem('cotrace-theme', theme)
   }, [theme])
+
+  useEffect(() => {
+    const hasDrafts = Object.values(engineerFeedbackDrafts).some((value) => value.trim())
+    if (!hasDrafts) return undefined
+    const warnBeforeUnload = (event) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warnBeforeUnload)
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload)
+  }, [engineerFeedbackDrafts])
 
   useEffect(() => {
     if (checking) return
@@ -143,6 +155,7 @@ function Shell() {
     setWorkspaceError('')
     setEngineerDrillDown(null)
     setEngineerViewState({ ...DEFAULT_ENGINEER_VIEW_STATE })
+    setEngineerFeedbackDrafts({})
     setManagerScope({ ...DEFAULT_MANAGER_SCOPE })
     setWarnings(jobWarnings)
     setTab(preferredResultsView)
@@ -362,6 +375,7 @@ function Shell() {
   const openRecentJob = async (job) => {
     setEngineerDrillDown(null)
     setEngineerViewState({ ...DEFAULT_ENGINEER_VIEW_STATE })
+    setEngineerFeedbackDrafts({})
     setManagerScope({ ...DEFAULT_MANAGER_SCOPE })
     setRestoreCandidateId(job.job_id)
     navigateToTab(preferredResultsView, {
@@ -400,6 +414,7 @@ function Shell() {
     setWarnings([])
     setEngineerDrillDown(null)
     setEngineerViewState({ ...DEFAULT_ENGINEER_VIEW_STATE })
+    setEngineerFeedbackDrafts({})
     setManagerScope({ ...DEFAULT_MANAGER_SCOPE })
     navigateToTab('home', {
       jobId: null,
@@ -410,6 +425,9 @@ function Shell() {
   }
 
   const signOut = async () => {
+    if (Object.values(engineerFeedbackDrafts).some((value) => value.trim()) && !window.confirm('Discard unsaved engineer feedback and sign out?')) {
+      return
+    }
     runToken.current += 1
     clearWorkspaceState(sessionStorage, username)
     const search = workspaceSearch({}, window.location.search)
@@ -616,6 +634,8 @@ function Shell() {
             onReviewKnowledge={openKnowledgeReview}
             initialViewState={engineerViewState}
             onViewStateChange={setEngineerViewState}
+            feedbackDrafts={engineerFeedbackDrafts}
+            onFeedbackDraftsChange={setEngineerFeedbackDrafts}
           />
         )}
         {tab === 'manager' && (
