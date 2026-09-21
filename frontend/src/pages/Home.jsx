@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { Badge, Button, Card, IconWell } from '../components/ui'
+import { selectDroppedFiles } from '../uploadSelection'
 
 // Reads a browser file's relative path (folder uploads set webkitRelativePath).
 function relPath(file) {
@@ -295,24 +296,10 @@ export default function Home({ onStartBatch, onStopBatch, processing, progress, 
     }
     if (!dropped.length) return
 
-    const hasZip = dropped.some((f) => f.name.toLowerCase().endsWith('.zip'))
-    const hasFolder = dropped.some((f) => (f.webkitRelativePath || '').includes('/'))
-
-    if (hasZip) {
-      // Zip drop: take only the first zip, replace everything.
-      setFiles(dropped.filter((f) => f.name.toLowerCase().endsWith('.zip')).slice(0, 1))
-      return
-    }
-    if (hasFolder) {
-      // Folder drop: replace everything with the folder's contents.
-      setFiles(dropped)
-      return
-    }
-    // Plain file drop: .txt only, merge.
-    const txts = dropped.filter((f) => f.name.toLowerCase().endsWith('.txt'))
-    const skipped = dropped.length - txts.length
-    if (skipped) setLocalError(`${skipped} file${skipped > 1 ? 's' : ''} skipped — only .txt files can be added individually.`)
-    if (txts.length) setFiles((prev) => mergeFiles(prev, txts))
+    const selection = selectDroppedFiles(dropped)
+    setLocalError(selection.error)
+    if (selection.replace) setFiles(selection.files)
+    else if (selection.files.length) setFiles((prev) => mergeFiles(prev, selection.files))
   }
 
   const start = async () => {
