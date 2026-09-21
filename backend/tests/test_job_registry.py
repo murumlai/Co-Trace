@@ -240,6 +240,49 @@ class TestEvictExpired:
         assert reg.get("fresh") is not None
 
 
+class TestListOwned:
+    def test_returns_only_owner_jobs_in_deterministic_order(self, tmp_path, isolated_settings):
+        reg = JobRegistry()
+        work_root = tmp_path / "work"
+        for job_id in ("job-a", "job-b", "job-c"):
+            (work_root / job_id).mkdir(parents=True)
+        jobs = [
+            reg.create("job-a", str(work_root / "job-a"), owner_id="42"),
+            reg.create("job-b", str(work_root / "job-b"), owner_id="99"),
+            reg.create("job-c", str(work_root / "job-c"), owner_id="42"),
+        ]
+        now = time.time()
+        jobs[0].created_at = now - 2
+        jobs[1].created_at = now
+        jobs[2].created_at = now - 1
+
+        page, has_more = reg.list_owned("42", limit=10)
+
+        assert [job.job_id for job in page] == ["job-c", "job-a"]
+        assert has_more is False
+
+    def test_cursor_paginates_jobs_with_equal_timestamps(self, tmp_path, isolated_settings):
+        reg = JobRegistry()
+        created_at = time.time()
+        for job_id in ("job-a", "job-b", "job-c"):
+            workdir = tmp_path / "work" / job_id
+            workdir.mkdir(parents=True)
+            job = reg.create(job_id, str(workdir), owner_id="42")
+            job.created_at = created_at
+
+        first, has_more = reg.list_owned("42", limit=2)
+        second, second_has_more = reg.list_owned(
+            "42",
+            limit=2,
+            before=(first[-1].created_at, first[-1].job_id),
+        )
+
+        assert [job.job_id for job in first] == ["job-c", "job-b"]
+        assert has_more is True
+        assert [job.job_id for job in second] == ["job-a"]
+        assert second_has_more is False
+
+
 # ---------------------------------------------------------------------------
 # JobRegistry.request_cancel
 # ---------------------------------------------------------------------------

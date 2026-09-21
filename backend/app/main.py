@@ -7,6 +7,8 @@ implementations without monkeypatching module-level singletons.
 """
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import os
 import re
@@ -20,7 +22,7 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
 
-from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -44,7 +46,7 @@ from .knowledge import parsing
 from .knowledge.models import PlaybookCreateRequest, PlaybookUpdateRequest
 from .knowledge.summarizer import ProductKnowledgeError, is_llm_backend_available
 from .logging_config import setup_backend_logging, write_frontend_log
-from .models import AcronymUpsertRequest, AdminLoginRequest, FeedbackCreateRequest, FeedbackEntry, FrontendLogRequest
+from .models import AcronymUpsertRequest, AdminLoginRequest, FeedbackCreateRequest, FeedbackEntry, FrontendLogRequest, JobListResponse, JobSummary
 from .redaction import redact
 from .record_views import build_debug_packet, group_units_by_serial
 from .upload_storage import UploadStorageError, save_uploads
@@ -307,6 +309,54 @@ def job_status(job_id: str, user: AuthenticatedUser = Depends(require_user),
                reg: Any = Depends(get_registry)) -> dict:
     job = _get_owned_job(job_id, user, reg)
     return job.to_status().model_dump()
+
+
+def _encode_job_cursor(job: Any) -> str:
+    payload = json.dumps([job.created_at, job.job_id], separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_job_cursor(cursor: str | None) -> tuple[float, str] | None:
+    if not cursor:
+        return None
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        value = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+        if not isinstance(value, list) or len(value) != 2 or not isinstance(value[1], str):
+            raise ValueError
+        return float(value[0]), value[1]
+    except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(400, "Invalid jobs cursor") from exc
+
+
+@app.get("/api/jobs", response_model=JobListResponse)
+def list_jobs(
+    limit: int = Query(default=20, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+    user: AuthenticatedUser = Depends(require_user),
+    reg: Any = Depends(get_registry),
+) -> JobListResponse:
+    jobs, has_more = reg.list_owned(
+        user.github_id,
+        limit=limit,
+        before=_decode_job_cursor(cursor),
+    )
+    items = [
+        JobSummary(
+            job_id=job.job_id,
+            display_name=f"Batch {job.job_id[:8]}",
+            status=job.status,
+            progress=job.to_status().progress,
+            message=job.message,
+            created_at=job.created_at,
+            completed_at=job.completed_at,
+            result_available=job.status == "done",
+            unit_count=len(job.records),
+        )
+        for job in jobs
+    ]
+    next_cursor = _encode_job_cursor(jobs[-1]) if has_more and jobs else None
+    return JobListResponse(items=items, next_cursor=next_cursor)
 
 
 @app.post("/api/jobs/{job_id}/stop")

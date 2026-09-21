@@ -291,6 +291,23 @@ class JobStatus(BaseModel):
     llm_metrics: LlmUsageMetrics = Field(default_factory=LlmUsageMetrics)
 
 
+class JobSummary(BaseModel):
+    job_id: str
+    display_name: str
+    status: JobState
+    progress: JobProgress = Field(default_factory=JobProgress)
+    message: str = ""
+    created_at: float
+    completed_at: Optional[float] = None
+    result_available: bool = False
+    unit_count: int = 0
+
+
+class JobListResponse(BaseModel):
+    items: list[JobSummary] = Field(default_factory=list)
+    next_cursor: Optional[str] = None
+
+
 class FrontendLogRequest(BaseModel):
     level: str = "info"
     message: str

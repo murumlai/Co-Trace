@@ -211,6 +211,34 @@ class TestJobOwnership:
         assert resp.status_code == 200
         assert resp.json()["job_id"] == "owned-job"
 
+    def test_owner_lists_only_owned_job_summaries(self, client, registry_with_owned_job, tmp_path):
+        registry_with_owned_job.create(
+            "other-job",
+            str(tmp_path / "other-job"),
+            owner_id="99",
+            owner_login="hubot",
+        )
+
+        resp = client.get(
+            "/api/jobs",
+            headers=auth_headers(login="octocat", github_id="42"),
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert [item["job_id"] for item in body["items"]] == ["owned-job"]
+        assert body["items"][0]["display_name"] == "Batch owned-jo"
+        assert body["items"][0]["result_available"] is False
+        assert "records" not in body["items"][0]
+
+    def test_jobs_list_rejects_invalid_cursor(self, client, registry_with_owned_job):
+        resp = client.get(
+            "/api/jobs?cursor=not-json",
+            headers=auth_headers(login="octocat", github_id="42"),
+        )
+
+        assert resp.status_code == 400
+
     @pytest.mark.parametrize(
         ("method", "path"),
         [

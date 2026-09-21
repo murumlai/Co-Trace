@@ -54,6 +54,16 @@ class JobRepository(Protocol):
         """Return all non-expired jobs currently tracked."""
         ...
 
+    def list_owned(
+        self,
+        owner_id: str,
+        *,
+        limit: int,
+        before: tuple[float, str] | None = None,
+    ) -> tuple[list[Any], bool]:
+        """Return one newest-first page for an owner and whether more jobs exist."""
+        ...
+
 
 class JobStateStore(Protocol):
     """Persistence seam used by ``Job`` and ``JobRegistry``.

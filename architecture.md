@@ -178,6 +178,52 @@ flowchart LR
     results are deterministic and are never written to the analysis cache, so retirement takes
     effect without cache cleanup.
 
+## Approved Batch Discovery and Scoped Analytics Extension
+
+The current API can reopen only a known job ID, persisted job state does not retain enough batch
+scope and completeness metadata after upload cleanup, and the Manager endpoint cannot apply a
+shared product/lot/station/time scope. The frontend cannot reconstruct those facts reliably from
+the grouped Engineer response because intermediate passing attempts are intentionally omitted.
+
+The approved extension keeps the existing architecture: `JobRegistry` remains the owner of
+file-backed job state, FastAPI retains ownership checks, and `aggregator.py` remains a pure
+computation layer. No database or new service is introduced.
+
+```mermaid
+flowchart LR
+        UI[React workspace<br/>recent batches + scope controls]
+        API[FastAPI owned-job routes]
+        Registry[JobRegistry<br/>owner-filtered listing]
+        State[(existing job_state.json<br/>optional batch metadata)]
+        Scope[Pure scoped aggregator]
+        Records[UnitRecord list]
+        Engineer[Engineer drill-down]
+
+        UI -->|GET /api/jobs| API
+        UI -->|GET /api/jobs/id/manager?filters| API
+        API --> Registry
+        Registry --> State
+        API --> Scope
+        Records --> Scope
+        Scope -->|metrics + denominators<br/>matching attempt/unit IDs| UI
+        UI --> Engineer
+```
+
+- Job listing is owner-filtered and paginated with deterministic creation-time/job-ID ordering.
+    It exposes summaries only, never records or log text.
+- Existing per-job JSON gains backward-compatible optional metadata for display name, products,
+    observed source timestamps, parsed/included counts, unknowns, and categorized warnings.
+- Manager filters are applied before first/latest calculations. Measures therefore describe the
+    selected records within one uploaded batch, never lifetime manufacturing yield.
+- Unknown outcomes remain in unit-outcome totals but are excluded from PASS-rate denominators.
+    Records without timestamps are excluded only while a time filter is active and are reported in
+    the scope metadata. Source timestamps remain timezone-unspecified unless their values include an
+    offset.
+- Filtered aggregate rows return matching attempt and unit identifiers so Manager and Engineer
+    can use the same selected population without inferring omitted intermediate attempts.
+- All collection and detail routes use the existing authenticated owner ID checks. Old job-state
+    files load with unavailable optional metadata rather than fabricated values.
+
 ## Analysis Request Flow
 
 ```mermaid

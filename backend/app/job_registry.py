@@ -269,6 +269,26 @@ class JobRegistry:
             self._evict_expired()
             return list(self._jobs.values())
 
+    def list_owned(
+        self,
+        owner_id: str,
+        *,
+        limit: int,
+        before: tuple[float, str] | None = None,
+    ) -> tuple[list[Job], bool]:
+        """Return a deterministic newest-first page without exposing other owners."""
+        with self._lock:
+            self._evict_expired()
+            jobs = sorted(
+                (job for job in self._jobs.values() if job.owner_id == owner_id),
+                key=lambda job: (job.created_at, job.job_id),
+                reverse=True,
+            )
+            if before is not None:
+                jobs = [job for job in jobs if (job.created_at, job.job_id) < before]
+            page = jobs[:limit]
+            return page, len(jobs) > limit
+
     def load_from_disk(self) -> None:
         """Scan WORK_DIR for persisted job_state.json files and restore them."""
         for job in self._store.load_all(settings.WORK_DIR):
