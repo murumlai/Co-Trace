@@ -32,6 +32,13 @@ test('restores identifiers and preferences without persisting free-text search',
       expanded: 'attempt-9',
     },
     drillDown: { lot_id: 'LOT-A' },
+    managerScope: {
+      products: ['P1'],
+      lots: ['LOT-A'],
+      stations: ['station-key'],
+      startTime: '2026-09-20T08:00',
+      endTime: '2026-09-20T10:00',
+    },
   })
 
   const restored = loadWorkspaceState(storage, 'engineer.one')
@@ -42,6 +49,7 @@ test('restores identifiers and preferences without persisting free-text search',
   assert.equal(restored.engineer.searchQuery, '')
   assert.equal(restored.engineer.expanded, 'attempt-9')
   assert.equal(restored.drillDown.lot_id, 'LOT-A')
+  assert.deepEqual(restored.managerScope.products, ['P1'])
 })
 
 test('URL identifiers override the session workspace and preserve unrelated parameters', () => {
@@ -62,6 +70,7 @@ test('URL identifiers override the session workspace and preserve unrelated para
   assert.match(query, /other=keep/)
   assert.match(query, /job=new-job/)
   assert.match(query, /tab=manager/)
+  assert.match(query, /scope_station=ST-02|station=ST-02/)
   assert.doesNotMatch(query, /old-job/)
 })
 
@@ -89,4 +98,24 @@ test('workspace storage is identity scoped and removable on sign out', () => {
   clearWorkspaceState(storage, 'first')
   assert.equal(loadWorkspaceState(storage, 'first').jobId, null)
   assert.equal(loadWorkspaceState(storage, 'second').jobId, 'second-job')
+})
+
+test('preserves exact drill-down identities in session state without putting them in the URL', () => {
+  const storage = memoryStorage()
+  const state = saveWorkspaceState(storage, 'user', {
+    tab: 'engineer',
+    jobId: 'job-1',
+    drillDown: {
+      signature: 'sig-1',
+      attempt_ids: ['attempt-1', 'attempt-2'],
+      unit_ids: ['SN-1'],
+      label: 'Failure family',
+    },
+  })
+  const query = workspaceSearch(state)
+  const restored = loadWorkspaceState(storage, 'user', query)
+
+  assert.deepEqual(restored.drillDown.attempt_ids, ['attempt-1', 'attempt-2'])
+  assert.deepEqual(restored.drillDown.unit_ids, ['SN-1'])
+  assert.doesNotMatch(query, /attempt-1|SN-1/)
 })

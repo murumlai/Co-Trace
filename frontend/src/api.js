@@ -67,7 +67,16 @@ export const api = {
     request(`/api/jobs/${jobId}/feedback`, { method: 'POST', body: payload }),
   reanalyze: (jobId, unitId) =>
     request(`/api/jobs/${jobId}/units/${unitId}/reanalyze`, { method: 'POST' }),
-  manager: (jobId) => request(`/api/jobs/${jobId}/manager`),
+  manager: (jobId, scope = {}) => {
+    const params = new URLSearchParams()
+    ;(scope.products || []).forEach((value) => params.append('product', value))
+    ;(scope.lots || []).forEach((value) => params.append('lot', value))
+    ;(scope.stations || []).forEach((value) => params.append('station', value))
+    if (scope.startTime) params.set('start_time', scope.startTime)
+    if (scope.endTime) params.set('end_time', scope.endTime)
+    const query = params.toString()
+    return request(`/api/jobs/${jobId}/manager${query ? `?${query}` : ''}`)
+  },
   analysisCache: () => request('/api/cache/analysis'),
   clearAnalysisCache: (cacheKey) =>
     request(`/api/cache/analysis/${cacheKey}`, { method: 'DELETE' }),

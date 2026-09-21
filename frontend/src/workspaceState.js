@@ -10,7 +10,7 @@ const SORTS = new Set([
   'knowledge_match',
 ])
 const VIEWS = new Set(['table', 'cards'])
-const URL_KEYS = ['job', 'tab', 'unit', 'family', 'drill_signature', 'station', 'host', 'lot']
+const URL_KEYS = ['job', 'tab', 'unit', 'family', 'drill_signature', 'station', 'host', 'lot', 'product', 'scope_lot', 'scope_station', 'start', 'end']
 
 export const DEFAULT_ENGINEER_VIEW_STATE = Object.freeze({
   filter: 'all',
@@ -22,6 +22,14 @@ export const DEFAULT_ENGINEER_VIEW_STATE = Object.freeze({
   expanded: null,
 })
 
+export const DEFAULT_MANAGER_SCOPE = Object.freeze({
+  products: [],
+  lots: [],
+  stations: [],
+  startTime: '',
+  endTime: '',
+})
+
 const bounded = (value, maxLength = 240) => {
   if (typeof value !== 'string') return null
   const clean = value.trim()
@@ -29,6 +37,10 @@ const bounded = (value, maxLength = 240) => {
 }
 
 const allowed = (value, choices, fallback) => choices.has(value) ? value : fallback
+
+const boundedList = (values, limit = 1000) => Array.from(new Set(
+  (Array.isArray(values) ? values : []).map((value) => bounded(value)).filter(Boolean),
+)).slice(0, limit)
 
 function normalizeDrillDown(value) {
   if (!value || typeof value !== 'object') return null
@@ -42,7 +54,20 @@ function normalizeDrillDown(value) {
     ...(stationId ? { station_id: stationId } : {}),
     ...(host ? { host } : {}),
     ...(lotId ? { lot_id: lotId } : {}),
-    label: signature || lotId || [host, stationId].filter(Boolean).join(' / '),
+    attempt_ids: boundedList(value.attempt_ids),
+    unit_ids: boundedList(value.unit_ids),
+    label: bounded(value.label) || signature || lotId || [host, stationId].filter(Boolean).join(' / '),
+  }
+}
+
+function normalizeManagerScope(value) {
+  const scope = value && typeof value === 'object' ? value : {}
+  return {
+    products: boundedList(scope.products, 50),
+    lots: boundedList(scope.lots, 50),
+    stations: boundedList(scope.stations, 50),
+    startTime: bounded(scope.startTime) || '',
+    endTime: bounded(scope.endTime) || '',
   }
 }
 
@@ -60,6 +85,7 @@ export function normalizeWorkspaceState(value = {}) {
       view: allowed(engineer.view, VIEWS, DEFAULT_ENGINEER_VIEW_STATE.view),
       expanded: bounded(engineer.expanded),
     },
+    managerScope: normalizeManagerScope(value.managerScope),
     drillDown: normalizeDrillDown(value.drillDown),
   }
 }
@@ -86,8 +112,17 @@ export function loadWorkspaceState(storage, username, search = '') {
       expanded: params.get('unit') || saved.engineer?.expanded,
       activeSignature: params.get('family') || saved.engineer?.activeSignature,
     },
+    managerScope: {
+      ...(saved.managerScope || {}),
+      products: params.has('product') ? params.getAll('product') : saved.managerScope?.products,
+      lots: params.has('scope_lot') ? params.getAll('scope_lot') : saved.managerScope?.lots,
+      stations: params.has('scope_station') ? params.getAll('scope_station') : saved.managerScope?.stations,
+      startTime: params.get('start') || saved.managerScope?.startTime,
+      endTime: params.get('end') || saved.managerScope?.endTime,
+    },
     drillDown: params.has('drill_signature') || params.has('station') || params.has('lot')
       ? {
+          ...(saved.drillDown || {}),
           signature: params.get('drill_signature'),
           station_id: params.get('station'),
           host: params.get('host'),
@@ -128,6 +163,11 @@ export function workspaceSearch(value, currentSearch = '') {
   if (state.tab !== 'home') params.set('tab', state.tab)
   if (state.engineer.expanded) params.set('unit', state.engineer.expanded)
   if (state.engineer.activeSignature) params.set('family', state.engineer.activeSignature)
+  state.managerScope.products.forEach((value) => params.append('product', value))
+  state.managerScope.lots.forEach((value) => params.append('scope_lot', value))
+  state.managerScope.stations.forEach((value) => params.append('scope_station', value))
+  if (state.managerScope.startTime) params.set('start', state.managerScope.startTime)
+  if (state.managerScope.endTime) params.set('end', state.managerScope.endTime)
   if (state.drillDown?.signature) params.set('drill_signature', state.drillDown.signature)
   if (state.drillDown?.station_id) params.set('station', state.drillDown.station_id)
   if (state.drillDown?.host) params.set('host', state.drillDown.host)

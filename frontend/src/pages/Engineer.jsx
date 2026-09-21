@@ -330,17 +330,26 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
     }
   }
 
+  const drillDownUnitIds = useMemo(
+    () => new Set(drillDown?.unit_ids || []),
+    [drillDown?.unit_ids],
+  )
+
   const shown = useMemo(
     () =>
       units
         .filter((unit) => {
           const serial = unit.serial_number || unit.unit_id
+          const hasExactScope = drillDownUnitIds.size > 0
+          const matchesExactScope = !hasExactScope || drillDownUnitIds.has(serial)
           const matchesClass = filter === 'all' || unit.classification === filter
           const matchesSerial = serialFilter === 'all' || serial === serialFilter
           const matchesSignature =
+            hasExactScope ||
             !activeSignature ||
             unit.failures?.some((failure) => failure.signature === activeSignature)
           const matchesStation =
+            hasExactScope ||
             !drillDown?.station_id ||
             groupAttempts(unit).some(
               (attempt) =>
@@ -348,11 +357,13 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
                 (!drillDown.host || attempt.host === drillDown.host),
             )
           const matchesLot =
+            hasExactScope ||
             !drillDown?.lot_id ||
             groupAttempts(unit).some((attempt) => attempt.lot_id === drillDown.lot_id)
           return (
             matchesClass &&
             matchesSerial &&
+            matchesExactScope &&
             matchesSignature &&
             matchesStation &&
             matchesLot &&
@@ -360,7 +371,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
           )
         })
         .sort(compareGroups(sortBy)),
-    [activeSignature, drillDown, filter, searchQuery, serialFilter, sortBy, units],
+    [activeSignature, drillDown, drillDownUnitIds, filter, searchQuery, serialFilter, sortBy, units],
   )
   const pageSize = view === 'cards' ? LARGE_CARD_PAGE_SIZE : LARGE_TABLE_PAGE_SIZE
   const pageCount = shown.length > LARGE_BATCH_THRESHOLD ? Math.ceil(shown.length / pageSize) : 1
@@ -375,6 +386,13 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
 
   const drillDownStats = useMemo(() => {
     if (!drillDown) return null
+    if (drillDown.attempt_ids?.length || drillDown.unit_ids?.length) {
+      return {
+        attempts: drillDown.attempt_ids?.length || 0,
+        units: drillDown.unit_ids?.length || 0,
+        exact: true,
+      }
+    }
     const matchesAttempt = (attempt) => {
       if (drillDown.signature) return attempt.signature === drillDown.signature
       if (drillDown.station_id) {
@@ -390,7 +408,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
       (total, unit) => total + groupAttempts(unit).filter(matchesAttempt).length,
       0,
     )
-    return { attempts, units: matchingUnits.length }
+    return { attempts, units: matchingUnits.length, exact: false }
   }, [drillDown, units])
 
   const clearDrillDown = () => {
@@ -604,15 +622,21 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
       {drillDown && drillDownStats && (
         <div className="mb-4 flex items-center gap-3">
           <Badge tone="accent">
-            From Manager: {drillDown.label || 'selection'} · {drillDownStats.attempts} attempt{drillDownStats.attempts === 1 ? '' : 's'}
+            From Manager: {drillDown.label || 'selection'} · {drillDownStats.attempts} matching attempt{drillDownStats.attempts === 1 ? '' : 's'}
             {drillDownStats.attempts !== drillDownStats.units
-              ? ` across ${drillDownStats.units} units`
+              ? ` across ${drillDownStats.units} unit${drillDownStats.units === 1 ? '' : 's'}`
               : ''}
           </Badge>
           <Button variant="ghost" className="px-2 py-1" onClick={clearDrillDown}>
             Clear
           </Button>
         </div>
+      )}
+
+      {drillDownStats?.exact && (
+        <p className="mb-4 text-xs text-muted">
+          Unit rows show each selected unit's latest outcome and available failure evidence; intermediate passing attempts remain included in the Manager count.
+        </p>
       )}
 
       {activeSignature && !drillDown && (

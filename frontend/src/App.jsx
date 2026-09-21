@@ -13,6 +13,7 @@ import { monitorJob } from './jobMonitoring'
 import {
   clearWorkspaceState,
   DEFAULT_ENGINEER_VIEW_STATE,
+  DEFAULT_MANAGER_SCOPE,
   loadWorkspaceState,
   saveWorkspaceState,
   workspaceSearch,
@@ -47,6 +48,7 @@ function Shell() {
   const [batchError, setBatchError] = useState('')
   const [engineerDrillDown, setEngineerDrillDown] = useState(null)
   const [engineerViewState, setEngineerViewState] = useState({ ...DEFAULT_ENGINEER_VIEW_STATE })
+  const [managerScope, setManagerScope] = useState({ ...DEFAULT_MANAGER_SCOPE })
   const [knowledgeReview, setKnowledgeReview] = useState(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [warnings, setWarnings] = useState([])
@@ -82,6 +84,7 @@ function Shell() {
     const restored = loadWorkspaceState(sessionStorage, username, window.location.search)
     setTab(restored.tab)
     setEngineerViewState(restored.engineer)
+    setManagerScope(restored.managerScope)
     setEngineerDrillDown(restored.drillDown)
     setRestoreCandidateId(restored.jobId)
     setWorkspaceReady(true)
@@ -95,12 +98,13 @@ function Shell() {
       tab,
       jobId: jobId || restoreCandidateId,
       engineer: engineerViewState,
+      managerScope,
       drillDown: engineerDrillDown,
     }
     saveWorkspaceState(sessionStorage, username, workspace)
     const search = workspaceSearch(workspace, window.location.search)
     window.history.replaceState(null, '', `${window.location.pathname}${search}${window.location.hash}`)
-  }, [engineerDrillDown, engineerViewState, isAuthed, jobId, restoreCandidateId, restoringWorkspace, tab, username, workspaceReady])
+  }, [engineerDrillDown, engineerViewState, isAuthed, jobId, managerScope, restoreCandidateId, restoringWorkspace, tab, username, workspaceReady])
 
   useEffect(() => {
     if (!workspaceReady || !isAuthed || !username) return undefined
@@ -108,6 +112,7 @@ function Shell() {
       const restored = loadWorkspaceState(sessionStorage, username, window.location.search)
       setTab(restored.tab)
       setEngineerViewState((current) => ({ ...current, ...restored.engineer }))
+      setManagerScope(restored.managerScope)
       setEngineerDrillDown(restored.drillDown)
       const currentJobId = jobId || restoreCandidateId
       if (restored.jobId && restored.jobId !== currentJobId) {
@@ -138,6 +143,7 @@ function Shell() {
     setWorkspaceError('')
     setEngineerDrillDown(null)
     setEngineerViewState({ ...DEFAULT_ENGINEER_VIEW_STATE })
+    setManagerScope({ ...DEFAULT_MANAGER_SCOPE })
     setWarnings(jobWarnings)
     setTab(preferredResultsView)
     loadRecentJobs({ replace: true })
@@ -356,11 +362,13 @@ function Shell() {
   const openRecentJob = async (job) => {
     setEngineerDrillDown(null)
     setEngineerViewState({ ...DEFAULT_ENGINEER_VIEW_STATE })
+    setManagerScope({ ...DEFAULT_MANAGER_SCOPE })
     setRestoreCandidateId(job.job_id)
     navigateToTab(preferredResultsView, {
       jobId: job.job_id,
       drillDown: null,
       engineer: DEFAULT_ENGINEER_VIEW_STATE,
+      managerScope: DEFAULT_MANAGER_SCOPE,
     })
     await restoreWorkspaceJob(job.job_id)
   }
@@ -369,6 +377,7 @@ function Shell() {
     tab,
     jobId: jobId || restoreCandidateId,
     engineer: engineerViewState,
+    managerScope,
     drillDown: engineerDrillDown,
     ...overrides,
   })
@@ -391,7 +400,13 @@ function Shell() {
     setWarnings([])
     setEngineerDrillDown(null)
     setEngineerViewState({ ...DEFAULT_ENGINEER_VIEW_STATE })
-    navigateToTab('home', { jobId: null, drillDown: null, engineer: DEFAULT_ENGINEER_VIEW_STATE })
+    setManagerScope({ ...DEFAULT_MANAGER_SCOPE })
+    navigateToTab('home', {
+      jobId: null,
+      drillDown: null,
+      engineer: DEFAULT_ENGINEER_VIEW_STATE,
+      managerScope: DEFAULT_MANAGER_SCOPE,
+    })
   }
 
   const signOut = async () => {
@@ -603,7 +618,14 @@ function Shell() {
             onViewStateChange={setEngineerViewState}
           />
         )}
-        {tab === 'manager' && <Manager jobId={jobId} onDrillDown={openEngineerDrillDown} />}
+        {tab === 'manager' && (
+          <Manager
+            jobId={jobId}
+            onDrillDown={openEngineerDrillDown}
+            scope={managerScope}
+            onScopeChange={setManagerScope}
+          />
+        )}
         {tab === 'knowledge' && (
           <Knowledge
             jobId={jobId}

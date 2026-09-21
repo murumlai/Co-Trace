@@ -12,8 +12,9 @@ import {
   YAxis,
 } from 'recharts'
 import { api } from '../api'
-import { Card, IconWell, MetricCard } from '../components/ui'
+import { Button, Card, IconWell, MetricCard } from '../components/ui'
 import { firstObservedPassMetric, formatRate } from '../managerMetrics'
+import { DEFAULT_MANAGER_SCOPE } from '../workspaceState'
 
 const AXIS = { fill: 'rgb(var(--color-muted))', fontSize: 12, fontFamily: 'DM Sans' }
 const GRID = 'rgb(var(--color-grid))'
@@ -43,7 +44,7 @@ function ChartCard({ title, subtitle, children }) {
   )
 }
 
-export default function Manager({ jobId, onDrillDown }) {
+export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SCOPE, onScopeChange }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -56,9 +57,8 @@ export default function Manager({ jobId, onDrillDown }) {
     }
     let active = true
     setLoading(true)
-    setData(null)
     setError('')
-    api.manager(jobId).then(
+    api.manager(jobId, scope).then(
       (nextData) => {
         if (active) setData(nextData)
       },
@@ -71,16 +71,16 @@ export default function Manager({ jobId, onDrillDown }) {
     return () => {
       active = false
     }
-  }, [jobId, reload])
+  }, [jobId, reload, scope])
 
   if (!jobId) return <EmptyState />
-  if (loading)
+  if (loading && !data)
     return (
       <div className="mx-auto max-w-6xl px-6 py-12">
         <Card role="status" className="p-10 text-center text-muted">Loading metrics…</Card>
       </div>
     )
-  if (error) {
+  if (error && !data) {
     return (
       <div className="mx-auto max-w-2xl px-6 py-24 text-center">
         <IconWell className="h-16 w-16 mx-auto mb-6">
@@ -98,20 +98,52 @@ export default function Manager({ jobId, onDrillDown }) {
       </div>
     )
   }
-  if (!data || !data.summary?.total_runs) return <EmptyMetricsState />
+  if (!data) return <EmptyMetricsState />
 
   const s = data.summary
   const topFailure = data.pareto && data.pareto.length ? data.pareto[0] : null
   const firstObservedPass = firstObservedPassMetric(s)
+  const batch = data.batch || {}
+  const scoped = data.scope || { options: { products: [], lots: [], stations: [] } }
+  const activeScopeCount = scope.products.length + scope.lots.length + scope.stations.length + (scope.startTime ? 1 : 0) + (scope.endTime ? 1 : 0)
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-10">
-      <div className="mb-8">
+      <div className="mb-6">
         <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">
-          Manager view
+          {batch.display_name || 'Manager view'}
         </h1>
-        <p className="mt-1 text-sm text-muted">Latest unit outcomes and attempt-level results for this uploaded batch.</p>
+        <p className="mt-1 text-sm text-muted">
+          Latest unit outcomes and attempt-level results for this uploaded batch.
+        </p>
       </div>
+
+      <BatchQualityStatus batch={batch} />
+      <ScopeControls
+        scope={scope}
+        options={scoped.options || { products: [], lots: [], stations: [] }}
+        activeCount={activeScopeCount}
+        loading={loading}
+        onChange={onScopeChange}
+      />
+
+      {loading && <p role="status" className="mb-4 text-sm text-muted">Updating selected scope…</p>}
+      {error && (
+        <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+          <span>{error}. Showing the previous scope.</span>
+          <Button variant="ghost" className="px-3 py-1.5" onClick={() => setReload((value) => value + 1)}>Retry</Button>
+        </div>
+      )}
+      {scoped.missing_timestamp_excluded > 0 && (
+        <div className="mb-4 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
+          {scoped.missing_timestamp_excluded} attempt{scoped.missing_timestamp_excluded === 1 ? '' : 's'} excluded because the selected time range could not be compared to its timestamp.
+        </div>
+      )}
+
+      {!s.total_runs ? (
+        <EmptyMetricsState scoped />
+      ) : (
+      <>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
         <MetricCard
@@ -187,7 +219,12 @@ export default function Manager({ jobId, onDrillDown }) {
               <li key={p.signature}>
                 <button
                   type="button"
-                  onClick={() => onDrillDown({ signature: p.signature, label: p.reason })}
+                  onClick={() => onDrillDown({
+                    signature: p.signature,
+                    label: p.reason,
+                    attempt_ids: p.attempt_ids || [],
+                    unit_ids: p.unit_ids || [],
+                  })}
                   className="flex w-full justify-between gap-4 rounded-md px-1 py-1 text-left hover:bg-surface-2 focus-ring"
                 >
                 <span className="truncate text-ink-2">{p.reason}</span>
@@ -220,6 +257,8 @@ export default function Manager({ jobId, onDrillDown }) {
                     station_id: station.station_id,
                     host: station.host,
                     label: station.station,
+                    attempt_ids: station.attempt_ids || [],
+                    unit_ids: station.unit_ids || [],
                   })}
                   className="flex w-full justify-between gap-4 rounded-md px-1 py-1 text-left hover:bg-surface-2 focus-ring"
                 >
@@ -247,12 +286,22 @@ export default function Manager({ jobId, onDrillDown }) {
                   <tr
                     key={l.lot}
                     className="cursor-pointer text-ink border-b border-border/60 last:border-0 hover:bg-surface-2"
-                    onClick={() => onDrillDown({ lot_id: l.lot, label: l.lot })}
+                    onClick={() => onDrillDown({
+                      lot_id: l.lot,
+                      label: l.lot,
+                      attempt_ids: l.attempt_ids || [],
+                      unit_ids: l.unit_ids || [],
+                    })}
                     tabIndex={0}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault()
-                        onDrillDown({ lot_id: l.lot, label: l.lot })
+                        onDrillDown({
+                          lot_id: l.lot,
+                          label: l.lot,
+                          attempt_ids: l.attempt_ids || [],
+                          unit_ids: l.unit_ids || [],
+                        })
                       }
                     }}
                   >
@@ -267,7 +316,88 @@ export default function Manager({ jobId, onDrillDown }) {
           </div>
         </ChartCard>
       </div>
+      </>
+      )}
     </div>
+  )
+}
+
+function ScopeControls({ scope, options, activeCount, loading, onChange }) {
+  const setSingle = (field, value) => onChange?.({ ...scope, [field]: value ? [value] : [] })
+  const setTime = (field, value) => onChange?.({ ...scope, [field]: value })
+  return (
+    <section className="mb-6 border-y border-border bg-surface/50 py-4" aria-labelledby="manager-scope-heading">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 id="manager-scope-heading" className="font-display text-sm font-bold text-ink">Analysis scope</h2>
+          <p className="text-xs text-muted">Metrics recalculate within the selected attempts.</p>
+        </div>
+        {activeCount > 0 && (
+          <Button variant="ghost" className="px-3 py-1.5" disabled={loading} onClick={() => onChange?.({ ...DEFAULT_MANAGER_SCOPE })}>
+            Clear {activeCount} filter{activeCount === 1 ? '' : 's'}
+          </Button>
+        )}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <ScopeSelect label="Product" value={scope.products[0] || ''} options={options.products || []} disabled={loading} onChange={(value) => setSingle('products', value)} />
+        <ScopeSelect label="Lot" value={scope.lots[0] || ''} options={options.lots || []} disabled={loading} onChange={(value) => setSingle('lots', value)} />
+        <ScopeSelect label="Station / tester" value={scope.stations[0] || ''} options={options.stations || []} disabled={loading} onChange={(value) => setSingle('stations', value)} />
+        <ScopeDate label="From" value={scope.startTime} disabled={loading} onChange={(value) => setTime('startTime', value)} />
+        <ScopeDate label="Through" value={scope.endTime} disabled={loading} onChange={(value) => setTime('endTime', value)} />
+      </div>
+    </section>
+  )
+}
+
+function ScopeSelect({ label, value, options, disabled, onChange }) {
+  return (
+    <label className="text-xs text-muted">
+      <span className="mb-1 block font-medium">{label}</span>
+      <select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink focus-ring disabled:opacity-60">
+        <option value="">All</option>
+        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+    </label>
+  )
+}
+
+function ScopeDate({ label, value, disabled, onChange }) {
+  return (
+    <label className="text-xs text-muted">
+      <span className="mb-1 block font-medium">{label}</span>
+      <input type="datetime-local" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink focus-ring disabled:opacity-60" />
+    </label>
+  )
+}
+
+function BatchQualityStatus({ batch }) {
+  const available = batch.included_run_count != null
+  const gaps = Number(batch.parse_excluded_count || 0) + Number(batch.incomplete_folder_count || 0) + Number(batch.unknown_result_count || 0) + Number(batch.missing_debuglog_count || 0)
+  const period = batch.observed_start_time && batch.observed_end_time
+    ? `${batch.observed_start_time} to ${batch.observed_end_time}`
+    : 'Observed period unavailable'
+  return (
+    <section className="mb-5 flex flex-wrap items-center justify-between gap-3 border-l-2 border-accent pl-4" aria-label="Batch scope and completeness">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-ink">
+          {batch.product_codes?.length ? batch.product_codes.join(', ') : 'Products unavailable'}
+        </p>
+        <p className="mt-0.5 break-words text-xs text-muted">
+          {period} · Timezone {batch.timestamp_timezone === 'offset' ? 'from source offsets' : batch.timestamp_timezone || 'unavailable'}
+        </p>
+      </div>
+      <div className="text-right">
+        <p className={gaps ? 'text-sm font-semibold text-warning' : 'text-sm font-semibold text-teal'}>
+          {!available ? 'Completeness unavailable' : gaps ? `${gaps} quality flag${gaps === 1 ? '' : 's'}` : 'No quality flags'}
+        </p>
+        {available && <p className="text-xs text-muted">{batch.included_run_count}/{batch.discovered_run_count ?? batch.included_run_count} parsed runs included</p>}
+        {available && gaps > 0 && (
+          <p className="text-xs text-muted">
+            {batch.parse_excluded_count || 0} parse excluded · {batch.incomplete_folder_count || 0} incomplete · {batch.unknown_result_count || 0} unknown · {batch.missing_debuglog_count || 0} missing DebugLog
+          </p>
+        )}
+      </div>
+    </section>
   )
 }
 
@@ -283,14 +413,14 @@ function EmptyState() {
   )
 }
 
-function EmptyMetricsState() {
+function EmptyMetricsState({ scoped = false }) {
   return (
     <div className="mx-auto max-w-2xl px-6 py-24 text-center">
       <IconWell className="h-16 w-16 mx-auto mb-6">
         <span className="font-display text-xl font-bold text-muted">0</span>
       </IconWell>
-      <h2 className="font-display text-2xl font-bold text-ink">No metrics in this batch</h2>
-      <p className="mt-2 text-muted">No PASS, FAIL, or UNKNOWN test runs were available to summarize.</p>
+      <h2 className="font-display text-2xl font-bold text-ink">No metrics in this {scoped ? 'scope' : 'batch'}</h2>
+      <p className="mt-2 text-muted">No PASS, FAIL, or UNKNOWN test attempts were available to summarize.</p>
     </div>
   )
 }
