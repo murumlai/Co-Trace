@@ -13,6 +13,7 @@ import {
 } from 'recharts'
 import { api } from '../api'
 import { Card, IconWell, MetricCard } from '../components/ui'
+import { firstObservedPassMetric, formatRate } from '../managerMetrics'
 
 const AXIS = { fill: 'rgb(var(--color-muted))', fontSize: 12, fontFamily: 'DM Sans' }
 const GRID = 'rgb(var(--color-grid))'
@@ -101,6 +102,7 @@ export default function Manager({ jobId, onDrillDown }) {
 
   const s = data.summary
   const topFailure = data.pareto && data.pareto.length ? data.pareto[0] : null
+  const firstObservedPass = firstObservedPassMetric(s)
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-10">
@@ -108,32 +110,33 @@ export default function Manager({ jobId, onDrillDown }) {
         <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">
           Manager view
         </h1>
-        <p className="mt-1 text-sm text-muted">Yield, throughput, and failure breakdown for this batch.</p>
+        <p className="mt-1 text-sm text-muted">Latest unit outcomes and attempt-level results for this uploaded batch.</p>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
         <MetricCard
-          label="First-pass yield"
-          value={`${s.fpy}%`}
+          label="First observed pass rate"
+          value={firstObservedPass.value}
           tone="accent"
-          hint={`${s.fpy_pass}/${s.fpy_total} first attempts`}
+          hint={firstObservedPass.hint}
         />
-        <MetricCard label="Total runs" value={s.total_runs} hint={`${s.retests} retests`} />
-        <MetricCard label="Unique units" value={s.unique_units} />
-        <MetricCard label="Passed" value={s.passed} tone="pass" />
-        <MetricCard label="Failed" value={s.failed} tone="fail" />
+        <MetricCard label="Test attempts" value={s.total_runs} hint={`${s.retests} additional attempts`} />
+        <MetricCard label="Observed units" value={s.unique_units} />
+        <MetricCard label="Latest passed units" value={s.passed} tone="pass" hint={`${s.passed}/${s.unique_units} observed units`} />
+        <MetricCard label="Latest failing units" value={s.failed} tone="fail" hint={`${s.failed}/${s.unique_units} observed units`} />
+        <MetricCard label="Latest unknown units" value={s.unknown || 0} hint={`${s.unknown || 0}/${s.unique_units} observed units`} />
         {topFailure && (
           <MetricCard
-            label="Top failure"
+            label="Top failed-attempt family"
             value={`${topFailure.pct}%`}
             tone="fail"
-            hint={`${topFailure.reason} · ${topFailure.count} fails`}
+            hint={`${topFailure.reason} · ${topFailure.count} failed attempts`}
           />
         )}
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6">
-        <ChartCard title="Yield trend" subtitle="Pass rate by day">
+        <ChartCard title="Attempt pass-rate trend" subtitle="PASS attempts / PASS + FAIL attempts by day">
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={data.trend} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
               <CartesianGrid stroke={GRID} strokeDasharray="4 4" vertical={false} />
@@ -151,7 +154,7 @@ export default function Manager({ jobId, onDrillDown }) {
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Failure Pareto" subtitle="Fail count with cumulative %">
+        <ChartCard title="Failed-attempt Pareto" subtitle="Failed attempts with cumulative share">
           <ResponsiveContainer width="100%" height={280}>
             <ComposedChart data={data.pareto} margin={{ top: 5, right: 4, left: -10, bottom: 0 }}>
               <CartesianGrid stroke={GRID} strokeDasharray="4 4" vertical={false} />
@@ -167,7 +170,7 @@ export default function Manager({ jobId, onDrillDown }) {
                 axisLine={false}
               />
               <Tooltip contentStyle={tooltipStyle} />
-              <Bar yAxisId="left" dataKey="count" name="Fails" fill={ACCENT} radius={[6, 6, 0, 0]} />
+              <Bar yAxisId="left" dataKey="count" name="Failed attempts" fill={ACCENT} radius={[6, 6, 0, 0]} />
               <Line
                 yAxisId="right"
                 type="monotone"
@@ -197,7 +200,7 @@ export default function Manager({ jobId, onDrillDown }) {
           </ul>
         </ChartCard>
 
-        <ChartCard title="Station / tester breakdown" subtitle="Pass vs fail per station">
+        <ChartCard title="Station / tester attempts" subtitle="PASS vs FAIL attempts per station">
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={data.stations} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
               <CartesianGrid stroke={GRID} strokeDasharray="4 4" vertical={false} />
@@ -221,22 +224,22 @@ export default function Manager({ jobId, onDrillDown }) {
                   className="flex w-full justify-between gap-4 rounded-md px-1 py-1 text-left hover:bg-surface-2 focus-ring"
                 >
                   <span className="truncate text-ink-2">{station.station}</span>
-                  <span className="shrink-0 text-muted">{station.fail} fails</span>
+                  <span className="shrink-0 text-muted">{station.fail} failed attempts</span>
                 </button>
               </li>
             ))}
           </ul>
         </ChartCard>
 
-        <ChartCard title="Lot-to-lot comparison" subtitle="Yield by lot">
+        <ChartCard title="Lot-to-lot attempt comparison" subtitle="Attempt pass rate by lot">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-muted text-left border-b border-border">
                   <th className="pb-2 font-medium">Lot</th>
-                  <th className="pb-2 font-medium text-right">Pass</th>
-                  <th className="pb-2 font-medium text-right">Fail</th>
-                  <th className="pb-2 font-medium text-right">Yield</th>
+                  <th className="pb-2 font-medium text-right">PASS attempts</th>
+                  <th className="pb-2 font-medium text-right">FAIL attempts</th>
+                  <th className="pb-2 font-medium text-right">Pass rate</th>
                 </tr>
               </thead>
               <tbody>
@@ -256,7 +259,7 @@ export default function Manager({ jobId, onDrillDown }) {
                     <td className="py-2 truncate">{l.lot}</td>
                     <td className="py-2 text-right text-teal">{l.pass}</td>
                     <td className="py-2 text-right text-danger">{l.fail}</td>
-                    <td className="py-2 text-right font-semibold">{l.yield}%</td>
+                    <td className="py-2 text-right font-semibold">{formatRate(l.yield, l.total)}</td>
                   </tr>
                 ))}
               </tbody>
