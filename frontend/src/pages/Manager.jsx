@@ -51,6 +51,23 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
   const [error, setError] = useState('')
   const [reload, setReload] = useState(0)
   const [lotSort, setLotSort] = useState({ key: 'yield', direction: 'asc' })
+  const [comparison, setComparison] = useState(null)
+  const [comparisonLoading, setComparisonLoading] = useState(false)
+  const [comparisonError, setComparisonError] = useState('')
+  const scopeKey = JSON.stringify({
+    products: scope.products,
+    lots: scope.lots,
+    stations: scope.stations,
+    startTime: scope.startTime,
+    endTime: scope.endTime,
+  })
+  const comparisonKey = JSON.stringify({
+    products: scope.products,
+    lots: scope.lots,
+    stations: scope.stations,
+    targetMetric: scope.targetMetric,
+    targetPercent: scope.targetPercent,
+  })
 
   useEffect(() => {
     if (!jobId) {
@@ -73,7 +90,27 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
     return () => {
       active = false
     }
-  }, [jobId, reload, scope])
+  }, [jobId, reload, scopeKey])
+
+  useEffect(() => {
+    if (!jobId) return undefined
+    let active = true
+    setComparisonLoading(true)
+    setComparisonError('')
+    api.comparison(jobId, scope).then(
+      (result) => {
+        if (active) setComparison(result)
+      },
+      (requestError) => {
+        if (active) setComparisonError(requestError.message)
+      },
+    ).finally(() => {
+      if (active) setComparisonLoading(false)
+    })
+    return () => {
+      active = false
+    }
+  }, [comparisonKey, jobId])
 
   if (!jobId) return <EmptyState />
   if (loading && !data)
@@ -124,7 +161,7 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
     direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
   }))
   const exportCsv = () => {
-    const csv = buildManagerCsv(data)
+    const csv = buildManagerCsv(data, comparison)
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
     const link = document.createElement('a')
     link.href = url
@@ -162,6 +199,14 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
         activeCount={activeScopeCount}
         loading={loading}
         onChange={onScopeChange}
+      />
+      <ComparisonPanel
+        comparison={comparison}
+        loading={comparisonLoading}
+        error={comparisonError}
+        targetMetric={scope.targetMetric}
+        targetPercent={scope.targetPercent}
+        onTargetChange={(update) => onScopeChange?.({ ...scope, ...update })}
       />
 
       {loading && <p role="status" className="mb-4 text-sm text-muted">Updating selected scope…</p>}
@@ -413,6 +458,66 @@ function SortButton({ label, column, sort, onChange }) {
       {label}{active ? (sort.direction === 'asc' ? ' ↑' : ' ↓') : ''}
     </button>
   )
+}
+
+function ComparisonPanel({ comparison, loading, error, targetMetric, targetPercent, onTargetChange }) {
+  const first = comparison?.metrics?.first_observed_pass_rate
+  const latest = comparison?.metrics?.latest_observed_unit_yield
+  return (
+    <section className="print-avoid-break mb-6 border-y border-border bg-surface/50 py-4" aria-labelledby="comparison-heading">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 id="comparison-heading" className="font-display text-sm font-bold text-ink">Qualified comparison</h2>
+          <p className="text-xs text-muted">Newest prior owned, completed, non-duplicate batch with the same product and active lot/station scope.</p>
+        </div>
+        <div className="no-print flex flex-wrap gap-2">
+          <select value={targetMetric} onChange={(event) => onTargetChange({ targetMetric: event.target.value })} aria-label="Target metric" className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-ink focus-ring">
+            <option value="first_observed_pass_rate">First observed pass rate target</option>
+            <option value="latest_observed_unit_yield">Latest unit yield target</option>
+          </select>
+          <input type="number" min="0" max="100" step="0.1" value={targetPercent} onChange={(event) => onTargetChange({ targetPercent: event.target.value })} placeholder="Target %" aria-label="User-entered target percent" className="w-28 rounded-lg border border-border bg-surface px-3 py-2 text-xs text-ink focus-ring" />
+        </div>
+      </div>
+      {loading && <p role="status" className="text-sm text-muted">Checking comparable batches…</p>}
+      {error && <p role="alert" className="text-sm text-danger">Comparison unavailable: {error}</p>}
+      {!loading && !error && comparison && !comparison.available && <p className="text-sm text-muted">{comparison.reason}</p>}
+      {!loading && comparison?.available && (
+        <div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <ComparisonMetric label="First observed pass rate" metric={first} />
+            <ComparisonMetric label="Latest observed unit yield" metric={latest} />
+            <div className="rounded-lg border border-border bg-surface px-4 py-3">
+              <p className="text-xs uppercase tracking-wide text-muted">Baseline</p>
+              <p className="mt-1 truncate text-sm font-semibold text-ink" title={comparison.baseline.display_name}>{comparison.baseline.display_name}</p>
+              <p className="mt-1 text-xs text-muted">{comparison.scope.current_attempts} current / {comparison.scope.baseline_attempts} baseline attempts</p>
+            </div>
+          </div>
+          {comparison.target && (
+            <p className="mt-3 text-sm text-ink-2">
+              User-entered {comparison.target.percent}% target · gap {formatDelta(comparison.target.gap_pp)} percentage points
+            </p>
+          )}
+          <p className="mt-2 text-xs text-muted">{comparison.scope.time_rule}</p>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function ComparisonMetric({ label, metric }) {
+  if (!metric) return null
+  return (
+    <div className="rounded-lg border border-border bg-surface px-4 py-3">
+      <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
+      <p className={`mt-1 text-2xl font-bold ${metric.delta_pp >= 0 ? 'text-teal' : 'text-danger'}`}>{formatDelta(metric.delta_pp)} pp</p>
+      <p className="mt-1 text-xs text-muted">{metric.current}% ({metric.current_denominator}) vs {metric.baseline}% ({metric.baseline_denominator})</p>
+    </div>
+  )
+}
+
+function formatDelta(value) {
+  const amount = Number(value || 0)
+  return `${amount > 0 ? '+' : ''}${amount}`
 }
 
 function ScopeControls({ scope, options, activeCount, loading, onChange }) {

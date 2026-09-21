@@ -77,6 +77,18 @@ export const api = {
     const query = params.toString()
     return request(`/api/jobs/${jobId}/manager${query ? `?${query}` : ''}`)
   },
+  comparison: (jobId, scope = {}) => {
+    const params = new URLSearchParams()
+    ;(scope.products || []).forEach((value) => params.append('product', value))
+    ;(scope.lots || []).forEach((value) => params.append('lot', value))
+    ;(scope.stations || []).forEach((value) => params.append('station', value))
+    if (scope.targetPercent !== '' && scope.targetPercent != null) {
+      params.set('target_metric', scope.targetMetric || 'first_observed_pass_rate')
+      params.set('target_percent', String(scope.targetPercent))
+    }
+    const query = params.toString()
+    return request(`/api/jobs/${jobId}/comparison${query ? `?${query}` : ''}`)
+  },
   analysisCache: () => request('/api/cache/analysis'),
   clearAnalysisCache: (cacheKey) =>
     request(`/api/cache/analysis/${cacheKey}`, { method: 'DELETE' }),

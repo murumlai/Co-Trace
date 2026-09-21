@@ -39,6 +39,8 @@ test('restores identifiers and preferences without persisting free-text search',
       stations: ['station-key'],
       startTime: '2026-09-20T08:00',
       endTime: '2026-09-20T10:00',
+      targetMetric: 'latest_observed_unit_yield',
+      targetPercent: '95',
     },
   })
 
@@ -52,6 +54,8 @@ test('restores identifiers and preferences without persisting free-text search',
   assert.deepEqual(restored.engineer.columns, ['product', 'failure'])
   assert.equal(restored.drillDown.lot_id, 'LOT-A')
   assert.deepEqual(restored.managerScope.products, ['P1'])
+  assert.equal(restored.managerScope.targetMetric, 'latest_observed_unit_yield')
+  assert.equal(restored.managerScope.targetPercent, '95')
 })
 
 test('URL identifiers override the session workspace and preserve unrelated parameters', () => {

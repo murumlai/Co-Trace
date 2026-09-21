@@ -8,7 +8,7 @@ export function csvCell(value) {
 
 const row = (...values) => values.map(csvCell).join(',')
 
-export function buildManagerCsv(data, generatedAt = new Date().toISOString()) {
+export function buildManagerCsv(data, comparison = null, generatedAt = new Date().toISOString()) {
   const summary = data.summary || {}
   const scope = data.scope || {}
   const batch = data.batch || {}
@@ -27,6 +27,12 @@ export function buildManagerCsv(data, generatedAt = new Date().toISOString()) {
     row('Definition', 'All measures describe attempts selected within this uploaded batch. First/latest are calculated within the selection.'),
     row('Completeness', `${batch.included_run_count ?? 'unavailable'}/${batch.discovered_run_count ?? 'unavailable'} parsed runs included`),
     row('Quality flags', `parse excluded=${batch.parse_excluded_count ?? 'unavailable'}; incomplete=${batch.incomplete_folder_count ?? 'unavailable'}; unknown=${batch.unknown_result_count ?? 'unavailable'}; missing DebugLog=${batch.missing_debuglog_count ?? 'unavailable'}`),
+    row('Comparison availability', comparison?.available ? 'available' : (comparison?.reason || 'unavailable')),
+    row('Comparison baseline', comparison?.baseline?.display_name || ''),
+    row('Comparison sample sizes', comparison?.scope ? `${comparison.scope.current_attempts} current attempts; ${comparison.scope.baseline_attempts} baseline attempts` : ''),
+    row('First observed pass-rate delta (percentage points)', comparison?.metrics?.first_observed_pass_rate?.delta_pp ?? ''),
+    row('Latest unit-yield delta (percentage points)', comparison?.metrics?.latest_observed_unit_yield?.delta_pp ?? ''),
+    row('Target', comparison?.target ? `${comparison.target.percent}% ${comparison.target.metric}; gap ${comparison.target.gap_pp} percentage points; provenance=${comparison.target.provenance}` : ''),
     '',
     row('KPI', 'Value', 'Denominator / definition'),
     row('First observed pass rate', summary.fpy, `${summary.fpy_pass}/${summary.fpy_total} units`),

@@ -28,6 +28,15 @@ test('exports active scope, completeness, KPIs, and aggregate tables', () => {
     stations: [{ station: 'H / ST1', total: 2, pass: 1, fail: 1 }],
     lots: [{ lot: 'L1', total: 2, pass: 1, fail: 1, yield: 50 }],
     trend: [{ date: '2026-09-21', pass: 1, fail: 1, yield: 50 }],
+  }, {
+    available: true,
+    baseline: { display_name: 'Prior batch' },
+    scope: { current_attempts: 3, baseline_attempts: 4 },
+    metrics: {
+      first_observed_pass_rate: { delta_pp: 5 },
+      latest_observed_unit_yield: { delta_pp: 10 },
+    },
+    target: { percent: 95, metric: 'latest_observed_unit_yield', gap_pp: 5, provenance: 'user_entered' },
   }, '2026-09-21T12:00:00Z')
 
   assert.match(csv, /Active product filters","P1/)
@@ -35,6 +44,8 @@ test('exports active scope, completeness, KPIs, and aggregate tables', () => {
   assert.match(csv, /Latest observed unit yield/)
   assert.match(csv, /"'=unsafe"/)
   assert.match(csv, /Attempt pass-rate trend/)
+  assert.match(csv, /Prior batch/)
+  assert.match(csv, /provenance=user_entered/)
   assert.match(csv, /Not included in aggregate export/)
 })
 

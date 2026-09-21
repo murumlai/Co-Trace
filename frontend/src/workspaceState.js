@@ -30,6 +30,8 @@ export const DEFAULT_MANAGER_SCOPE = Object.freeze({
   stations: [],
   startTime: '',
   endTime: '',
+  targetMetric: 'first_observed_pass_rate',
+  targetPercent: '',
 })
 
 const bounded = (value, maxLength = 240) => {
@@ -70,6 +72,10 @@ function normalizeManagerScope(value) {
     stations: boundedList(scope.stations, 50),
     startTime: bounded(scope.startTime) || '',
     endTime: bounded(scope.endTime) || '',
+    targetMetric: scope.targetMetric === 'latest_observed_unit_yield'
+      ? 'latest_observed_unit_yield'
+      : 'first_observed_pass_rate',
+    targetPercent: bounded(scope.targetPercent, 6) || '',
   }
 }
 
