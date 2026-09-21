@@ -4,6 +4,11 @@ import { useAuth } from '../auth'
 import { groupAttempts } from '../unitAttempts'
 import { DEFAULT_ENGINEER_VIEW_STATE } from '../workspaceState'
 import {
+  ANALYSIS_SOURCE_LABEL,
+  assessEvidence,
+  modelConfidenceLabel,
+} from '../diagnosisPresentation'
+import {
   Badge,
   Button,
   Card,
@@ -1324,7 +1329,7 @@ function KnowledgeBadge({ attempt }) {
     const cats = categories.map((c) => KNOWLEDGE_CATEGORY_LABEL[c] || c).join(', ')
     return (
       <div className="mb-3 text-xs text-teal">
-        <span className="font-semibold">◆ Product knowledge used:</span>{' '}
+        <span className="font-semibold">Product knowledge used as supporting context:</span>{' '}
         {cats || 'matched'} · {sectionCount} section{sectionCount === 1 ? '' : 's'}
       </div>
     )
@@ -1351,52 +1356,25 @@ function DebugLogStatus({ attempt }) {
   )
 }
 
-const ANALYSIS_SOURCE_LABEL = {
-  llm: 'Copilot analysis',
-  stub: 'Offline placeholder',
-  cached: 'Reused in batch',
-  'local-cache': 'Saved analysis',
-  playbook: 'Reviewed playbook',
-}
-
-const CONTEXT_SOURCE_LABEL = {
-  debug_excerpt: 'DebugLog excerpt',
-  ftrunner_snippet: 'FTRunner snippet',
-  error_message: 'Error message only',
-}
-
 function EvidenceQuality({ attempt }) {
-  const weakReasons = []
-  if (attempt.analysis_source === 'stub') weakReasons.push('Offline placeholder, not a live diagnosis')
-  if (attempt.analysis_context_source === 'error_message') weakReasons.push('Only the error message was available')
-  if (attempt.knowledge_match_status && attempt.knowledge_match_status !== 'matched') {
-    weakReasons.push('No matching product knowledge')
-  }
-  if (
-    attempt.debuglog_status &&
-    !['excerpt', 'not_applicable'].includes(attempt.debuglog_status)
-  ) {
-    weakReasons.push(attempt.debuglog_message || 'DebugLog evidence was unavailable')
-  }
+  const assessment = assessEvidence(attempt)
   const unknownAcronyms = attempt.unknown_acronyms || []
 
   return (
     <div className="mb-4 border-y border-border/60 py-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge tone={weakReasons.length ? 'warn' : 'pass'}>
-          {weakReasons.length ? 'Weak evidence' : 'Grounded evidence'}
+        <Badge tone={assessment.grounded ? 'pass' : 'warn'}>
+          {assessment.grounded ? 'Grounded evidence' : 'Evidence limitations'}
         </Badge>
         <Badge tone={attempt.analysis_source === 'stub' ? 'warn' : attempt.analysis_source === 'playbook' ? 'pass' : 'muted'}>
-          {ANALYSIS_SOURCE_LABEL[attempt.analysis_source] || attempt.analysis_source || 'Pending analysis'}
+          {assessment.sourceLabel}
         </Badge>
-        <Badge tone="muted">
-          {CONTEXT_SOURCE_LABEL[attempt.analysis_context_source] || 'Context source unavailable'}
-        </Badge>
-        {attempt.knowledge_match_status === 'matched' && <Badge tone="pass">Product knowledge matched</Badge>}
+        <Badge tone="muted">{assessment.contextLabel}</Badge>
+        {attempt.knowledge_match_status === 'matched' && <Badge tone="accent">Knowledge matched · supporting only</Badge>}
       </div>
-      {weakReasons.length > 0 && (
+      {assessment.reasons.length > 0 && (
         <ul className="mt-2 space-y-1 text-xs text-warning">
-          {weakReasons.map((reason) => <li key={reason}>{reason}</li>)}
+          {assessment.reasons.map((reason) => <li key={reason}>{reason}</li>)}
         </ul>
       )}
       {unknownAcronyms.length > 0 && (
@@ -1411,49 +1389,84 @@ function EvidenceQuality({ attempt }) {
   )
 }
 
-function StructuredRca({ attempt }) {
-  const hasStructuredRca =
+function DiagnosisMetadata({ attempt }) {
+  const hasMetadata =
     attempt.confidence != null ||
     attempt.root_cause_category ||
-    attempt.evidence_summary ||
-    attempt.next_debug_action ||
     attempt.likely_owner ||
     attempt.safety_or_escape_risk ||
     attempt.needs_more_evidence != null
-  if (!hasStructuredRca) return null
+  if (!hasMetadata) return null
 
-  const confidence =
-    attempt.confidence != null ? `${Math.round(attempt.confidence * 100)}% confidence` : null
+  const confidence = modelConfidenceLabel(attempt.confidence)
 
   return (
+    <div className="mb-3 flex flex-wrap gap-2">
+      {attempt.root_cause_category && <Badge tone="accent">Category: {attempt.root_cause_category}</Badge>}
+      {confidence && <Badge tone="muted">{confidence}</Badge>}
+      {attempt.likely_owner && <Badge tone="muted">Suggested team: {attempt.likely_owner}</Badge>}
+      {attempt.safety_or_escape_risk && (
+        <Badge tone={attempt.safety_or_escape_risk.toLowerCase() === 'low' ? 'pass' : 'warn'}>
+          Reported risk: {attempt.safety_or_escape_risk}
+        </Badge>
+      )}
+      {attempt.needs_more_evidence === true && <Badge tone="warn">Needs more evidence</Badge>}
+    </div>
+  )
+}
+
+function VerificationAction({ attempt }) {
+  const action = attempt.next_debug_action || attempt.suggested_solution
+  if (!action) return null
+  return (
+    <div className="mb-4 border-l-2 border-accent pl-3">
+      <div className="mb-1 text-xs uppercase tracking-wide text-muted">Next verification step</div>
+      <p className="font-medium text-ink whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{action}</p>
+    </div>
+  )
+}
+
+function SupportingEvidence({ attempt }) {
+  return (
     <div className="mb-4">
-      <div className="flex flex-wrap gap-2">
-        {attempt.root_cause_category && <Badge tone="accent">{attempt.root_cause_category}</Badge>}
-        {confidence && <Badge tone="muted">{confidence}</Badge>}
-        {attempt.likely_owner && <Badge tone="muted">Owner: {attempt.likely_owner}</Badge>}
-        {attempt.safety_or_escape_risk && (
-          <Badge tone={attempt.safety_or_escape_risk.toLowerCase() === 'low' ? 'pass' : 'warn'}>
-            Risk: {attempt.safety_or_escape_risk}
-          </Badge>
-        )}
-        {attempt.needs_more_evidence === true && <Badge tone="warn">Needs more evidence</Badge>}
-      </div>
+      <div className="mb-2 text-xs uppercase tracking-wide text-muted">Supporting evidence</div>
+      <EvidenceQuality attempt={attempt} />
+      <KnowledgeBadge attempt={attempt} />
+      <DebugLogStatus attempt={attempt} />
       {attempt.evidence_summary && (
-        <div className="mt-3">
-          <div className="mb-1 text-xs uppercase tracking-wide text-muted">Evidence summary</div>
-          <p className="text-sm text-ink-2 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-            {attempt.evidence_summary}
-          </p>
-        </div>
+        <p className="text-sm text-ink-2 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+          {attempt.evidence_summary}
+        </p>
       )}
-      {attempt.next_debug_action && (
-        <div className="mt-3 border-l-2 border-accent pl-3">
-          <div className="mb-1 text-xs uppercase tracking-wide text-muted">Next debug action</div>
-          <p className="font-medium text-ink whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-            {attempt.next_debug_action}
-          </p>
-        </div>
-      )}
+    </div>
+  )
+}
+
+function Guidance({ attempt }) {
+  if (!attempt.suggested_solution || !attempt.next_debug_action || attempt.suggested_solution === attempt.next_debug_action) return null
+  return (
+    <div className="mb-4">
+      <div className="mb-1 text-xs uppercase tracking-wide text-muted">Corrective guidance</div>
+      <p className="text-ink whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{attempt.suggested_solution}</p>
+    </div>
+  )
+}
+
+function PlaybookNotice({ attempt, onReviewKnowledge }) {
+  if (attempt.analysis_source !== 'playbook') return null
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2 border-l-2 border-teal pl-3">
+      <Badge tone="pass">Deterministic reviewed playbook</Badge>
+      <Button
+        variant="ghost"
+        className="px-2 py-1"
+        onClick={() => onReviewKnowledge?.({
+          productCode: attempt.product_code,
+          playbookId: attempt.playbook_id,
+        })}
+      >
+        Open playbook
+      </Button>
     </div>
   )
 }
@@ -1492,49 +1505,26 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
         </p>
       )}
 
-      <KnowledgeBadge attempt={attempt} />
-      <DebugLogStatus attempt={attempt} />
-      <EvidenceQuality attempt={attempt} />
-      {attempt.analysis_source === 'playbook' && (
-        <div className="mb-4 flex flex-wrap items-center gap-2 border-l-2 border-teal pl-3">
-          <Badge tone="pass">Deterministic playbook guidance</Badge>
-          <Button
-            variant="ghost"
-            className="px-2 py-1"
-            onClick={() => onReviewKnowledge?.({
-              productCode: attempt.product_code,
-              playbookId: attempt.playbook_id,
-            })}
-          >
-            Open playbook
-          </Button>
-        </div>
-      )}
-      <StructuredRca attempt={attempt} />
-      <FeedbackControls
-        attempt={attempt}
-        entries={feedbackEntries}
-        busy={feedbackBusy}
-        onSubmit={onFeedback}
-        note={feedbackDraft}
-        onNoteChange={onFeedbackDraftChange}
-      />
+      <DiagnosisMetadata attempt={attempt} />
+      <PlaybookNotice attempt={attempt} onReviewKnowledge={onReviewKnowledge} />
 
       <div className="text-xs uppercase tracking-wide text-muted mb-1">
-        Root cause
+        Suspected cause
         {sourceLabel && <span className="ml-2 lowercase opacity-70">· {sourceLabel}</span>}
       </div>
       <p className="text-ink whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-        {attempt.root_cause || 'Analyzing…'}
+        {attempt.root_cause || 'No diagnosis is available yet.'}
       </p>
 
-      <div className="text-xs uppercase tracking-wide text-muted mt-4 mb-1">Suggested solution</div>
-      <p className="text-ink whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-        {attempt.suggested_solution || '—'}
-      </p>
+      <div className="mt-4">
+        <VerificationAction attempt={attempt} />
+        <Guidance attempt={attempt} />
+      </div>
+
+      <SupportingEvidence attempt={attempt} />
 
       {showSnippet && (
-        <div className="mt-4">
+        <div className="mb-4">
           <TerminalViewer
             text={attempt.redacted_snippet || ''}
             title="Redacted log snippet"
@@ -1544,6 +1534,15 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
           />
         </div>
       )}
+
+      <FeedbackControls
+        attempt={attempt}
+        entries={feedbackEntries}
+        busy={feedbackBusy}
+        onSubmit={onFeedback}
+        note={feedbackDraft}
+        onNoteChange={onFeedbackDraftChange}
+      />
 
       <div className="mt-4 flex flex-wrap gap-3">
         <Button onClick={() => onReanalyze(attempt)} disabled={reanalyzing === attempt.unit_id}>
