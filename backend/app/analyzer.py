@@ -14,7 +14,7 @@ from . import analysis_cache, llm_client, redaction
 from .job_registry import Job
 from .knowledge.acronym_glossary import AcronymGlossaryContext
 from .knowledge.models import KnowledgeContext
-from .models import AnalysisResult, LlmAnalysisResult, UnitRecord
+from .models import AnalysisResult, EvidenceReference, LlmAnalysisResult, UnitRecord
 from .record_views import _normalize_msg, signature_for
 log = logging.getLogger("cotrace.analyzer")
 
@@ -218,6 +218,7 @@ def _analyze_unit(
         job.signature_cache.pop(sig, None)
 
     knowledge = _retrieve_knowledge(rec, knowledge_retriever)
+    rec.evidence_references = _evidence_references(rec, snippet, context_source, knowledge)
     glossary = _resolve_glossary(rec, acronym_glossary, snippet)
     cache_key = _cache.make_key(
         error_code=rec.error_code,
@@ -362,6 +363,44 @@ def _retrieve_knowledge(
     rec.knowledge_section_ids = list(knowledge.matched_section_ids)
     rec.knowledge_categories = list(knowledge.matched_categories)
     return knowledge
+
+
+def _evidence_references(
+    rec: UnitRecord,
+    snippet: str,
+    context_source: str,
+    knowledge: KnowledgeContext | None,
+) -> list[EvidenceReference]:
+    references: list[EvidenceReference] = []
+    if snippet:
+        line_count = max(1, len(snippet.splitlines()))
+        context_label = {
+            "debug_excerpt": "Redacted DebugLog excerpt",
+            "ftrunner_snippet": "Redacted FTRunner snippet",
+            "error_message": "Redacted error-message context",
+        }.get(context_source, "Redacted analysis context")
+        references.append(EvidenceReference(
+            kind="log_excerpt",
+            reference_id=f"log:{rec.unit_id}:1-{line_count}",
+            label=context_label,
+            source_type=context_source,
+            line_start=1,
+            line_end=line_count,
+        ))
+    if knowledge is not None:
+        for match in knowledge.matches:
+            if match.section_id not in rec.knowledge_section_ids:
+                continue
+            references.append(EvidenceReference(
+                kind="knowledge_section",
+                reference_id=f"knowledge:{match.section_id}",
+                label=match.heading or match.source_filename or match.section_id,
+                section_id=match.section_id,
+                product_code=match.product_code or rec.product_code,
+                heading=match.heading,
+                source_filename=match.source_filename,
+            ))
+    return references
 
 
 def _resolve_glossary(

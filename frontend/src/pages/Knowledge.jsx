@@ -65,6 +65,38 @@ export default function Knowledge({ jobId, reviewFilter, onClearReview }) {
     api.units(jobId).then((data) => setBatchUnits(data.units || [])).catch(() => setBatchUnits([]))
   }, [jobId])
 
+  useEffect(() => {
+    const sectionId = reviewFilter?.sectionId
+    const productCode = reviewFilter?.productCode
+    if (!sectionId || !productCode) return
+    let active = true
+    setError('')
+    setNotice('Validating referenced knowledge section…')
+    api.knowledgeSections(productCode).then(
+      (data) => {
+        if (!active) return
+        const nextSections = data.sections || []
+        setOpenProduct(productCode)
+        setSections(nextSections)
+        const found = nextSections.some((section) => section.section_id === sectionId)
+        setNotice(found
+          ? 'Source section provided to analysis.'
+          : 'Referenced source section is unavailable; the knowledge pack may have been rebuilt or the document removed.')
+        if (found) {
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            document.getElementById(`knowledge-section-${sectionId}`)?.scrollIntoView({ block: 'center' })
+          }))
+        }
+      },
+      (requestError) => {
+        if (active) setError(`Could not validate the referenced source: ${requestError.message}`)
+      },
+    )
+    return () => {
+      active = false
+    }
+  }, [reviewFilter?.productCode, reviewFilter?.sectionId])
+
   const manifest = status?.manifest || null
   const products = manifest?.products || []
   const documents = manifest?.documents || []
@@ -414,7 +446,15 @@ export default function Knowledge({ jobId, reviewFilter, onClearReview }) {
                   {sections.length === 0 ? (
                     <p className="text-sm text-muted">No sections.</p>
                   ) : (
-                    sections.map((s) => <SectionPreview key={s.section_id} section={s} />)
+                    sections.map((s) => (
+                      <div
+                        key={s.section_id}
+                        id={`knowledge-section-${s.section_id}`}
+                        className={reviewFilter?.sectionId === s.section_id ? 'rounded-lg ring-2 ring-accent' : ''}
+                      >
+                        <SectionPreview section={s} />
+                      </div>
+                    ))
                   )}
                 </div>
               )}

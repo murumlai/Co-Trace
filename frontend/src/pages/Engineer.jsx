@@ -8,6 +8,7 @@ import {
   assessEvidence,
   modelConfidenceLabel,
 } from '../diagnosisPresentation'
+import { validateEvidenceReferences } from '../evidenceReferences'
 import {
   Badge,
   Button,
@@ -1426,7 +1427,8 @@ function VerificationAction({ attempt }) {
   )
 }
 
-function SupportingEvidence({ attempt }) {
+function SupportingEvidence({ attempt, onFocusLine, onReviewKnowledge }) {
+  const references = validateEvidenceReferences(attempt.evidence_references, attempt.redacted_snippet || '')
   return (
     <div className="mb-4">
       <div className="mb-2 text-xs uppercase tracking-wide text-muted">Supporting evidence</div>
@@ -1438,6 +1440,42 @@ function SupportingEvidence({ attempt }) {
           {attempt.evidence_summary}
         </p>
       )}
+      <div className="mt-3 border-t border-border/60 pt-3">
+        <p className="mb-2 text-xs font-medium text-muted">Sources provided to analysis</p>
+        {references.length === 0 ? (
+          <p className="text-xs text-muted">Source references are unavailable for this diagnosis.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {references.map((reference) => (
+              <li key={reference.reference_id}>
+                {reference.kind === 'log_excerpt' ? (
+                  <button
+                    type="button"
+                    disabled={!reference.available}
+                    onClick={() => onFocusLine?.(reference.line_start)}
+                    className="text-left text-xs text-accent hover:underline focus-ring disabled:text-muted disabled:no-underline"
+                  >
+                    {reference.available
+                      ? `${reference.label} · excerpt lines ${reference.line_start}-${reference.line_end}`
+                      : `${reference.label} · ${reference.unavailableReason}`}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onReviewKnowledge?.({
+                      productCode: reference.product_code || attempt.product_code,
+                      sectionId: reference.section_id,
+                    })}
+                    className="text-left text-xs text-accent hover:underline focus-ring"
+                  >
+                    {reference.label}{reference.source_filename ? ` · ${reference.source_filename}` : ''}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   )
 }
@@ -1472,6 +1510,7 @@ function PlaybookNotice({ attempt, onReviewKnowledge }) {
 }
 
 function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, feedbackDraft, onFeedbackDraftChange }) {
+  const [focusLine, setFocusLine] = useState(null)
   const canClearCache =
     !!onClearCache &&
     attempt.analysis_cache_key && ['llm', 'local-cache'].includes(attempt.analysis_source)
@@ -1521,7 +1560,7 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
         <Guidance attempt={attempt} />
       </div>
 
-      <SupportingEvidence attempt={attempt} />
+      <SupportingEvidence attempt={attempt} onFocusLine={setFocusLine} onReviewKnowledge={onReviewKnowledge} />
 
       {showSnippet && (
         <div className="mb-4">
@@ -1531,6 +1570,7 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
             errorCode={attempt.error_code || null}
             failingStep={attempt.failing_step || null}
             timestamp={when || null}
+            focusLine={focusLine}
           />
         </div>
       )}

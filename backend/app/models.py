@@ -29,6 +29,19 @@ class StepRecord(BaseModel):
     duration_s: float = 0.0
 
 
+class EvidenceReference(BaseModel):
+    kind: Literal["log_excerpt", "knowledge_section"]
+    reference_id: str
+    label: str
+    source_type: Optional[str] = None
+    line_start: Optional[int] = None
+    line_end: Optional[int] = None
+    section_id: Optional[str] = None
+    product_code: Optional[str] = None
+    heading: Optional[str] = None
+    source_filename: Optional[str] = None
+
+
 class UnitRecord(BaseModel):
     """Normalized per-unit record emitted by the preprocessor."""
 
@@ -66,6 +79,7 @@ class UnitRecord(BaseModel):
     root_cause: Optional[str] = None
     suggested_solution: Optional[str] = None
     redacted_snippet: Optional[str] = None
+    evidence_references: list[EvidenceReference] = Field(default_factory=list)
     analysis_source: Optional[str] = None  # "llm" | "stub" | "cached" | "local-cache" | "playbook"
     analysis_context_source: Optional[str] = None  # "debug_excerpt" | "ftrunner_snippet" | "error_message"
     analysis_cache_key: Optional[str] = None

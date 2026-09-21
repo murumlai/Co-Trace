@@ -58,6 +58,7 @@ export default function TerminalViewer({
   errorCode = null,
   failingStep = null,
   timestamp = null,
+  focusLine = null,
 }) {
   const [query, setQuery] = useState('')
   const [activeMatch, setActiveMatch] = useState(0)
@@ -82,6 +83,13 @@ export default function TerminalViewer({
   useEffect(() => {
     if (currentLine != null) lineRefs.current.get(currentLine)?.scrollIntoView({ block: 'center' })
   }, [currentLine])
+
+  useEffect(() => {
+    if (focusLine != null) {
+      setQuery('')
+      lineRefs.current.get(focusLine)?.scrollIntoView({ block: 'center' })
+    }
+  }, [focusLine, view.lines])
 
   const navigateMatches = (direction) => {
     setActiveMatch((current) => moveMatch(current, direction, view.matchIndexes.length))
@@ -185,7 +193,7 @@ export default function TerminalViewer({
                 }}
                 className={[
                   'flex min-w-0 gap-3 border-l-2 px-2 leading-relaxed',
-                  n === currentLine ? 'border-term-accent bg-term-accent/10' : 'border-transparent',
+                  n === currentLine || n === focusLine ? 'border-term-accent bg-term-accent/10' : 'border-transparent',
                 ].join(' ')}
               >
                 <span className="w-10 shrink-0 select-none text-right text-xs text-term-muted/60">

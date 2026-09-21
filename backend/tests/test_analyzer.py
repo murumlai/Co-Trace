@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import pytest
 
-from app.analyzer import analyze_job, signature_for, build_llm_context, reanalyze_unit
+from app.analyzer import _evidence_references, analyze_job, signature_for, build_llm_context, reanalyze_unit
 from app.job_registry import Job
+from app.knowledge.models import KnowledgeContext, RetrievalMatch
 from app.models import LlmAnalysisResult, UnitRecord
 
 
@@ -116,6 +117,48 @@ class TestBuildLlmContext:
         context, source = build_llm_context(rec)
         assert context == "raw error"
         assert source == "error_message"
+
+
+class TestEvidenceReferences:
+    def test_records_redacted_excerpt_local_bounds(self):
+        rec = _fail_rec("u1")
+
+        references = _evidence_references(
+            rec,
+            "first\nsecond\nthird",
+            "ftrunner_snippet",
+            None,
+        )
+
+        assert len(references) == 1
+        assert references[0].kind == "log_excerpt"
+        assert references[0].line_start == 1
+        assert references[0].line_end == 3
+        assert references[0].source_type == "ftrunner_snippet"
+
+    def test_records_only_matched_sections_actually_selected(self):
+        rec = _fail_rec("u1")
+        rec.product_code = "P1"
+        rec.knowledge_section_ids = ["selected"]
+        knowledge = KnowledgeContext(
+            matched=True,
+            match_status="matched",
+            matched_section_ids=["selected"],
+            matches=[
+                RetrievalMatch(section_id="selected", doc_id="d1", heading="Selected source"),
+                RetrievalMatch(section_id="not-selected", doc_id="d2", heading="Other source"),
+            ],
+        )
+
+        references = _evidence_references(rec, "context", "debug_excerpt", knowledge)
+
+        knowledge_refs = [reference for reference in references if reference.kind == "knowledge_section"]
+        assert [reference.section_id for reference in knowledge_refs] == ["selected"]
+        assert knowledge_refs[0].label == "Selected source"
+        assert knowledge_refs[0].product_code == "P1"
+
+    def test_empty_context_and_no_knowledge_produce_no_references(self):
+        assert _evidence_references(_fail_rec("u1"), "", "error_message", None) == []
 
 
 # ---------------------------------------------------------------------------

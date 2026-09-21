@@ -224,6 +224,40 @@ flowchart LR
 - All collection and detail routes use the existing authenticated owner ID checks. Old job-state
     files load with unavailable optional metadata rather than fabricated values.
 
+## Approved Deterministic Evidence Provenance Extension
+
+`UnitRecord` currently stores the selected redacted context and retrieved knowledge section IDs,
+but it does not preserve a typed source-reference contract. The UI therefore cannot validate
+section availability or navigate to stable excerpt-local lines without inferring provenance from
+display text. The approved extension records only deterministic sources actually supplied to the
+analysis; it does not alter prompts or claim that a source proves a generated statement.
+
+```mermaid
+flowchart LR
+        Analyzer[Analyzer deterministic context selection]
+        Refs[EvidenceReference list<br/>attempt + excerpt lines + section IDs]
+        Job[(existing job_state.json)]
+        Units[Owned units API]
+        Engineer[Engineer supporting sources]
+        Knowledge[Authorized knowledge section lookup]
+
+        Analyzer -->|records sources actually supplied| Refs
+        Refs --> Job
+        Job --> Units
+        Units --> Engineer
+        Engineer -->|validate section still exists| Knowledge
+        Engineer -->|jump to local excerpt line| Engineer
+```
+
+- Log references use redacted excerpt-local line numbers only. They never claim original source
+    file line precision.
+- Knowledge references include only section IDs returned by retrieval and supplied to analysis.
+- The UI labels these references `Sources provided to analysis`, not citations or proof.
+- Removed/rebuilt sections and invalid excerpt bounds render as unavailable. Existing jobs and
+    cached diagnoses without references remain compatible.
+- Claim-level source mappings require a separate prompt/provider contract and are not part of
+    this extension.
+
 ## Analysis Request Flow
 
 ```mermaid
