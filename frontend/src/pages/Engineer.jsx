@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { groupAttempts } from '../unitAttempts'
+import { DEFAULT_ENGINEER_VIEW_STATE } from '../workspaceState'
 import {
   Badge,
   Button,
@@ -113,8 +114,9 @@ const compareGroups = (sortBy) => (left, right) => {
   )
 }
 
-export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewKnowledge }) {
+export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewKnowledge, initialViewState, onViewStateChange }) {
   const { isAdmin } = useAuth()
+  const initialView = { ...DEFAULT_ENGINEER_VIEW_STATE, ...(initialViewState || {}) }
   const [units, setUnits] = useState([])
   const [clusters, setClusters] = useState([])
   const [feedbackEntries, setFeedbackEntries] = useState([])
@@ -126,15 +128,19 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
   const [unitsReload, setUnitsReload] = useState(0)
   const [clustersReload, setClustersReload] = useState(0)
   const [feedbackReload, setFeedbackReload] = useState(0)
-  const [filter, setFilter] = useState('all')
-  const [quickFilter, setQuickFilter] = useState('all')
-  const [serialFilter, setSerialFilter] = useState('all')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [sortBy, setSortBy] = useState('latest_failure')
-  const [activeSignature, setActiveSignature] = useState(null)
+  const [filter, setFilter] = useState(initialView.filter)
+  const [quickFilter, setQuickFilter] = useState(
+    initialView.serialFilter !== 'all'
+      ? `serial:${initialView.serialFilter}`
+      : initialView.filter === 'all' ? 'all' : `class:${initialView.filter}`,
+  )
+  const [serialFilter, setSerialFilter] = useState(initialView.serialFilter)
+  const [searchQuery, setSearchQuery] = useState(initialView.searchQuery)
+  const [sortBy, setSortBy] = useState(initialView.sortBy)
+  const [activeSignature, setActiveSignature] = useState(initialView.activeSignature)
   const [page, setPage] = useState(1)
-  const [view, setView] = useState('table')
-  const [expanded, setExpanded] = useState(null)
+  const [view, setView] = useState(initialView.view)
+  const [expanded, setExpanded] = useState(initialView.expanded)
   const [reanalyzing, setReanalyzing] = useState(null)
   const [clearingCache, setClearingCache] = useState(null)
   const [clearingAll, setClearingAll] = useState(false)
@@ -150,7 +156,6 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
     let active = true
     setLoading(true)
     setUnitsError('')
-    setActiveSignature(null)
     api.units(jobId).then(
       (unitData) => {
         if (!active) return
@@ -208,6 +213,35 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
       active = false
     }
   }, [feedbackReload, jobId])
+
+  useEffect(() => {
+    if (!initialViewState) return
+    const next = { ...DEFAULT_ENGINEER_VIEW_STATE, ...initialViewState }
+    setFilter(next.filter)
+    setSerialFilter(next.serialFilter)
+    setSearchQuery(next.searchQuery)
+    setSortBy(next.sortBy)
+    setActiveSignature(next.activeSignature)
+    setView(next.view)
+    setExpanded(next.expanded)
+    setQuickFilter(
+      next.serialFilter !== 'all'
+        ? `serial:${next.serialFilter}`
+        : next.filter === 'all' ? 'all' : `class:${next.filter}`,
+    )
+  }, [initialViewState])
+
+  useEffect(() => {
+    onViewStateChange?.({
+      filter,
+      serialFilter,
+      searchQuery,
+      sortBy,
+      activeSignature,
+      view,
+      expanded,
+    })
+  }, [activeSignature, expanded, filter, onViewStateChange, searchQuery, serialFilter, sortBy, view])
 
   useEffect(() => {
     if (drillDown?.signature) setActiveSignature(drillDown.signature)

@@ -9,6 +9,13 @@ import Knowledge from './pages/Knowledge'
 import About from './pages/About'
 import { debugLog, log } from './logger'
 import { monitorJob } from './jobMonitoring'
+import {
+  clearWorkspaceState,
+  DEFAULT_ENGINEER_VIEW_STATE,
+  loadWorkspaceState,
+  saveWorkspaceState,
+  workspaceSearch,
+} from './workspaceState'
 
 const TABS = [
   ['home', 'Home'],
@@ -27,11 +34,16 @@ function Shell() {
   const [theme, setTheme] = useState(() => localStorage.getItem('cotrace-theme') || 'light')
   const [tab, setTab] = useState('home')
   const [jobId, setJobId] = useState(null)
+  const [restoreCandidateId, setRestoreCandidateId] = useState(null)
+  const [workspaceReady, setWorkspaceReady] = useState(false)
+  const [restoringWorkspace, setRestoringWorkspace] = useState(false)
+  const [workspaceError, setWorkspaceError] = useState('')
   const [activeJobId, setActiveJobId] = useState(null)
   const [batchRunning, setBatchRunning] = useState(false)
   const [batchProgress, setBatchProgress] = useState(null)
   const [batchError, setBatchError] = useState('')
   const [engineerDrillDown, setEngineerDrillDown] = useState(null)
+  const [engineerViewState, setEngineerViewState] = useState({ ...DEFAULT_ENGINEER_VIEW_STATE })
   const [knowledgeReview, setKnowledgeReview] = useState(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [warnings, setWarnings] = useState([])
@@ -39,6 +51,7 @@ function Shell() {
   const [selectedFiles, setSelectedFiles] = useState([])
   const runToken = useRef(0)
   const uploadAbort = useRef(null)
+  const workspaceOwner = useRef(null)
 
   useEffect(() => {
     const root = document.documentElement
@@ -47,7 +60,55 @@ function Shell() {
     localStorage.setItem('cotrace-theme', theme)
   }, [theme])
 
-  if (checking) {
+  useEffect(() => {
+    if (checking) return
+    if (!isAuthed || !username) {
+      workspaceOwner.current = null
+      setWorkspaceReady(true)
+      return
+    }
+    if (workspaceOwner.current === username) return
+    workspaceOwner.current = username
+    const restored = loadWorkspaceState(sessionStorage, username, window.location.search)
+    setTab(restored.tab)
+    setEngineerViewState(restored.engineer)
+    setEngineerDrillDown(restored.drillDown)
+    setRestoreCandidateId(restored.jobId)
+    setWorkspaceReady(true)
+    if (restored.jobId) restoreWorkspaceJob(restored.jobId)
+  }, [checking, isAuthed, username])
+
+  useEffect(() => {
+    if (!workspaceReady || !isAuthed || !username || restoringWorkspace) return
+    const workspace = {
+      tab,
+      jobId: jobId || restoreCandidateId,
+      engineer: engineerViewState,
+      drillDown: engineerDrillDown,
+    }
+    saveWorkspaceState(sessionStorage, username, workspace)
+    const search = workspaceSearch(workspace, window.location.search)
+    window.history.replaceState(null, '', `${window.location.pathname}${search}${window.location.hash}`)
+  }, [engineerDrillDown, engineerViewState, isAuthed, jobId, restoreCandidateId, restoringWorkspace, tab, username, workspaceReady])
+
+  useEffect(() => {
+    if (!workspaceReady || !isAuthed || !username) return undefined
+    const onPopState = () => {
+      const restored = loadWorkspaceState(sessionStorage, username, window.location.search)
+      setTab(restored.tab)
+      setEngineerViewState((current) => ({ ...current, ...restored.engineer }))
+      setEngineerDrillDown(restored.drillDown)
+      const currentJobId = jobId || restoreCandidateId
+      if (restored.jobId && restored.jobId !== currentJobId) {
+        setRestoreCandidateId(restored.jobId)
+        restoreWorkspaceJob(restored.jobId)
+      }
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [isAuthed, jobId, restoreCandidateId, username, workspaceReady])
+
+  if (checking || (isAuthed && !workspaceReady)) {
     return (
       <div className="min-h-screen flex items-center justify-center px-6 py-16 text-muted">
         Checking session…
@@ -61,7 +122,11 @@ function Shell() {
 
   const onJobReady = (id, jobWarnings = []) => {
     setJobId(id)
+    setActiveJobId(null)
+    setRestoreCandidateId(null)
+    setWorkspaceError('')
     setEngineerDrillDown(null)
+    setEngineerViewState({ ...DEFAULT_ENGINEER_VIEW_STATE })
     setWarnings(jobWarnings)
     setTab('engineer')
     log('info', 'Job ready', { jobId: id, warningCount: jobWarnings.length })
@@ -72,6 +137,8 @@ function Shell() {
     runToken.current = token
     setBatchRunning(true)
     setBatchError('')
+    setWorkspaceError('')
+    setRestoreCandidateId(null)
     setWarnings([])
     setLlmMetrics(null)
     setActiveJobId(null)
@@ -113,7 +180,7 @@ function Shell() {
     }
   }
 
-  const pollBatch = async (id, token) => {
+  async function pollBatch(id, token, openResults = true) {
     const result = await monitorJob({
       jobId: id,
       getStatus: api.status,
@@ -140,7 +207,14 @@ function Shell() {
     if (result.kind === 'stale') return
     setBatchRunning(false)
     if (result.kind === 'done') {
-      onJobReady(id, result.status.warnings || [])
+      if (openResults) {
+        onJobReady(id, result.status.warnings || [])
+      } else {
+        setJobId(id)
+        setActiveJobId(null)
+        setRestoreCandidateId(null)
+        setWarnings(result.status.warnings || [])
+      }
       return
     }
     if (result.kind === 'error' || result.kind === 'cancelled') {
@@ -155,6 +229,46 @@ function Shell() {
         stage: 'monitoring_error',
         message: 'Status monitoring paused',
       }))
+    }
+  }
+
+  async function restoreWorkspaceJob(id) {
+    const token = runToken.current + 1
+    runToken.current = token
+    setRestoringWorkspace(true)
+    setWorkspaceError('')
+    try {
+      const status = await api.status(id)
+      if (runToken.current !== token) return
+      setBatchProgress({
+        status: status.status,
+        stage: status.progress.stage,
+        processed: status.progress.processed,
+        total: status.progress.total,
+        message: status.message,
+        elapsed_s: status.elapsed_s || 0,
+      })
+      setLlmMetrics(status.llm_metrics || null)
+      if (status.status === 'done') {
+        setJobId(id)
+        setRestoreCandidateId(null)
+        setWarnings(status.warnings || [])
+        return
+      }
+      if (status.status === 'pending' || status.status === 'running') {
+        setActiveJobId(id)
+        setBatchRunning(true)
+        setRestoringWorkspace(false)
+        await pollBatch(id, token, false)
+        return
+      }
+      setWorkspaceError(`Saved batch is ${status.status}. Start a new batch or retry if its state has changed.`)
+    } catch (error) {
+      if (runToken.current !== token) return
+      const prefix = error.status === 404 ? 'Saved batch is no longer available' : 'Could not restore the saved batch'
+      setWorkspaceError(`${prefix}: ${error.message}`)
+    } finally {
+      if (runToken.current === token) setRestoringWorkspace(false)
     }
   }
 
@@ -196,14 +310,51 @@ function Shell() {
 
   const openEngineerDrillDown = (filter) => {
     setEngineerDrillDown(filter)
-    setTab('engineer')
+    navigateToTab('engineer', { drillDown: filter })
     setMenuOpen(false)
   }
 
   const openKnowledgeReview = (filter) => {
     setKnowledgeReview(filter)
-    setTab('knowledge')
+    navigateToTab('knowledge')
     setMenuOpen(false)
+  }
+
+  const workspaceSnapshot = (overrides = {}) => ({
+    tab,
+    jobId: jobId || restoreCandidateId,
+    engineer: engineerViewState,
+    drillDown: engineerDrillDown,
+    ...overrides,
+  })
+
+  const navigateToTab = (nextTab, overrides = {}) => {
+    const workspace = workspaceSnapshot({ tab: nextTab, ...overrides })
+    const search = workspaceSearch(workspace, window.location.search)
+    window.history.pushState(null, '', `${window.location.pathname}${search}${window.location.hash}`)
+    setTab(nextTab)
+  }
+
+  const clearRestoredWorkspace = () => {
+    runToken.current += 1
+    setJobId(null)
+    setActiveJobId(null)
+    setRestoreCandidateId(null)
+    setWorkspaceError('')
+    setBatchRunning(false)
+    setBatchProgress(null)
+    setWarnings([])
+    setEngineerDrillDown(null)
+    setEngineerViewState({ ...DEFAULT_ENGINEER_VIEW_STATE })
+    navigateToTab('home', { jobId: null, drillDown: null, engineer: DEFAULT_ENGINEER_VIEW_STATE })
+  }
+
+  const signOut = async () => {
+    runToken.current += 1
+    clearWorkspaceState(sessionStorage, username)
+    const search = workspaceSearch({}, window.location.search)
+    window.history.replaceState(null, '', `${window.location.pathname}${search}${window.location.hash}`)
+    await logout()
   }
 
   const NavButton = ({ id, label }) => {
@@ -212,7 +363,7 @@ function Shell() {
       <button
         onClick={() => {
           debugLog('Tab changed', { tab: id })
-          setTab(id)
+          navigateToTab(id)
           setMenuOpen(false)
         }}
         aria-current={selected ? 'page' : undefined}
@@ -285,7 +436,7 @@ function Shell() {
               )}
               <span className="text-sm text-muted">{username || 'user'}</span>
               <button
-                onClick={logout}
+                onClick={signOut}
                 className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-muted transition-colors duration-150 hover:bg-surface-2 hover:text-ink focus-ring"
               >
                 Sign out
@@ -316,7 +467,7 @@ function Shell() {
               )}
               <ThemeSwitch className="justify-center" />
               <button
-                onClick={logout}
+                onClick={signOut}
                 className="rounded-lg border border-border bg-surface px-4 py-2.5 text-sm text-muted focus-ring"
               >
                 Sign out ({username || 'user'})
@@ -346,6 +497,25 @@ function Shell() {
             </div>
           </div>
         )}
+
+        {(restoringWorkspace || workspaceError) && (
+          <div className="mx-auto max-w-7xl px-6 py-3">
+            <div role={workspaceError ? 'alert' : 'status'} className="flex flex-wrap items-center justify-between gap-3 rounded-panel border border-warning/30 bg-warning/10 px-4 py-3">
+              <div>
+                <p className="text-sm font-semibold text-warning">
+                  {restoringWorkspace ? 'Restoring saved batch' : 'Saved batch unavailable'}
+                </p>
+                {workspaceError && <p className="mt-0.5 text-xs text-muted">{workspaceError}</p>}
+              </div>
+              {workspaceError && (
+                <div className="flex gap-2">
+                  <button className="rounded-lg px-3 py-1.5 text-sm text-accent hover:bg-accent/10 focus-ring" onClick={() => restoreWorkspaceJob(restoreCandidateId)}>Retry</button>
+                  <button className="rounded-lg px-3 py-1.5 text-sm text-muted hover:bg-surface-2 focus-ring" onClick={clearRestoredWorkspace}>New batch</button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </header>
 
       <main>
@@ -369,6 +539,8 @@ function Shell() {
             drillDown={engineerDrillDown}
             onClearDrillDown={() => setEngineerDrillDown(null)}
             onReviewKnowledge={openKnowledgeReview}
+            initialViewState={engineerViewState}
+            onViewStateChange={setEngineerViewState}
           />
         )}
         {tab === 'manager' && <Manager jobId={jobId} onDrillDown={openEngineerDrillDown} />}

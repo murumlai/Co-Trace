@@ -30,7 +30,9 @@ async function request(path, { method = 'GET', body, headers = {}, signal, authO
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}))
     log('warning', 'API request failed', { path, method, status: res.status, durationMs, detail: detail.detail })
-    throw new Error(detail.detail || `Request failed (${res.status})`)
+    const error = new Error(detail.detail || `Request failed (${res.status})`)
+    error.status = res.status
+    throw error
   }
   if (method !== 'GET') {
     log('info', 'API request completed', { path, method, status: res.status, durationMs })

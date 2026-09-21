@@ -1,0 +1,137 @@
+const TABS = new Set(['home', 'engineer', 'manager', 'knowledge', 'about'])
+const FILTERS = new Set(['all', 'fail', 'retry_pass', 'first_pass', 'unknown'])
+const SORTS = new Set([
+  'latest_failure',
+  'status_priority',
+  'attempt_count',
+  'failure_count',
+  'station',
+  'duration',
+  'knowledge_match',
+])
+const VIEWS = new Set(['table', 'cards'])
+const URL_KEYS = ['job', 'tab', 'unit', 'family', 'drill_signature', 'station', 'host', 'lot']
+
+export const DEFAULT_ENGINEER_VIEW_STATE = Object.freeze({
+  filter: 'all',
+  serialFilter: 'all',
+  searchQuery: '',
+  sortBy: 'latest_failure',
+  activeSignature: null,
+  view: 'table',
+  expanded: null,
+})
+
+const bounded = (value, maxLength = 240) => {
+  if (typeof value !== 'string') return null
+  const clean = value.trim()
+  return clean && clean.length <= maxLength ? clean : null
+}
+
+const allowed = (value, choices, fallback) => choices.has(value) ? value : fallback
+
+function normalizeDrillDown(value) {
+  if (!value || typeof value !== 'object') return null
+  const signature = bounded(value.signature)
+  const stationId = bounded(value.station_id)
+  const host = bounded(value.host)
+  const lotId = bounded(value.lot_id)
+  if (!signature && !stationId && !lotId) return null
+  return {
+    ...(signature ? { signature } : {}),
+    ...(stationId ? { station_id: stationId } : {}),
+    ...(host ? { host } : {}),
+    ...(lotId ? { lot_id: lotId } : {}),
+    label: signature || lotId || [host, stationId].filter(Boolean).join(' / '),
+  }
+}
+
+export function normalizeWorkspaceState(value = {}) {
+  const engineer = value.engineer || {}
+  return {
+    tab: allowed(value.tab, TABS, 'home'),
+    jobId: bounded(value.jobId),
+    engineer: {
+      filter: allowed(engineer.filter, FILTERS, DEFAULT_ENGINEER_VIEW_STATE.filter),
+      serialFilter: bounded(engineer.serialFilter) || DEFAULT_ENGINEER_VIEW_STATE.serialFilter,
+      searchQuery: typeof engineer.searchQuery === 'string' ? engineer.searchQuery : '',
+      sortBy: allowed(engineer.sortBy, SORTS, DEFAULT_ENGINEER_VIEW_STATE.sortBy),
+      activeSignature: bounded(engineer.activeSignature),
+      view: allowed(engineer.view, VIEWS, DEFAULT_ENGINEER_VIEW_STATE.view),
+      expanded: bounded(engineer.expanded),
+    },
+    drillDown: normalizeDrillDown(value.drillDown),
+  }
+}
+
+export function workspaceStorageKey(username) {
+  return `cotrace-workspace:${String(username || '').trim().toLocaleLowerCase()}`
+}
+
+export function loadWorkspaceState(storage, username, search = '') {
+  let saved = {}
+  try {
+    saved = JSON.parse(storage?.getItem(workspaceStorageKey(username)) || '{}')
+  } catch {
+    saved = {}
+  }
+
+  const params = new URLSearchParams(search)
+  const fromUrl = {
+    ...saved,
+    tab: params.get('tab') || saved.tab,
+    jobId: params.get('job') || saved.jobId,
+    engineer: {
+      ...(saved.engineer || {}),
+      expanded: params.get('unit') || saved.engineer?.expanded,
+      activeSignature: params.get('family') || saved.engineer?.activeSignature,
+    },
+    drillDown: params.has('drill_signature') || params.has('station') || params.has('lot')
+      ? {
+          signature: params.get('drill_signature'),
+          station_id: params.get('station'),
+          host: params.get('host'),
+          lot_id: params.get('lot'),
+        }
+      : saved.drillDown,
+  }
+  return normalizeWorkspaceState(fromUrl)
+}
+
+export function saveWorkspaceState(storage, username, value) {
+  const normalized = normalizeWorkspaceState(value)
+  const safeState = {
+    ...normalized,
+    engineer: { ...normalized.engineer, searchQuery: '' },
+  }
+  try {
+    storage?.setItem(workspaceStorageKey(username), JSON.stringify(safeState))
+  } catch {
+    // The workspace remains usable when browser storage is unavailable.
+  }
+  return safeState
+}
+
+export function clearWorkspaceState(storage, username) {
+  try {
+    storage?.removeItem(workspaceStorageKey(username))
+  } catch {
+    // The caller still clears in-memory and URL state.
+  }
+}
+
+export function workspaceSearch(value, currentSearch = '') {
+  const state = normalizeWorkspaceState(value)
+  const params = new URLSearchParams(currentSearch)
+  URL_KEYS.forEach((key) => params.delete(key))
+  if (state.jobId) params.set('job', state.jobId)
+  if (state.tab !== 'home') params.set('tab', state.tab)
+  if (state.engineer.expanded) params.set('unit', state.engineer.expanded)
+  if (state.engineer.activeSignature) params.set('family', state.engineer.activeSignature)
+  if (state.drillDown?.signature) params.set('drill_signature', state.drillDown.signature)
+  if (state.drillDown?.station_id) params.set('station', state.drillDown.station_id)
+  if (state.drillDown?.host) params.set('host', state.drillDown.host)
+  if (state.drillDown?.lot_id) params.set('lot', state.drillDown.lot_id)
+  const query = params.toString()
+  return query ? `?${query}` : ''
+}
