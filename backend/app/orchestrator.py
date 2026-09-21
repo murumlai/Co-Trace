@@ -13,6 +13,8 @@ import logging
 import os
 import re
 import time
+import hashlib
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -273,7 +275,27 @@ def _batch_metadata(
         "observed_start_time": min(timestamps) if timestamps else None,
         "observed_end_time": max(timestamps) if timestamps else None,
         "timestamp_timezone": timezone,
+        "batch_fingerprint": _batch_fingerprint(records),
     })
+
+
+def _batch_fingerprint(records: list[Any]) -> str | None:
+    if not records:
+        return None
+    normalized = sorted((
+        record.serial_number or record.unit_id,
+        record.product_code or "",
+        record.lot_id or "",
+        record.station_id or "",
+        record.host or "",
+        record.start_time or "",
+        record.end_time or "",
+        record.result,
+        record.error_code or "",
+        record.error_message or "",
+    ) for record in records)
+    payload = json.dumps(normalized, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 # Legacy private helper kept for external callers that imported it directly.

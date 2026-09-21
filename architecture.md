@@ -258,6 +258,57 @@ flowchart LR
 - Claim-level source mappings require a separate prompt/provider contract and are not part of
     this extension.
 
+## Approved Owner-Scoped Historical Comparison Extension
+
+Historical deltas cannot be inferred safely from one job. The existing registry already retains
+owned completed job state, so comparisons remain inside that boundary. Completed jobs gain a
+deterministic fingerprint over normalized attempt identity and outcome fields to exclude duplicate
+re-uploads. No new history database is introduced.
+
+```mermaid
+flowchart LR
+        Current[Scoped current batch] --> Compare[Pure comparison service]
+        Registry[Owner-filtered completed jobs] --> Compare
+        Fingerprint[Normalized batch fingerprint] --> Registry
+        Compare --> Result[Baseline ID + sample sizes + percentage-point delta]
+        Target[Optional user-entered target] --> Result
+```
+
+- The baseline is the newest prior owned, completed, non-duplicate job with the same effective
+    product scope and nonempty results under active lot/station filters.
+- Absolute date filters are not replayed against prior batches. Each comparison reports current
+    and baseline observed periods and sample sizes so users can judge comparability.
+- Missing fingerprints and incomparable populations return unavailable rather than a fabricated
+    delta. Percentage changes are reported as percentage points.
+- Targets are optional request/session values with provenance `user_entered`; this extension does
+    not create a shared target store or universal thresholds.
+
+## Approved Owner-Only Investigation Action Extension
+
+Engineer feedback records whether guidance was useful, but it cannot safely represent assignment,
+status transitions, concurrency, or audit history. A separate atomic JSON action store is added
+behind a narrow protocol. It follows the existing feedback/playbook storage pattern and does not
+change job ownership or grant access to an assignee.
+
+```mermaid
+flowchart LR
+        Engineer[Engineer controls] --> API[Owned-job action routes]
+        Manager[Manager queue] --> API
+        API --> Store[ActionStore protocol]
+        Store --> Disk[(investigation_actions.json)]
+        API --> Audit[Versioned transition history]
+```
+
+- Actions belong to an owned job and may target one failed attempt or failure signature. The API
+    validates the target against current job records before writing.
+- Assignment is an informational team/person label, not an authorization grant. Existing owner
+    checks protect every read and mutation.
+- Updates require the current version; stale writes return a conflict and preserve both the action
+    and its audit history. Every transition records actor, timestamp, previous/new status, owner,
+    and next action.
+- Actions expire with the job TTL. Cross-user collaboration or shared queues require separate
+    approval and are outside this extension.
+
 ## Analysis Request Flow
 
 ```mermaid

@@ -308,6 +308,7 @@ class BatchMetadata(BaseModel):
     observed_start_time: Optional[str] = None
     observed_end_time: Optional[str] = None
     timestamp_timezone: Literal["offset", "unspecified", "mixed", "unavailable"] = "unavailable"
+    batch_fingerprint: Optional[str] = None
 
 
 class JobStatus(BaseModel):

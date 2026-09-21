@@ -27,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import aggregator
+from . import aggregator, comparison
 from .auth import AuthenticatedUser, get_auth, require_admin, require_user
 from .config import settings
 from .dependencies import (
@@ -534,6 +534,30 @@ def manager(
         raise HTTPException(400, str(exc)) from exc
     view["batch"] = job.batch.model_dump()
     return view
+
+
+@app.get("/api/jobs/{job_id}/comparison")
+def manager_comparison(
+    job_id: str,
+    product: list[str] = Query(default=[]),
+    lot: list[str] = Query(default=[]),
+    station: list[str] = Query(default=[]),
+    target_metric: str | None = Query(default=None),
+    target_percent: float | None = Query(default=None, ge=0, le=100),
+    user: AuthenticatedUser = Depends(require_user),
+    reg: Any = Depends(get_registry),
+) -> dict:
+    job = _get_owned_job(job_id, user, reg)
+    candidates, _ = reg.list_owned(user.github_id, limit=10000)
+    return comparison.compare_jobs(
+        job,
+        candidates,
+        product_codes=set(product),
+        lot_ids=set(lot),
+        station_keys=set(station),
+        target_metric=target_metric,
+        target_percent=target_percent,
+    )
 
 
 @app.post("/api/logs/frontend")

@@ -280,6 +280,7 @@ class TestJobOwnership:
             ("GET", "/api/jobs/owned-job/debug-packet?unit_id=u1"),
             ("POST", "/api/jobs/owned-job/units/u1/reanalyze"),
             ("GET", "/api/jobs/owned-job/manager"),
+            ("GET", "/api/jobs/owned-job/comparison"),
         ],
     )
     def test_other_user_cannot_access_job_routes(self, client, registry_with_owned_job, method, path):
