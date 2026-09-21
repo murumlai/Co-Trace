@@ -14,6 +14,7 @@ import {
 import { api } from '../api'
 import { Button, Card, IconWell, MetricCard } from '../components/ui'
 import { additionalAttemptMetric, firstObservedPassMetric, formatRate, latestObservedYieldMetric } from '../managerMetrics'
+import { buildManagerCsv, managerReportFilename } from '../managerReport'
 import { DEFAULT_MANAGER_SCOPE } from '../workspaceState'
 
 const AXIS = { fill: 'rgb(var(--color-muted))', fontSize: 12, fontFamily: 'DM Sans' }
@@ -34,7 +35,7 @@ const tooltipStyle = {
 
 function ChartCard({ title, subtitle, children }) {
   return (
-    <Card className="min-w-0 overflow-hidden p-6">
+    <Card className="print-avoid-break min-w-0 overflow-hidden p-6">
       <div className="mb-5">
         <h3 className="font-display font-bold text-ink">{title}</h3>
         {subtitle && <p className="mt-0.5 text-xs text-muted">{subtitle}</p>}
@@ -122,16 +123,36 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
     key,
     direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
   }))
+  const exportCsv = () => {
+    const csv = buildManagerCsv(data)
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = managerReportFilename(batch.display_name)
+    link.click()
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-10">
-      <div className="mb-6">
-        <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">
-          {batch.display_name || 'Manager view'}
-        </h1>
-        <p className="mt-1 text-sm text-muted">
-          Latest unit outcomes and attempt-level results for this uploaded batch.
-        </p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">
+            {batch.display_name || 'Manager view'}
+          </h1>
+          <p className="mt-1 text-sm text-muted">
+            Latest unit outcomes and attempt-level results for this uploaded batch.
+          </p>
+        </div>
+        <div className="no-print flex gap-2">
+          <Button onClick={exportCsv}>Export CSV</Button>
+          <Button variant="primary" onClick={() => window.print()}>Print summary</Button>
+        </div>
+      </div>
+
+      <div className="print-only mb-4 text-xs text-ink">
+        <p>Generated {new Date().toLocaleString()}</p>
+        <p>Measures describe the selected attempts within this uploaded batch. First/latest outcomes are calculated within the active scope.</p>
       </div>
 
       <BatchQualityStatus batch={batch} />
@@ -202,6 +223,28 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
               />
             </LineChart>
           </ResponsiveContainer>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-muted">
+                  <th className="pb-2 font-medium">Date</th>
+                  <th className="pb-2 text-right font-medium">PASS</th>
+                  <th className="pb-2 text-right font-medium">FAIL</th>
+                  <th className="pb-2 text-right font-medium">Pass rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.trend.map((item) => (
+                  <tr key={item.date} className="border-b border-border/60 last:border-0">
+                    <td className="py-2">{item.date}</td>
+                    <td className="py-2 text-right text-teal">{item.pass}</td>
+                    <td className="py-2 text-right text-danger">{item.fail}</td>
+                    <td className="py-2 text-right font-medium">{formatRate(item.yield, item.pass + item.fail)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </ChartCard>
 
         <ChartCard title="Failed-attempt Pareto" subtitle="Failed attempts with cumulative share">
