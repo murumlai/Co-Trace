@@ -34,7 +34,7 @@ const tooltipStyle = {
 
 function ChartCard({ title, subtitle, children }) {
   return (
-    <Card className="p-6">
+    <Card className="min-w-0 overflow-hidden p-6">
       <div className="mb-5">
         <h3 className="font-display font-bold text-ink">{title}</h3>
         {subtitle && <p className="mt-0.5 text-xs text-muted">{subtitle}</p>}
@@ -49,6 +49,7 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [reload, setReload] = useState(0)
+  const [lotSort, setLotSort] = useState({ key: 'yield', direction: 'asc' })
 
   useEffect(() => {
     if (!jobId) {
@@ -108,6 +109,19 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
   const batch = data.batch || {}
   const scoped = data.scope || { options: { products: [], lots: [], stations: [] } }
   const activeScopeCount = scope.products.length + scope.lots.length + scope.stations.length + (scope.startTime ? 1 : 0) + (scope.endTime ? 1 : 0)
+  const sortedLots = (() => {
+    const direction = lotSort.direction === 'asc' ? 1 : -1
+    return [...(data.lots || [])].sort((left, right) => {
+      const result = lotSort.key === 'lot'
+        ? String(left.lot).localeCompare(String(right.lot))
+        : Number(left[lotSort.key] || 0) - Number(right[lotSort.key] || 0)
+      return result * direction
+    })
+  })()
+  const changeLotSort = (key) => setLotSort((current) => ({
+    key,
+    direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
+  }))
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-10">
@@ -218,9 +232,14 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
               />
             </ComposedChart>
           </ResponsiveContainer>
-          <ul className="mt-4 space-y-1.5 text-sm">
-            {data.pareto.slice(0, 5).map((p) => (
-              <li key={p.signature}>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[30rem] text-sm">
+              <thead><tr className="border-b border-border text-left text-muted"><th className="pb-2 font-medium">Rank</th><th className="pb-2 font-medium">Failure family</th><th className="pb-2 text-right font-medium">Attempts</th><th className="pb-2 text-right font-medium">Share</th><th className="pb-2 text-right font-medium">Cumulative</th></tr></thead>
+              <tbody>
+            {data.pareto.map((p, index) => (
+              <tr key={p.signature} className="border-b border-border/60 last:border-0">
+                <td className="py-2 text-muted">{index + 1}</td>
+                <td className="py-2">
                 <button
                   type="button"
                   onClick={() => onDrillDown({
@@ -229,16 +248,23 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
                     attempt_ids: p.attempt_ids || [],
                     unit_ids: p.unit_ids || [],
                   })}
-                  className="flex w-full justify-between gap-4 rounded-md px-1 py-1 text-left hover:bg-surface-2 focus-ring"
+                  className="max-w-[22rem] truncate rounded-md px-1 py-1 text-left text-ink-2 hover:bg-surface-2 focus-ring"
+                  title={p.reason}
                 >
-                <span className="truncate text-ink-2">{p.reason}</span>
-                <span className="shrink-0 text-muted">
-                  {p.count} · <span className="text-ink font-medium">{p.pct}%</span>
-                </span>
+                  {p.reason}
                 </button>
-              </li>
+                </td>
+                <td className="py-2 text-right">{p.count}</td>
+                <td className="py-2 text-right">{p.pct}%</td>
+                <td className="py-2 text-right">{p.cum_pct}%</td>
+              </tr>
             ))}
-          </ul>
+              </tbody>
+            </table>
+          </div>
+          {data.pareto.length > 0 && (
+            <p className="mt-3 text-xs text-muted">Showing up to the top 10 failure families. Shares use all failed attempts in scope; visible cumulative share may be below 100%.</p>
+          )}
         </ChartCard>
 
         <ChartCard title="Station / tester attempts" subtitle="PASS vs FAIL attempts per station">
@@ -252,9 +278,13 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
               <Bar dataKey="fail" name="Fail" stackId="a" fill={DANGER} radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
-          <ul className="mt-4 space-y-1.5 text-sm">
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[28rem] text-sm">
+              <thead><tr className="border-b border-border text-left text-muted"><th className="pb-2 font-medium">Station / tester</th><th className="pb-2 text-right font-medium">Volume</th><th className="pb-2 text-right font-medium">PASS</th><th className="pb-2 text-right font-medium">FAIL</th><th className="pb-2 text-right font-medium">Failure rate</th></tr></thead>
+              <tbody>
             {data.stations.map((station) => (
-              <li key={`${station.host || ''}:${station.station_id || ''}`}>
+              <tr key={`${station.host || ''}:${station.station_id || ''}`} className="border-b border-border/60 last:border-0">
+                <td className="py-2">
                 <button
                   type="button"
                   onClick={() => onDrillDown({
@@ -264,14 +294,21 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
                     attempt_ids: station.attempt_ids || [],
                     unit_ids: station.unit_ids || [],
                   })}
-                  className="flex w-full justify-between gap-4 rounded-md px-1 py-1 text-left hover:bg-surface-2 focus-ring"
+                  className="max-w-64 truncate rounded-md px-1 py-1 text-left text-ink-2 hover:bg-surface-2 focus-ring"
+                  title={station.station}
                 >
-                  <span className="truncate text-ink-2">{station.station}</span>
-                  <span className="shrink-0 text-muted">{station.fail} failed attempts</span>
+                  {station.station}
                 </button>
-              </li>
+                </td>
+                <td className="py-2 text-right">{station.total}</td>
+                <td className="py-2 text-right text-teal">{station.pass}</td>
+                <td className="py-2 text-right text-danger">{station.fail}</td>
+                <td className="py-2 text-right font-medium">{formatRate(station.total ? (station.fail / station.total) * 100 : 0, station.total)}</td>
+              </tr>
             ))}
-          </ul>
+              </tbody>
+            </table>
+          </div>
         </ChartCard>
 
         <ChartCard title="Lot-to-lot attempt comparison" subtitle="Attempt pass rate by lot">
@@ -279,14 +316,14 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-muted text-left border-b border-border">
-                  <th className="pb-2 font-medium">Lot</th>
+                  <th className="pb-2 font-medium"><SortButton label="Lot" column="lot" sort={lotSort} onChange={changeLotSort} /></th>
                   <th className="pb-2 font-medium text-right">PASS attempts</th>
-                  <th className="pb-2 font-medium text-right">FAIL attempts</th>
-                  <th className="pb-2 font-medium text-right">Pass rate</th>
+                  <th className="pb-2 font-medium text-right"><SortButton label="FAIL attempts" column="fail" sort={lotSort} onChange={changeLotSort} /></th>
+                  <th className="pb-2 font-medium text-right"><SortButton label="Pass rate" column="yield" sort={lotSort} onChange={changeLotSort} /></th>
                 </tr>
               </thead>
               <tbody>
-                {data.lots.map((l) => (
+                {sortedLots.map((l) => (
                   <tr
                     key={l.lot}
                     className="cursor-pointer text-ink border-b border-border/60 last:border-0 hover:bg-surface-2"
@@ -323,6 +360,15 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
       </>
       )}
     </div>
+  )
+}
+
+function SortButton({ label, column, sort, onChange }) {
+  const active = sort.key === column
+  return (
+    <button type="button" onClick={() => onChange(column)} className="rounded px-1 py-0.5 hover:bg-surface-2 focus-ring" aria-label={`Sort by ${label}`}>
+      {label}{active ? (sort.direction === 'asc' ? ' ↑' : ' ↓') : ''}
+    </button>
   )
 }
 
