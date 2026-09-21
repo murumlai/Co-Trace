@@ -12,7 +12,7 @@ import {
   YAxis,
 } from 'recharts'
 import { api } from '../api'
-import { Button, Card, IconWell, MetricCard } from '../components/ui'
+import { Badge, Button, Card, IconWell, MetricCard } from '../components/ui'
 import { additionalAttemptMetric, firstObservedPassMetric, formatRate, latestObservedYieldMetric } from '../managerMetrics'
 import { buildManagerCsv, managerReportFilename } from '../managerReport'
 import { DEFAULT_MANAGER_SCOPE } from '../workspaceState'
@@ -54,6 +54,10 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
   const [comparison, setComparison] = useState(null)
   const [comparisonLoading, setComparisonLoading] = useState(false)
   const [comparisonError, setComparisonError] = useState('')
+  const [actions, setActions] = useState([])
+  const [actionsError, setActionsError] = useState('')
+  const [actionBusy, setActionBusy] = useState(null)
+  const [actionsReload, setActionsReload] = useState(0)
   const scopeKey = JSON.stringify({
     products: scope.products,
     lots: scope.lots,
@@ -112,6 +116,23 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
     }
   }, [comparisonKey, jobId])
 
+  useEffect(() => {
+    if (!jobId) return undefined
+    let active = true
+    setActionsError('')
+    api.actions(jobId).then(
+      (result) => {
+        if (active) setActions(result.entries || [])
+      },
+      (requestError) => {
+        if (active) setActionsError(requestError.message)
+      },
+    )
+    return () => {
+      active = false
+    }
+  }, [actionsReload, jobId])
+
   if (!jobId) return <EmptyState />
   if (loading && !data)
     return (
@@ -161,13 +182,29 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
     direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
   }))
   const exportCsv = () => {
-    const csv = buildManagerCsv(data, comparison)
+    const csv = buildManagerCsv(data, comparison, undefined, actions)
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
     const link = document.createElement('a')
     link.href = url
     link.download = managerReportFilename(batch.display_name)
     link.click()
     URL.revokeObjectURL(url)
+  }
+  const updateActionStatus = async (entry, status) => {
+    setActionBusy(entry.action_id)
+    setActionsError('')
+    try {
+      const updated = await api.updateAction(jobId, entry.action_id, {
+        expected_version: entry.version,
+        status,
+      })
+      setActions((current) => current.map((item) => item.action_id === updated.action_id ? updated : item))
+    } catch (requestError) {
+      if (requestError.status === 409) setActionsReload((value) => value + 1)
+      setActionsError(requestError.message)
+    } finally {
+      setActionBusy(null)
+    }
   }
 
   return (
@@ -207,6 +244,19 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
         targetMetric={scope.targetMetric}
         targetPercent={scope.targetPercent}
         onTargetChange={(update) => onScopeChange?.({ ...scope, ...update })}
+      />
+      <ActionQueue
+        entries={actions}
+        error={actionsError}
+        busy={actionBusy}
+        onRetry={() => setActionsReload((value) => value + 1)}
+        onStatusChange={updateActionStatus}
+        onOpen={(entry) => onDrillDown({
+          signature: entry.signature || null,
+          label: entry.error_code || entry.next_action,
+          attempt_ids: entry.unit_id ? [entry.unit_id] : [],
+          unit_ids: [],
+        })}
       />
 
       {loading && <p role="status" className="mb-4 text-sm text-muted">Updating selected scope…</p>}
@@ -512,6 +562,40 @@ function ComparisonMetric({ label, metric }) {
       <p className={`mt-1 text-2xl font-bold ${metric.delta_pp >= 0 ? 'text-teal' : 'text-danger'}`}>{formatDelta(metric.delta_pp)} pp</p>
       <p className="mt-1 text-xs text-muted">{metric.current}% ({metric.current_denominator}) vs {metric.baseline}% ({metric.baseline_denominator})</p>
     </div>
+  )
+}
+
+function ActionQueue({ entries, error, busy, onRetry, onStatusChange, onOpen }) {
+  const active = entries.filter((entry) => entry.status !== 'resolved')
+  return (
+    <section className="print-avoid-break mb-6" aria-labelledby="action-queue-heading">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <h2 id="action-queue-heading" className="font-display text-sm font-bold text-ink">Investigation actions</h2>
+          <p className="text-xs text-muted">Owner-only workflow state; assignee labels do not grant access.</p>
+        </div>
+        <Badge tone={active.length ? 'warn' : 'pass'}>{active.length} active</Badge>
+      </div>
+      {error && <div role="alert" className="mb-2 flex items-center justify-between rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"><span>{error}</span><Button variant="ghost" className="px-2 py-1" onClick={onRetry}>Retry</Button></div>}
+      {entries.length === 0 ? (
+        <p className="rounded-lg border border-border bg-surface px-4 py-3 text-sm text-muted">No investigation actions for this batch.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-border bg-surface">
+          <table className="w-full min-w-[44rem] text-sm">
+            <thead><tr className="border-b border-border bg-surface-2 text-left text-muted"><th className="px-3 py-2 font-medium">Failure</th><th className="px-3 py-2 font-medium">Next action</th><th className="px-3 py-2 font-medium">Owner</th><th className="px-3 py-2 font-medium">Status</th><th className="px-3 py-2 font-medium">Updated</th></tr></thead>
+            <tbody>{entries.map((entry) => (
+              <tr key={entry.action_id} className="border-b border-border/60 last:border-0">
+                <td className="px-3 py-2"><button type="button" onClick={() => onOpen(entry)} className="text-accent hover:underline focus-ring">{entry.error_code || entry.signature || entry.unit_id}</button></td>
+                <td className="max-w-72 px-3 py-2"><span className="block truncate" title={entry.next_action}>{entry.next_action}</span></td>
+                <td className="px-3 py-2">{entry.assignee || 'Unassigned'}</td>
+                <td className="px-3 py-2"><select value={entry.status} disabled={busy === entry.action_id} onChange={(event) => onStatusChange(entry, event.target.value)} aria-label={`Status for ${entry.error_code || entry.action_id}`} className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-ink focus-ring"><option value="open">Open</option><option value="in_progress">In progress</option><option value="blocked">Blocked</option><option value="resolved">Resolved</option></select></td>
+                <td className="px-3 py-2 text-xs text-muted">{new Date(entry.updated_at).toLocaleString()}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+    </section>
   )
 }
 

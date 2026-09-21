@@ -125,14 +125,17 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
   const [units, setUnits] = useState([])
   const [clusters, setClusters] = useState([])
   const [feedbackEntries, setFeedbackEntries] = useState([])
+  const [investigationActions, setInvestigationActions] = useState([])
   const [runCount, setRunCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [unitsError, setUnitsError] = useState('')
   const [clustersError, setClustersError] = useState('')
   const [feedbackError, setFeedbackError] = useState('')
+  const [actionsError, setActionsError] = useState('')
   const [unitsReload, setUnitsReload] = useState(0)
   const [clustersReload, setClustersReload] = useState(0)
   const [feedbackReload, setFeedbackReload] = useState(0)
+  const [actionsReload, setActionsReload] = useState(0)
   const [filter, setFilter] = useState(initialView.filter)
   const [quickFilter, setQuickFilter] = useState(
     initialView.serialFilter !== 'all'
@@ -152,6 +155,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
   const [clearingAll, setClearingAll] = useState(false)
   const [exporting, setExporting] = useState(null)
   const [feedbackBusy, setFeedbackBusy] = useState(null)
+  const [investigationActionBusy, setInvestigationActionBusy] = useState(null)
   const [actionError, setActionError] = useState('')
 
   useEffect(() => {
@@ -219,6 +223,23 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
       active = false
     }
   }, [feedbackReload, jobId])
+
+  useEffect(() => {
+    if (!jobId) return undefined
+    let active = true
+    setActionsError('')
+    api.actions(jobId).then(
+      (data) => {
+        if (active) setInvestigationActions(data.entries || [])
+      },
+      (error) => {
+        if (active) setActionsError(error.message)
+      },
+    )
+    return () => {
+      active = false
+    }
+  }, [actionsReload, jobId])
 
   useEffect(() => {
     if (!initialViewState) return
@@ -342,14 +363,19 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
     () => new Set(drillDown?.unit_ids || []),
     [drillDown?.unit_ids],
   )
+  const drillDownAttemptIds = useMemo(
+    () => new Set(drillDown?.attempt_ids || []),
+    [drillDown?.attempt_ids],
+  )
 
   const shown = useMemo(
     () =>
       units
         .filter((unit) => {
           const serial = unit.serial_number || unit.unit_id
-          const hasExactScope = drillDownUnitIds.size > 0
-          const matchesExactScope = !hasExactScope || drillDownUnitIds.has(serial)
+          const hasExactScope = drillDownUnitIds.size > 0 || drillDownAttemptIds.size > 0
+          const matchesExactScope = !hasExactScope || drillDownUnitIds.has(serial) ||
+            groupAttempts(unit).some((attempt) => drillDownAttemptIds.has(attempt.unit_id))
           const matchesClass = filter === 'all' || unit.classification === filter
           const matchesSerial = serialFilter === 'all' || serial === serialFilter
           const matchesSignature =
@@ -379,7 +405,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
           )
         })
         .sort(compareGroups(sortBy)),
-    [activeSignature, drillDown, drillDownUnitIds, filter, searchQuery, serialFilter, sortBy, units],
+    [activeSignature, drillDown, drillDownAttemptIds, drillDownUnitIds, filter, searchQuery, serialFilter, sortBy, units],
   )
   const pageSize = view === 'cards' ? LARGE_CARD_PAGE_SIZE : LARGE_TABLE_PAGE_SIZE
   const pageCount = shown.length > LARGE_BATCH_THRESHOLD ? Math.ceil(shown.length / pageSize) : 1
@@ -397,9 +423,15 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
   const drillDownStats = useMemo(() => {
     if (!drillDown) return null
     if (drillDown.attempt_ids?.length || drillDown.unit_ids?.length) {
+      const exactAttempts = new Set(drillDown.attempt_ids || [])
+      const exactUnits = new Set(drillDown.unit_ids || [])
+      const matchingUnitCount = units.filter((unit) => {
+        const serial = unit.serial_number || unit.unit_id
+        return exactUnits.has(serial) || groupAttempts(unit).some((attempt) => exactAttempts.has(attempt.unit_id))
+      }).length
       return {
         attempts: drillDown.attempt_ids?.length || 0,
-        units: drillDown.unit_ids?.length || 0,
+        units: exactUnits.size || matchingUnitCount,
         exact: true,
       }
     }
@@ -533,6 +565,45 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
     }
   }
 
+  const createInvestigationAction = async (attempt, values) => {
+    setInvestigationActionBusy(attempt.unit_id)
+    setActionError('')
+    try {
+      const created = await api.createAction(jobId, {
+        unit_id: attempt.unit_id,
+        assignee: values.assignee || null,
+        next_action: values.nextAction,
+        status: values.status,
+      })
+      setInvestigationActions((current) => [...current, created])
+    } catch (error) {
+      setActionError(error.message)
+      throw error
+    } finally {
+      setInvestigationActionBusy(null)
+    }
+  }
+
+  const updateInvestigationAction = async (entry, values) => {
+    setInvestigationActionBusy(entry.action_id)
+    setActionError('')
+    try {
+      const updated = await api.updateAction(jobId, entry.action_id, {
+        expected_version: entry.version,
+        assignee: values.assignee || null,
+        next_action: values.nextAction,
+        status: values.status,
+      })
+      setInvestigationActions((current) => current.map((item) => item.action_id === updated.action_id ? updated : item))
+    } catch (error) {
+      if (error.status === 409) setActionsReload((value) => value + 1)
+      setActionError(error.message)
+      throw error
+    } finally {
+      setInvestigationActionBusy(null)
+    }
+  }
+
   if (!jobId) return <EmptyState />
 
   const detailProps = {
@@ -551,6 +622,10 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
     visibleColumns,
     feedbackDrafts,
     onFeedbackDraftChange: (attemptId, value) => onFeedbackDraftsChange?.((current) => ({ ...current, [attemptId]: value })),
+    investigationActions,
+    investigationActionBusy,
+    onCreateInvestigationAction: createInvestigationAction,
+    onUpdateInvestigationAction: updateInvestigationAction,
   }
 
   const selectUnitAt = (index) => {
@@ -596,6 +671,14 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
           title="Engineer feedback unavailable"
           message={feedbackError}
           onRetry={() => setFeedbackReload((value) => value + 1)}
+        />
+      )}
+
+      {actionsError && (
+        <ResourceNotice
+          title="Investigation actions unavailable"
+          message={actionsError}
+          onRetry={() => setActionsReload((value) => value + 1)}
         />
       )}
 
@@ -1025,7 +1108,7 @@ function InspectionWorkspace({ units, selected, selectedIndex, total, onSelect, 
 }
 
 
-function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, visibleColumns, feedbackDrafts, onFeedbackDraftChange }) {
+function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, visibleColumns, feedbackDrafts, onFeedbackDraftChange, investigationActions, investigationActionBusy, onCreateInvestigationAction, onUpdateInvestigationAction }) {
   const columnCount = 6 + visibleColumns.length
   return (
     <TableShell tableClassName="min-w-[1100px] table-fixed">
@@ -1107,6 +1190,10 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                         onFeedback={onFeedback}
                         feedbackDrafts={feedbackDrafts}
                         onFeedbackDraftChange={onFeedbackDraftChange}
+                        investigationActions={investigationActions}
+                        investigationActionBusy={investigationActionBusy}
+                        onCreateInvestigationAction={onCreateInvestigationAction}
+                        onUpdateInvestigationAction={onUpdateInvestigationAction}
                       />
                     </div>
                   </td>
@@ -1120,7 +1207,7 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
   )
 }
 
-function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, feedbackDrafts, onFeedbackDraftChange }) {
+function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, feedbackDrafts, onFeedbackDraftChange, investigationActions, investigationActionBusy, onCreateInvestigationAction, onUpdateInvestigationAction }) {
   return (
     <div className="space-y-4">
       {units.map((u) => {
@@ -1177,6 +1264,10 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                   onFeedback={onFeedback}
                   feedbackDrafts={feedbackDrafts}
                   onFeedbackDraftChange={onFeedbackDraftChange}
+                  investigationActions={investigationActions}
+                  investigationActionBusy={investigationActionBusy}
+                  onCreateInvestigationAction={onCreateInvestigationAction}
+                  onUpdateInvestigationAction={onUpdateInvestigationAction}
                 />
               </div>
             )}
@@ -1187,7 +1278,7 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
   )
 }
 
-function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, feedbackDrafts = {}, onFeedbackDraftChange }) {
+function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, feedbackDrafts = {}, onFeedbackDraftChange, investigationActions = [], investigationActionBusy, onCreateInvestigationAction, onUpdateInvestigationAction }) {
   const passedAfter =
     u.classification === 'retry_pass'
       ? `Passed after ${u.failure_count} failed attempt${u.failure_count === 1 ? '' : 's'}.`
@@ -1221,6 +1312,10 @@ function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearing
           onFeedback={onFeedback}
           feedbackDraft={feedbackDrafts[attempt.unit_id] || ''}
           onFeedbackDraftChange={(value) => onFeedbackDraftChange?.(attempt.unit_id, value)}
+          investigationAction={investigationActions.find((entry) => entry.unit_id === attempt.unit_id) || null}
+          investigationActionBusy={investigationActionBusy}
+          onCreateInvestigationAction={onCreateInvestigationAction}
+          onUpdateInvestigationAction={onUpdateInvestigationAction}
         />
       ))}
     </div>
@@ -1509,7 +1604,7 @@ function PlaybookNotice({ attempt, onReviewKnowledge }) {
   )
 }
 
-function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, feedbackDraft, onFeedbackDraftChange }) {
+function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, feedbackDraft, onFeedbackDraftChange, investigationAction, investigationActionBusy, onCreateInvestigationAction, onUpdateInvestigationAction }) {
   const [focusLine, setFocusLine] = useState(null)
   const canClearCache =
     !!onClearCache &&
@@ -1582,6 +1677,14 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
         onSubmit={onFeedback}
         note={feedbackDraft}
         onNoteChange={onFeedbackDraftChange}
+      />
+
+      <InvestigationActionControls
+        attempt={attempt}
+        entry={investigationAction}
+        busy={investigationActionBusy}
+        onCreate={onCreateInvestigationAction}
+        onUpdate={onUpdateInvestigationAction}
       />
 
       <div className="mt-4 flex flex-wrap gap-3">
@@ -1681,6 +1784,66 @@ function FeedbackControls({ attempt, entries, busy, onSubmit, note, onNoteChange
         ))}
       </div>
     </div>
+  )
+}
+
+const ACTION_STATUSES = [
+  ['open', 'Open'],
+  ['in_progress', 'In progress'],
+  ['blocked', 'Blocked'],
+  ['resolved', 'Resolved'],
+]
+
+function InvestigationActionControls({ attempt, entry, busy, onCreate, onUpdate }) {
+  const [assignee, setAssignee] = useState(entry?.assignee || '')
+  const [nextAction, setNextAction] = useState(entry?.next_action || attempt.next_debug_action || '')
+  const [status, setStatus] = useState(entry?.status || 'open')
+
+  useEffect(() => {
+    setAssignee(entry?.assignee || '')
+    setNextAction(entry?.next_action || attempt.next_debug_action || '')
+    setStatus(entry?.status || 'open')
+  }, [attempt.next_debug_action, entry])
+
+  const save = async () => {
+    const values = { assignee, nextAction, status }
+    try {
+      if (entry) await onUpdate(entry, values)
+      else await onCreate(attempt, values)
+    } catch {
+      // The page-level action error carries API and conflict details.
+    }
+  }
+  const saving = busy === (entry?.action_id || attempt.unit_id)
+
+  return (
+    <section className="mb-4 border-y border-border/60 py-3" aria-label="Investigation action">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-muted">Investigation action</p>
+          <p className="text-xs text-muted">Assignment is informational and does not grant access.</p>
+        </div>
+        {entry && <Badge tone={status === 'resolved' ? 'pass' : status === 'blocked' ? 'warn' : 'accent'}>v{entry.version} · {ACTION_STATUSES.find(([value]) => value === status)?.[1]}</Badge>}
+      </div>
+      <div className="grid gap-2 sm:grid-cols-[10rem_minmax(0,1fr)_9rem_auto]">
+        <Input value={assignee} maxLength={120} onChange={(event) => setAssignee(event.target.value)} placeholder="Team or owner" aria-label="Action assignee" />
+        <Input value={nextAction} maxLength={2000} onChange={(event) => setNextAction(event.target.value)} placeholder="Verified next action" aria-label="Investigation next action" />
+        <select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Investigation status" className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink focus-ring">
+          {ACTION_STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+        <Button variant="primary" disabled={!nextAction.trim() || saving} onClick={save}>{saving ? 'Saving…' : entry ? 'Update' : 'Create'}</Button>
+      </div>
+      {entry?.history?.length > 0 && (
+        <details className="mt-3 text-xs text-muted">
+          <summary className="cursor-pointer focus-ring">Audit history ({entry.history.length})</summary>
+          <ul className="mt-2 space-y-1">
+            {entry.history.slice().reverse().map((event) => (
+              <li key={`${event.version}:${event.changed_at}`}>v{event.version} · {event.actor_login} · {event.status} · {new Date(event.changed_at).toLocaleString()}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </section>
   )
 }
 

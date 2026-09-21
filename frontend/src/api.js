@@ -32,6 +32,10 @@ async function request(path, { method = 'GET', body, headers = {}, signal, authO
     log('warning', 'API request failed', { path, method, status: res.status, durationMs, detail: detail.detail })
     const error = new Error(detail.detail || `Request failed (${res.status})`)
     error.status = res.status
+    error.payload = detail.detail
+    if (detail.detail && typeof detail.detail === 'object' && detail.detail.message) {
+      error.message = detail.detail.message
+    }
     throw error
   }
   if (method !== 'GET') {
@@ -65,6 +69,11 @@ export const api = {
   feedback: (jobId) => request(`/api/jobs/${jobId}/feedback`),
   createFeedback: (jobId, payload) =>
     request(`/api/jobs/${jobId}/feedback`, { method: 'POST', body: payload }),
+  actions: (jobId) => request(`/api/jobs/${jobId}/actions`),
+  createAction: (jobId, payload) =>
+    request(`/api/jobs/${jobId}/actions`, { method: 'POST', body: payload }),
+  updateAction: (jobId, actionId, payload) =>
+    request(`/api/jobs/${jobId}/actions/${actionId}`, { method: 'PATCH', body: payload }),
   reanalyze: (jobId, unitId) =>
     request(`/api/jobs/${jobId}/units/${unitId}/reanalyze`, { method: 'POST' }),
   manager: (jobId, scope = {}) => {

@@ -37,7 +37,10 @@ test('exports active scope, completeness, KPIs, and aggregate tables', () => {
       latest_observed_unit_yield: { delta_pp: 10 },
     },
     target: { percent: 95, metric: 'latest_observed_unit_yield', gap_pp: 5, provenance: 'user_entered' },
-  }, '2026-09-21T12:00:00Z')
+  }, '2026-09-21T12:00:00Z', [{
+    error_code: 'E1', next_action: 'Inspect fixture', assignee: 'Test team',
+    status: 'in_progress', updated_at: '2026-09-21T11:00:00Z', version: 2,
+  }])
 
   assert.match(csv, /Active product filters","P1/)
   assert.match(csv, /2\/3 parsed runs included/)
@@ -46,6 +49,8 @@ test('exports active scope, completeness, KPIs, and aggregate tables', () => {
   assert.match(csv, /Attempt pass-rate trend/)
   assert.match(csv, /Prior batch/)
   assert.match(csv, /provenance=user_entered/)
+  assert.match(csv, /Verified investigation actions/)
+  assert.match(csv, /Inspect fixture/)
   assert.match(csv, /Not included in aggregate export/)
 })
 

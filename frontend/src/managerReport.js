@@ -8,7 +8,7 @@ export function csvCell(value) {
 
 const row = (...values) => values.map(csvCell).join(',')
 
-export function buildManagerCsv(data, comparison = null, generatedAt = new Date().toISOString()) {
+export function buildManagerCsv(data, comparison = null, generatedAt = new Date().toISOString(), actions = []) {
   const summary = data.summary || {}
   const scope = data.scope || {}
   const batch = data.batch || {}
@@ -59,6 +59,10 @@ export function buildManagerCsv(data, comparison = null, generatedAt = new Date(
     ...(data.trend || []).map((item) => row(item.date, item.pass, item.fail, item.yield)),
     '',
     row('Recommended actions', 'Not included in aggregate export; use scoped Engineer drill-down and redacted debug packets.'),
+    '',
+    row('Verified investigation actions'),
+    row('Failure', 'Next action', 'Owner', 'Status', 'Updated', 'Version'),
+    ...actions.map((item) => row(item.error_code || item.signature || item.unit_id, item.next_action, item.assignee || 'Unassigned', item.status, item.updated_at, item.version)),
   ]
   return `${lines.join('\r\n')}\r\n`
 }
