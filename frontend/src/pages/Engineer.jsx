@@ -66,6 +66,17 @@ const SEARCH_FIELDS = [
 
 const textValue = (value) => String(value ?? '').toLocaleLowerCase()
 
+const sameViewState = (left, right) =>
+  left?.filter === right.filter &&
+  left?.serialFilter === right.serialFilter &&
+  left?.searchQuery === right.searchQuery &&
+  left?.sortBy === right.sortBy &&
+  left?.activeSignature === right.activeSignature &&
+  left?.view === right.view &&
+  left?.expanded === right.expanded &&
+  left?.columns?.length === right.columns.length &&
+  left.columns.every((column, index) => column === right.columns[index])
+
 const groupMatchesSearch = (group, query) => {
   const normalizedQuery = query.trim().toLocaleLowerCase()
   if (!normalizedQuery) return true
@@ -260,7 +271,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
   }, [initialViewState])
 
   useEffect(() => {
-    onViewStateChange?.({
+    const nextViewState = {
       filter,
       serialFilter,
       searchQuery,
@@ -269,7 +280,8 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
       view,
       expanded,
       columns: visibleColumns,
-    })
+    }
+    onViewStateChange?.((current) => sameViewState(current, nextViewState) ? current : nextViewState)
   }, [activeSignature, expanded, filter, onViewStateChange, searchQuery, serialFilter, sortBy, view, visibleColumns])
 
   useEffect(() => {
@@ -974,9 +986,6 @@ function ColumnChooser({ columns, onChange }) {
 
 function ClusterPanel({ clusters, activeSignature, exporting, onSelect, onExport }) {
   const [open, setOpen] = useState(false)
-  useEffect(() => {
-    if (activeSignature) setOpen(true)
-  }, [activeSignature])
   return (
     <section className="mt-6 border-t border-border pt-5" aria-labelledby="failure-families-heading">
       <div className="flex items-center justify-between gap-4">
