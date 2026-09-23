@@ -2,8 +2,10 @@
 
 Co-Trace is a browser-based dashboard for manufacturing FTRunner logs. It parses uploaded log folders, files, or root-level zip archives and presents two views:
 
-- **Engineer**: latest result per serial, retry history, failed-unit evidence, AI root cause/solution, and re-analysis.
-- **Manager**: first-pass yield, yield trend, failure-reason Pareto, station/tester breakdown, and lot comparison.
+- **Engineer**: triage worklist and signature-keyed failure clusters, search/sort/pagination, per-unit inspection with retry-vs-final-pass comparison, structured RCA (confidence, category, owner, risk, next action) linked to its log evidence, feedback, investigation actions, and redacted debug-packet export.
+- **Manager**: scoped filtering, first-pass yield vs. attempts, yield trend, signature Pareto, station/tester and lot breakdowns, retest burden, qualified baseline comparison against prior batches, clickable drill-down into Engineer, and shift-review report export.
+
+Recent batches can be reopened from the workspace, and the active investigation is restored after a page refresh.
 
 ## Current State
 
@@ -12,6 +14,8 @@ Co-Trace is a browser-based dashboard for manufacturing FTRunner logs. It parses
 - Diagnosis uses `LLM_PROVIDER` (`copilot_sdk` default = enterprise GitHub Copilot, or `offline_stub`); the public GitHub Models path is removed, and passing units never call the LLM.
 - Sign-in can use local admin credentials (`ADMIN_USERNAME`/`ADMIN_PASSWORD`) or optional GitHub OAuth. Jobs are owned by the signer, and knowledge/cache deletes are admin-only.
 - Successful diagnoses are cached and reused across uploads unless force-refreshed or the product/acronym context changes the cache key.
+- Admin-reviewed known-failure playbooks match exact failure signatures and are applied before the cache or Copilot.
+- Engineer feedback and investigation actions (owner, status, handoff) persist per job under `WORK_DIR`.
 
 ## Input Shape and Parsing
 
@@ -100,8 +104,9 @@ If optional OAuth is enabled for single-server mode, set `FRONTEND_URL` to `http
 Set-Location C:\Users\lloganat\source\repos\Co_Trace
 .\.venv\Scripts\python.exe -m pytest backend\tests\ -q
 
-# Frontend build
+# Frontend unit tests and build
 Set-Location C:\Users\lloganat\source\repos\Co_Trace\frontend
+npm.cmd test
 npm.cmd run build
 
 # Measure preprocessed JSON size
@@ -132,10 +137,13 @@ Most-used environment variables:
 | `WORK_DIR` | `.cotrace_work` | Per-job uploads, job state, and analysis cache location. |
 | `CLEANUP_JOB_WORKDIR_AFTER_RUN` | `1` | Deletes uploads/extracted files/preprocessed JSON after terminal job state. |
 | `ANALYSIS_CACHE_ENABLED` | `1` | Reuses successful diagnoses across uploads. |
+| `FEEDBACK_STORE_FILE` | `WORK_DIR/feedback.json` | Engineer diagnosis feedback. |
+| `INVESTIGATION_ACTION_STORE_FILE` | `WORK_DIR/investigation_actions.json` | Investigation actions and handoffs. |
 | `DEBUG_EXCERPT_CHAR_BUDGET` | `6000` | Max characters in failed-unit DebugLog excerpt. |
 | `PRODUCT_KNOWLEDGE_ENABLED` | `1` | Enables product-aware diagnosis (curated summaries in prompts). |
 | `PRODUCT_KNOWLEDGE_SUMMARY_MODEL` | `gpt-5.4-mini` | Model that summarizes product docs at ingestion (LLM required). |
 | `PRODUCT_KNOWLEDGE_SOURCE_DIRS` | `Log_Files_Folder`, `Product_Docs` | Folders scanned for supporting PDF/DOCX/XLSX docs (`os.pathsep`-joined). |
+| `PRODUCT_KNOWLEDGE_PLAYBOOKS_FILE` | `admin_playbooks.json` (repo root) | Reviewed known-failure playbooks. |
 
 See [backend/app/config.py](backend/app/config.py) for the full settings list and defaults.
 
@@ -150,12 +158,13 @@ summaries (never whole documents) are sent alongside the redacted failure excerp
 - **Add docs**: drop them in `Product_Docs/` or `Log_Files_Folder/`, or upload from the **Knowledge** tab (admin). If an uploaded filename already exists in `Product_Docs/`, choose whether to replace it or keep the old file; keeping an already-ingested file does no extra work.
 - **Ingestion**: sections are summarized by `gpt-5.4-mini` (LLM required). Generated artifacts (`product_knowledge*.json`, `*_sections.jsonl`) live at the repo root, are gitignored, and store only curated summaries, never raw document text.
 - **Remove/rebuild**: **Remove from pack** prunes only generated knowledge artifacts and preserves the source document. Rebuild from the Knowledge tab or `backend/scripts/build_product_knowledge.py`; changing knowledge invalidates stale diagnoses through the product/knowledge hash.
+- **Coverage and playbooks**: the Knowledge tab lists failure families lacking product coverage, and admins can create, edit, or delete reviewed known-failure playbooks (stored in gitignored `admin_playbooks.json`).
 
 ## Security and Storage
 
-- Local/generated outputs are gitignored, including `.cotrace_work`, virtualenvs, `node_modules`, `frontend/dist`, `product_docs` / `Product_Docs`, and `product_knowledge*.json` artifacts.
+- Local/generated outputs are gitignored, including `.cotrace_work`, virtualenvs, `node_modules`, `frontend/dist`, `product_docs` / `Product_Docs`, `product_knowledge*.json` artifacts, and `admin_playbooks.json`.
 - Redaction scrubs credentials, IPs, hostnames, usernames, MACs, and serials before LLM analysis; users authenticate via local admin credentials or optional GitHub OAuth, and Co-Trace stores only its signed HttpOnly session cookie.
-- Uploads, extracted zips, and preprocessed JSON are removed after processing by default; the analysis cache persists under `WORK_DIR`.
+- Uploads, extracted zips, and preprocessed JSON are removed after processing by default; the analysis cache, feedback, and investigation actions persist under `WORK_DIR`. Feedback and exported debug packets are redacted.
 - In production behind IIS, set the chosen auth variables and proxy values once on the server; users just open the app URL and sign in.
 
 ## Project Layout
@@ -166,15 +175,20 @@ backend/app/
   preprocessor.py     FTRunner parsing and DebugLog discovery
   analyzer.py         Failure dedup, cache, provider routing
   copilot_client.py   Enterprise Copilot SDK adapter
-  knowledge/          Product-aware diagnosis pipeline
-  job_registry.py     Disk-backed job state
+  knowledge/          Product-aware diagnosis pipeline and playbook store
+  job_registry.py     Disk-backed job state and recent-batch listing
   analysis_cache.py   Disk-backed diagnosis cache
+  comparison.py       Comparable batch baselines
+  record_views.py     Signatures, serial grouping, debug-packet export
+  feedback_store.py   Engineer diagnosis feedback
+  investigation_action_store.py  Investigation actions and handoffs
 
 frontend/src/
   App.jsx             Authenticated shell and tabs
   api.js              Fetch wrapper and session recovery
   pages/              Upload, diagnostics, analytics, knowledge UI
-  components/         UI primitives and terminal log viewer
+  components/         UI primitives, recent batches, terminal log viewer
+  *.js / *.test.js    Pure view-model helpers with node:test coverage
 ```
 
 ## Current Limitations
