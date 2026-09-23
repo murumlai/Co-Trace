@@ -33,13 +33,13 @@ def _admin_auth(client) -> dict:  # noqa: ARG001
 
 
 class TestAcronymRoutesAuth:
-    def test_list_without_session_401(self, env):
+    def test_shared_list_without_session_200(self, env):
         client, _ = env
-        assert client.get("/api/knowledge/acronyms").status_code == 401
+        assert client.get("/api/knowledge/acronyms").status_code == 200
 
-    def test_upsert_without_session_401(self, env):
+    def test_upsert_without_admin_403(self, env):
         client, _ = env
-        assert client.post("/api/knowledge/acronyms", json={"acronym": "PAN"}).status_code == 401
+        assert client.post("/api/knowledge/acronyms", json={"acronym": "PAN"}).status_code == 403
 
 
 class TestAcronymRoutes:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -53,27 +54,13 @@ class Settings:
     # usage. Adjust this if your internal credit accounting uses a different unit.
     LLM_TOKEN_CREDIT_SIZE: int = int(os.getenv("LLM_TOKEN_CREDIT_SIZE", "1000"))
 
-    # --- Auth (GitHub OAuth + signed cookie session) ---
-    GITHUB_CLIENT_ID: str = os.getenv("GITHUB_CLIENT_ID", "")
-    GITHUB_CLIENT_SECRET: str = os.getenv("GITHUB_CLIENT_SECRET", "")
-    GITHUB_CALLBACK_URL: str = os.getenv(
-        "GITHUB_CALLBACK_URL", "http://localhost:8000/api/auth/github/callback"
-    )
-    GITHUB_OAUTH_TIMEOUT_S: float = float(os.getenv("GITHUB_OAUTH_TIMEOUT_S", "15"))
-    JWT_SECRET: str = os.getenv("JWT_SECRET", "dev-only-change-me")
+    JWT_SECRET: str = os.getenv("JWT_SECRET") or secrets.token_urlsafe(48)
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
     COOKIE_SECURE: bool = _env_flag("COOKIE_SECURE", False)
     SESSION_COOKIE_NAME: str = os.getenv("SESSION_COOKIE_NAME", "session")
-    OAUTH_STATE_COOKIE_NAME: str = os.getenv("OAUTH_STATE_COOKIE_NAME", "github_oauth_state")
-    OAUTH_STATE_TTL_S: int = int(os.getenv("OAUTH_STATE_TTL_S", "600"))
     SESSION_TTL_S: int = int(os.getenv("SESSION_TTL_S", str(60 * 60 * 24 * 30)))
-    GITHUB_ADMIN_USERS: list[str] = [
-        user.strip() for user in os.getenv("GITHUB_ADMIN_USERS", "").split(",") if user.strip()
-    ]
-    # Local maintenance admin login (separate from GitHub OAuth).
-    # Set ADMIN_PASSWORD="" to disable this path entirely.
     ADMIN_USERNAME: str = os.getenv("ADMIN_USERNAME", "admin")
-    ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "admin")
+    ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "")
 
     # --- Jobs / storage ---
     WORK_DIR: str = os.getenv("WORK_DIR", os.path.join(os.getcwd(), ".cotrace_work"))

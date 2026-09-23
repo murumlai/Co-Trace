@@ -8,7 +8,7 @@
     "dev:debug": "node scripts/dev-server.mjs --debug",
     "test": "npm run test:unit && npm run test:component",
     "test:unit": "node --test src/diagnosisPresentation.test.js src/evidenceReferences.test.js src/jobMonitoring.test.js src/logEvidence.test.js src/managerMetrics.test.js src/managerReport.test.js src/unitAttempts.test.js src/uploadSelection.test.js src/workspaceState.test.js",
-    "test:component": "vitest run src/pages/Engineer.render.test.jsx",
+    "test:component": "vitest run src/pages/Engineer.render.test.jsx src/App.render.test.jsx",
     "build": "vite build",
     "preview": "vite preview"
   },

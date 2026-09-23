@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.feedback_store import DiskFeedbackStore
+from app.auth import SHARED_WORKSPACE_ID
 from app.models import FeedbackEntry, UnitRecord
 from tests.auth_helpers import auth_headers
 
@@ -49,7 +50,7 @@ def feedback_client(tmp_path):
     registry = JobRegistry()
     workdir = tmp_path / "owned-job"
     workdir.mkdir()
-    job = registry.create("owned-job", str(workdir), owner_id="42", owner_login="octocat")
+    job = registry.create("owned-job", str(workdir), owner_id=SHARED_WORKSPACE_ID, owner_login=SHARED_WORKSPACE_ID)
     job.records = [
         UnitRecord(
             unit_id="unit-1",
@@ -97,11 +98,13 @@ def test_feedback_route_derives_metadata_and_redacts_notes(feedback_client) -> N
     assert len(listed["entries"]) == 1
 
 
-def test_feedback_route_hides_other_users_job(feedback_client) -> None:
+def test_feedback_is_shared_across_browser_sessions(feedback_client) -> None:
     response = feedback_client.post(
         "/api/jobs/owned-job/feedback",
         headers=auth_headers(login="hubot", github_id="99"),
         json={"unit_id": "unit-1", "action": "helpful"},
     )
 
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.json()["owner_id"] == SHARED_WORKSPACE_ID
+    assert len(feedback_client.get("/api/jobs/owned-job/feedback").json()["entries"]) == 1

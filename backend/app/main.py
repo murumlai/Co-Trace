@@ -12,7 +12,6 @@ import json
 import logging
 import os
 import re
-import secrets
 import shutil
 import threading
 import time
@@ -20,11 +19,10 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlencode
 
-from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import aggregator, comparison
@@ -86,6 +84,13 @@ app.add_middleware(
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
+    if request.url.path.startswith("/api/") and request.method not in {"GET", "HEAD", "OPTIONS"}:
+        origin = request.headers.get("origin")
+        allowed_origins = {*settings.CORS_ORIGINS, settings.FRONTEND_URL.rstrip("/")}
+        if (origin and origin not in allowed_origins) or (
+            not origin and request.headers.get("sec-fetch-site") == "cross-site"
+        ):
+            return JSONResponse(status_code=403, content={"detail": "Request origin is not allowed"})
     started = time.perf_counter()
     if settings.APP_DEBUG:
         log.debug("%s %s started.", request.method, request.url.path)
@@ -120,76 +125,10 @@ os.makedirs(settings.WORK_DIR, exist_ok=True)
 # --------------------------------------------------------------------------
 # Auth
 # --------------------------------------------------------------------------
-def _frontend_redirect(**params: str) -> str:
-    if not params:
-        return settings.FRONTEND_URL
-    separator = "&" if "?" in settings.FRONTEND_URL else "?"
-    return f"{settings.FRONTEND_URL}{separator}{urlencode(params)}"
-
-
-def _clear_oauth_state_cookie(response: Response) -> None:
-    response.delete_cookie(
-        settings.OAUTH_STATE_COOKIE_NAME,
-        path="/",
-        secure=settings.COOKIE_SECURE,
-        httponly=True,
-        samesite="lax",
-    )
-
-
 @app.get("/api/auth/github")
-def github_login() -> RedirectResponse:
-    auth = get_auth()
-    state = auth.new_state()
-    response = RedirectResponse(auth.authorize_url(state), status_code=302)
-    response.set_cookie(
-        settings.OAUTH_STATE_COOKIE_NAME,
-        state,
-        max_age=settings.OAUTH_STATE_TTL_S,
-        httponly=True,
-        secure=settings.COOKIE_SECURE,
-        samesite="lax",
-        path="/",
-    )
-    return response
-
-
 @app.get("/api/auth/github/callback")
-async def github_callback(
-    code: str | None = None,
-    state: str | None = None,
-    state_cookie: str | None = Cookie(default=None, alias=settings.OAUTH_STATE_COOKIE_NAME),
-) -> RedirectResponse:
-    if not state or not state_cookie or not secrets.compare_digest(state, state_cookie):
-        response = RedirectResponse(_frontend_redirect(auth_error="state_mismatch"), status_code=302)
-        _clear_oauth_state_cookie(response)
-        return response
-    if not code:
-        response = RedirectResponse(_frontend_redirect(auth_error="missing_code"), status_code=302)
-        _clear_oauth_state_cookie(response)
-        return response
-    try:
-        user = await get_auth().authenticate_code(code)
-    except HTTPException as exc:
-        log.warning("GitHub OAuth callback failed: %s.", exc.detail)
-        response = RedirectResponse(_frontend_redirect(auth_error="oauth_failed"), status_code=302)
-        _clear_oauth_state_cookie(response)
-        return response
-
-    token = get_auth().create_session_token(user)
-    response = RedirectResponse(settings.FRONTEND_URL, status_code=302)
-    response.set_cookie(
-        settings.SESSION_COOKIE_NAME,
-        token,
-        max_age=settings.SESSION_TTL_S,
-        httponly=True,
-        secure=settings.COOKIE_SECURE,
-        samesite="lax",
-        path="/",
-    )
-    _clear_oauth_state_cookie(response)
-    log.info("User signed in with GitHub: %s%s.", user.login, " (admin)" if user.is_admin else "")
-    return response
+def github_login_unavailable() -> None:
+    raise HTTPException(410, "GitHub sign-in is no longer used. Open the shared workspace.")
 
 
 @app.post("/api/logout")
@@ -207,7 +146,7 @@ def logout(response: Response) -> dict:
 @app.post("/api/auth/admin/login")
 def admin_login(body: AdminLoginRequest, response: Response) -> dict:
     user = get_auth().authenticate_admin(body.username, body.password)
-    token = get_auth().create_session_token(user, auth_method="admin_local")
+    token = get_auth().create_session_token(user, auth_method="admin_shared")
     response.set_cookie(
         settings.SESSION_COOKIE_NAME,
         token,
@@ -224,6 +163,7 @@ def admin_login(body: AdminLoginRequest, response: Response) -> dict:
             "username": user.login,
             "login": user.login,
             "github_id": user.github_id,
+            "workspace_id": user.github_id,
             "is_admin": user.is_admin,
             "role": "admin",
             "name": user.name,
@@ -238,6 +178,7 @@ def me(user: AuthenticatedUser = Depends(require_user)) -> dict:
         "username": user.login,
         "login": user.login,
         "github_id": user.github_id,
+        "workspace_id": user.github_id,
         "is_admin": user.is_admin,
         "role": "admin" if user.is_admin else "user",
         "name": user.name,

@@ -1,18 +1,16 @@
-"""GitHub OAuth and signed session-cookie authentication."""
+"""Shared prototype workspace with signed maintenance sessions."""
 from __future__ import annotations
 
 import secrets
 import time
 from dataclasses import dataclass
-from typing import Any
-from urllib.parse import urlencode
-
-import httpx
 import jwt
 from fastapi import Cookie, Depends, HTTPException, status
 from jwt import InvalidTokenError
 
 from .config import settings
+
+SHARED_WORKSPACE_ID = "shared-workspace"
 
 
 @dataclass(frozen=True)
@@ -28,81 +26,8 @@ class AuthenticatedUser:
         return self.login
 
 
-class GitHubOAuthAuth:
-    def new_state(self) -> str:
-        return secrets.token_urlsafe(32)
-
-    def authorize_url(self, state: str) -> str:
-        if not settings.GITHUB_CLIENT_ID:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "GitHub OAuth is not configured")
-        query = urlencode(
-            {
-                "client_id": settings.GITHUB_CLIENT_ID,
-                "redirect_uri": settings.GITHUB_CALLBACK_URL,
-                "scope": "read:user",
-                "state": state,
-                "allow_signup": "false",
-            }
-        )
-        return f"https://github.com/login/oauth/authorize?{query}"
-
-    async def authenticate_code(self, code: str) -> AuthenticatedUser:
-        token = await self.exchange_code(code)
-        payload = await self.fetch_github_user(token)
-        return self.user_from_github_payload(payload)
-
-    async def exchange_code(self, code: str) -> str:
-        if not settings.GITHUB_CLIENT_ID or not settings.GITHUB_CLIENT_SECRET:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "GitHub OAuth is not configured")
-        async with httpx.AsyncClient(timeout=settings.GITHUB_OAUTH_TIMEOUT_S) as client:
-            response = await client.post(
-                "https://github.com/login/oauth/access_token",
-                headers={"Accept": "application/json"},
-                data={
-                    "client_id": settings.GITHUB_CLIENT_ID,
-                    "client_secret": settings.GITHUB_CLIENT_SECRET,
-                    "code": code,
-                    "redirect_uri": settings.GITHUB_CALLBACK_URL,
-                },
-            )
-        if response.status_code >= 400:
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "GitHub token exchange failed")
-        data = response.json()
-        if data.get("error"):
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, data.get("error_description") or "GitHub token exchange failed")
-        access_token = data.get("access_token")
-        if not access_token:
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "GitHub token response did not include an access token")
-        return str(access_token)
-
-    async def fetch_github_user(self, access_token: str) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=settings.GITHUB_OAUTH_TIMEOUT_S) as client:
-            response = await client.get(
-                "https://api.github.com/user",
-                headers={
-                    "Accept": "application/vnd.github+json",
-                    "Authorization": f"Bearer {access_token}",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-            )
-        if response.status_code >= 400:
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "GitHub identity lookup failed")
-        return response.json()
-
-    def user_from_github_payload(self, payload: dict[str, Any]) -> AuthenticatedUser:
-        login = str(payload.get("login") or "").strip()
-        github_id = str(payload.get("id") or "").strip()
-        if not login or not github_id:
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "GitHub identity response was incomplete")
-        return AuthenticatedUser(
-            login=login,
-            github_id=github_id,
-            is_admin=self.is_admin(login),
-            name=payload.get("name"),
-            avatar_url=payload.get("avatar_url"),
-        )
-
-    def create_session_token(self, user: AuthenticatedUser, auth_method: str = "github") -> str:
+class WorkspaceAuth:
+    def create_session_token(self, user: AuthenticatedUser, auth_method: str = "admin_shared") -> str:
         now = int(time.time())
         payload = {
             "sub": user.github_id,
@@ -119,6 +44,8 @@ class GitHubOAuthAuth:
     def authenticate_admin(self, username: str, password: str) -> AuthenticatedUser:
         if not settings.ADMIN_PASSWORD:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Local admin login is not configured")
+        if len(settings.JWT_SECRET.encode("utf-8")) < 32:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Admin session signing is not securely configured")
         expected_user = settings.ADMIN_USERNAME or "admin"
         user_ok = secrets.compare_digest(username or "", expected_user)
         pass_ok = secrets.compare_digest(password or "", settings.ADMIN_PASSWORD)
@@ -126,48 +53,44 @@ class GitHubOAuthAuth:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid admin credentials")
         return AuthenticatedUser(
             login=expected_user,
-            github_id=f"admin-local:{expected_user}",
+            github_id=SHARED_WORKSPACE_ID,
             is_admin=True,
             name="Administrator",
         )
 
-    def verify_session_token(self, token: str) -> AuthenticatedUser:
-        try:
-            payload = jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
-        except InvalidTokenError as exc:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired session") from exc
-        login = str(payload.get("login") or "").strip()
-        github_id = str(payload.get("sub") or "").strip()
-        if not login or not github_id:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid session")
-        # Local admin sessions carry their own admin grant; GitHub sessions are
-        # re-evaluated against the current admin list on every request.
-        auth_method = str(payload.get("amr") or "github")
-        is_admin = bool(payload.get("is_admin")) if auth_method == "admin_local" else self.is_admin(login)
-        return AuthenticatedUser(
-            login=login,
-            github_id=github_id,
-            is_admin=is_admin,
-            name=payload.get("name"),
-            avatar_url=payload.get("avatar_url"),
-        )
-
-    def is_admin(self, login: str) -> bool:
-        admins = {item.strip().lower() for item in settings.GITHUB_ADMIN_USERS if item.strip()}
-        return login.lower() in admins
+_auth = WorkspaceAuth()
 
 
-_auth = GitHubOAuthAuth()
-
-
-def get_auth() -> GitHubOAuthAuth:
+def get_auth() -> WorkspaceAuth:
     return _auth
 
 
 def require_user(session: str | None = Cookie(default=None, alias=settings.SESSION_COOKIE_NAME)) -> AuthenticatedUser:
-    if not session:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing session cookie")
-    return _auth.verify_session_token(session)
+    if session and settings.ADMIN_PASSWORD and len(settings.JWT_SECRET.encode("utf-8")) >= 32:
+        try:
+            payload = jwt.decode(
+                session, settings.JWT_SECRET, algorithms=["HS256"],
+                options={"require": ["exp", "sub", "login", "amr", "is_admin"]},
+            )
+            if (
+                payload.get("amr") == "admin_shared"
+                and payload.get("sub") == SHARED_WORKSPACE_ID
+                and payload.get("login") == (settings.ADMIN_USERNAME or "admin")
+                and payload.get("is_admin") is True
+            ):
+                return AuthenticatedUser(
+                    login=settings.ADMIN_USERNAME or "admin",
+                    github_id=SHARED_WORKSPACE_ID,
+                    is_admin=True,
+                    name="Administrator",
+                )
+        except InvalidTokenError:
+            pass
+    return AuthenticatedUser(
+        login=SHARED_WORKSPACE_ID,
+        github_id=SHARED_WORKSPACE_ID,
+        name="Shared workspace",
+    )
 
 
 def require_admin(user: AuthenticatedUser = Depends(require_user)) -> AuthenticatedUser:

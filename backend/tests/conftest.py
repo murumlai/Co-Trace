@@ -4,6 +4,13 @@ from __future__ import annotations
 import os
 import pytest
 
+@pytest.fixture(autouse=True)
+def maintenance_credentials(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "ADMIN_USERNAME", "admin")
+    monkeypatch.setattr(settings, "ADMIN_PASSWORD", "test-maintenance-password")
+
 
 @pytest.fixture()
 def isolated_settings(tmp_path, monkeypatch):

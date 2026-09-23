@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { AuthProvider, useAuth } from './auth'
-import Login from './pages/Login'
+import AdminDialog from './components/AdminDialog'
 import Home from './pages/Home'
 import Engineer from './pages/Engineer'
 import Manager from './pages/Manager'
@@ -11,7 +11,6 @@ import RecentBatches from './components/RecentBatches'
 import { debugLog, log } from './logger'
 import { monitorJob } from './jobMonitoring'
 import {
-  clearWorkspaceState,
   DEFAULT_ENGINEER_VIEW_STATE,
   DEFAULT_MANAGER_SCOPE,
   loadWorkspaceState,
@@ -34,7 +33,7 @@ function relPath(file) {
 const preferredViewKey = (username) => `cotrace-results-view:${String(username || '').toLocaleLowerCase()}`
 
 function Shell() {
-  const { checking, isAuthed, username, logout } = useAuth()
+  const { checking, isAuthed, workspaceId: username, isAdmin, logout, notice, clearNotice } = useAuth()
   const [theme, setTheme] = useState(() => localStorage.getItem('cotrace-theme') || 'light')
   const [tab, setTab] = useState('home')
   const [jobId, setJobId] = useState(null)
@@ -52,6 +51,9 @@ function Shell() {
   const [managerScope, setManagerScope] = useState({ ...DEFAULT_MANAGER_SCOPE })
   const [knowledgeReview, setKnowledgeReview] = useState(null)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [adminOpen, setAdminOpen] = useState(false)
+  const [adminError, setAdminError] = useState('')
+  const [leavingAdmin, setLeavingAdmin] = useState(false)
   const [warnings, setWarnings] = useState([])
   const [llmMetrics, setLlmMetrics] = useState(null)
   const [selectedFiles, setSelectedFiles] = useState([])
@@ -83,13 +85,13 @@ function Shell() {
   }, [engineerFeedbackDrafts])
 
   useEffect(() => {
-    if (!menuOpen) return undefined
+    if (!menuOpen || adminOpen) return undefined
     const closeOnEscape = (event) => {
       if (event.key === 'Escape') setMenuOpen(false)
     }
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [menuOpen])
+  }, [menuOpen, adminOpen])
 
   useEffect(() => {
     if (checking) return
@@ -103,6 +105,13 @@ function Shell() {
     const savedView = localStorage.getItem(preferredViewKey(username))
     setPreferredResultsView(savedView === 'manager' ? 'manager' : 'engineer')
     const restored = loadWorkspaceState(sessionStorage, username, window.location.search)
+    if (!window.location.search) {
+      restored.tab = 'home'
+      restored.jobId = null
+      restored.drillDown = null
+      restored.engineer = { ...DEFAULT_ENGINEER_VIEW_STATE }
+      restored.managerScope = { ...DEFAULT_MANAGER_SCOPE }
+    }
     setTab(restored.tab)
     setEngineerViewState(restored.engineer)
     setManagerScope(restored.managerScope)
@@ -144,16 +153,6 @@ function Shell() {
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
   }, [isAuthed, jobId, restoreCandidateId, username, workspaceReady])
-
-  if (checking || (isAuthed && !workspaceReady)) {
-    return (
-      <div className="min-h-screen flex items-center justify-center px-6 py-16 text-muted">
-        Checking session…
-      </div>
-    )
-  }
-
-  if (!isAuthed) return <Login />
 
   const toggleTheme = () => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
 
@@ -433,15 +432,20 @@ function Shell() {
     })
   }
 
-  const signOut = async () => {
-    if (Object.values(engineerFeedbackDrafts).some((value) => value.trim()) && !window.confirm('Discard unsaved engineer feedback and sign out?')) {
+  const toggleAdmin = async () => {
+    setAdminError('')
+    if (!isAdmin) {
+      setAdminOpen(true)
       return
     }
-    runToken.current += 1
-    clearWorkspaceState(sessionStorage, username)
-    const search = workspaceSearch({}, window.location.search)
-    window.history.replaceState(null, '', `${window.location.pathname}${search}${window.location.hash}`)
-    await logout()
+    setLeavingAdmin(true)
+    try {
+      await logout()
+    } catch {
+      setAdminError('Could not exit Admin mode. Check the connection and try Exit Admin again.')
+    } finally {
+      setLeavingAdmin(false)
+    }
   }
 
   const NavButton = ({ id, label }) => {
@@ -535,12 +539,12 @@ function Shell() {
                   Stop batch
                 </button>
               )}
-              <span className="text-sm text-muted">{username || 'user'}</span>
               <button
-                onClick={signOut}
+                onClick={toggleAdmin}
+                disabled={checking || leavingAdmin}
                 className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-muted transition-colors duration-150 hover:bg-surface-2 hover:text-ink focus-ring"
               >
-                Sign out
+                {isAdmin ? 'Exit Admin' : 'Admin'}
               </button>
             </div>
 
@@ -571,10 +575,11 @@ function Shell() {
               )}
               <ThemeSwitch className="justify-center" />
               <button
-                onClick={signOut}
+                onClick={toggleAdmin}
+                disabled={checking || leavingAdmin}
                 className="rounded-lg border border-border bg-surface px-4 py-2.5 text-sm text-muted focus-ring"
               >
-                Sign out ({username || 'user'})
+                {isAdmin ? 'Exit Admin' : 'Admin'}
               </button>
             </div>
           )}
@@ -621,6 +626,14 @@ function Shell() {
           </div>
         )}
       </header>
+
+      {(notice || adminError) && (
+        <div role="status" className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-6 py-3 text-sm text-warning">
+          <span>{adminError || notice}</span>
+          <button className="focus-ring rounded-md px-2 py-1" onClick={() => { clearNotice(); setAdminError('') }}>Dismiss</button>
+        </div>
+      )}
+      {adminOpen && <AdminDialog onClose={() => setAdminOpen(false)} />}
 
       <main>
         {tab === 'home' && (

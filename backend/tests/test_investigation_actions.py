@@ -98,13 +98,14 @@ def test_store_expires_entries_and_writes_atomically(tmp_path):
 
 @pytest.fixture()
 def action_api(tmp_path):
+    from app.auth import SHARED_WORKSPACE_ID
     from app.dependencies import get_investigation_action_store, get_registry
     from app.main import app
 
     workdir = tmp_path / "job"
     workdir.mkdir()
     registry = JobRegistry()
-    job = registry.create("job-1", str(workdir), owner_id="42", owner_login="octocat")
+    job = registry.create("job-1", str(workdir), owner_id=SHARED_WORKSPACE_ID, owner_login=SHARED_WORKSPACE_ID)
     job.records = [
         UnitRecord(
             unit_id="unit-1", serial_number="SN1", result="FAIL",
@@ -161,9 +162,9 @@ def test_action_api_create_list_update_and_conflict(action_api):
     assert conflict.json()["detail"]["current"]["version"] == 2
 
 
-def test_action_api_enforces_owner_and_failed_target(action_api):
+def test_action_api_shares_workspace_but_validates_target(action_api):
     other = auth_headers(login="hubot", github_id="99")
-    assert action_api.get("/api/jobs/job-1/actions", headers=other).status_code == 404
+    assert action_api.get("/api/jobs/job-1/actions", headers=other).status_code == 200
     response = action_api.post(
         "/api/jobs/job-1/actions",
         headers=auth_headers(),

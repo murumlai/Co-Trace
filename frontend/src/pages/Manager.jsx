@@ -518,7 +518,7 @@ function ComparisonPanel({ comparison, loading, error, targetMetric, targetPerce
       <div className="mb-3 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 id="comparison-heading" className="font-display text-sm font-bold text-ink">Qualified comparison</h2>
-          <p className="text-xs text-muted">Newest prior owned, completed, non-duplicate batch with the same product and active lot/station scope.</p>
+          <p className="text-xs text-muted">Newest prior shared, completed, non-duplicate batch with the same product and active lot/station scope.</p>
         </div>
         <div className="no-print flex flex-wrap gap-2">
           <select value={targetMetric} onChange={(event) => onTargetChange({ targetMetric: event.target.value })} aria-label="Target metric" className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-ink focus-ring">
@@ -572,7 +572,7 @@ function ActionQueue({ entries, error, busy, onRetry, onStatusChange, onOpen }) 
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
           <h2 id="action-queue-heading" className="font-display text-sm font-bold text-ink">Investigation actions</h2>
-          <p className="text-xs text-muted">Owner-only workflow state; assignee labels do not grant access.</p>
+          <p className="text-xs text-muted">Shared workflow state; assignee labels identify responsibility, not access.</p>
         </div>
         <Badge tone={active.length ? 'warn' : 'pass'}>{active.length} active</Badge>
       </div>

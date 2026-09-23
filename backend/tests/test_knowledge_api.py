@@ -89,13 +89,13 @@ def _admin_auth(client) -> dict:  # noqa: ARG001
 
 
 class TestKnowledgeRoutesAuth:
-    def test_status_without_session_401(self, env):
+    def test_shared_status_without_session_200(self, env):
         client, _ = env
-        assert client.get("/api/knowledge").status_code == 401
+        assert client.get("/api/knowledge").status_code == 200
 
-    def test_rebuild_without_session_401(self, env):
+    def test_rebuild_without_admin_403(self, env):
         client, _ = env
-        assert client.post("/api/knowledge/rebuild").status_code == 401
+        assert client.post("/api/knowledge/rebuild").status_code == 403
 
 
 class TestKnowledgeRoutes:

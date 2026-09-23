@@ -22,13 +22,11 @@ async function request(path, { method = 'GET', body, headers = {}, signal, authO
   }
   const durationMs = Math.round(performance.now() - started)
   debugLog('API response', { path, method, status: res.status, durationMs })
-  if (res.status === 401 && !authOptional) {
-    // Let the app fall back to the login screen instead of surfacing a raw 401
-    // error mid-action.
-    window.dispatchEvent(new Event('cotrace:unauthorized'))
-  }
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}))
+    if (!authOptional && (res.status === 401 || (res.status === 403 && detail.detail === 'Admin access required'))) {
+      window.dispatchEvent(new Event('cotrace:unauthorized'))
+    }
     log('warning', 'API request failed', { path, method, status: res.status, durationMs, detail: detail.detail })
     const error = new Error(detail.detail || `Request failed (${res.status})`)
     error.status = res.status

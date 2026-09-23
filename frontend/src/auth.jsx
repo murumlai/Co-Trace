@@ -1,24 +1,26 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { api } from './api'
 
 const AuthContext = createContext(null)
+const SHARED_USER = Object.freeze({ workspace_id: 'shared-workspace', username: 'shared-workspace', is_admin: false })
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null)
+  const [user, setUser] = useState(SHARED_USER)
   const [checking, setChecking] = useState(true)
-  const [sessionExpired, setSessionExpired] = useState(false)
+  const [notice, setNotice] = useState('')
+  const generation = useRef(0)
 
   useEffect(() => {
     let active = true
+    const current = generation.current
     api.me({ authOptional: true })
       .then((me) => {
-        if (!active) return
+        if (!active || current !== generation.current) return
         setUser(me)
-        setSessionExpired(false)
       })
       .catch(() => {
-        if (!active) return
-        setUser(null)
+        if (!active || current !== generation.current) return
+        setUser(SHARED_USER)
       })
       .finally(() => {
         if (active) setChecking(false)
@@ -30,50 +32,42 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     const onUnauthorized = () => {
-      setUser(null)
-      setSessionExpired(true)
+      generation.current += 1
+      setUser(SHARED_USER)
+      setNotice('Admin access is no longer available. Open Admin to sign in again; your workspace is unchanged.')
     }
     window.addEventListener('cotrace:unauthorized', onUnauthorized)
     return () => window.removeEventListener('cotrace:unauthorized', onUnauthorized)
   }, [])
 
-  const login = () => {
-    window.location.assign('/api/auth/github')
-  }
-
   const adminLogin = async (username, password) => {
+    const current = ++generation.current
     const res = await api.adminLogin({ username, password })
+    if (current !== generation.current) return
     setUser(res.user)
-    setSessionExpired(false)
+    setNotice('')
     return res.user
   }
 
   const logout = async () => {
-    try {
-      await api.logout()
-    } finally {
-      setUser(null)
-      setSessionExpired(false)
-    }
-  }
-
-  const clearSessionNotice = () => {
-    setSessionExpired(false)
+    generation.current += 1
+    await api.logout()
+    setUser(SHARED_USER)
+    setNotice('')
   }
 
   return (
     <AuthContext.Provider
       value={{
         user,
-        username: user?.username || user?.login || null,
-        login,
+        workspaceId: SHARED_USER.workspace_id,
         adminLogin,
         logout,
         checking,
-        isAuthed: !!user,
+        isAuthed: true,
         isAdmin: !!user?.is_admin,
-        sessionExpired,
-        clearSessionNotice,
+        notice,
+        clearNotice: () => setNotice(''),
       }}
     >
       {children}

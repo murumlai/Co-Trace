@@ -4,13 +4,15 @@ Co_Trace is a manufacturing test-log triage platform. It ingests FTRunner produc
 
 ## System Overview
 
+Prototype access update (2026-09-23): all visitors use one server-controlled `shared-workspace` principal. Home needs no sign-in or personal identity. The existing registry, stores, and dependency boundary are retained; no new service or storage architecture is introduced. Password-protected Admin mode grants maintenance permissions within that same workspace. Copilot authentication stays backend-only. Legacy account-owned jobs are not automatically published, and anonymous history does not identify individuals. Deploy only within a trusted network.
+
 ```mermaid
 graph TB
     subgraph Client["Frontend — React + Vite + Tailwind (SPA)"]
         direction TB
         Main["main.jsx<br/>entry / logging init"]
         AppShell["App.jsx<br/>tab router + batch orchestration"]
-        Auth["auth.jsx<br/>AuthContext"]
+        Auth["auth.jsx<br/>shared workspace + Admin role"]
         ApiJs["api.js<br/>HTTP client wrapper"]
         Logger["logger.js<br/>frontend telemetry"]
 
@@ -19,7 +21,6 @@ graph TB
             Engineer["Engineer<br/>triage worklist + RCA"]
             Manager["Manager<br/>scoped metrics + baselines"]
             Knowledge["Knowledge<br/>docs, playbooks, acronyms"]
-            Login["Login"]
             About["About"]
         end
 
@@ -27,6 +28,7 @@ graph TB
             TermView["TerminalViewer"]
             Recent["RecentBatches"]
             UI["ui.jsx primitives"]
+            AdminDialog["AdminDialog<br/>maintenance sign-in"]
         end
 
         subgraph Helpers["View-model helpers (node:test)"]
@@ -45,7 +47,7 @@ graph TB
     subgraph Server["Backend — FastAPI (Python)"]
         direction TB
         MainPy["main.py<br/>routes + middleware"]
-        AuthPy["auth.py<br/>GitHub OAuth + admin JWT"]
+        AuthPy["auth.py<br/>shared principal + Admin JWT"]
         Deps["dependencies.py<br/>composition root / DI"]
         Config["config.py<br/>env settings"]
         Contracts["contracts.py<br/>protocols"]
@@ -97,7 +99,6 @@ graph TB
     end
 
     subgraph External["External Services"]
-        GitHub["GitHub OAuth (optional)"]
         CopilotSDK["Enterprise GitHub Copilot<br/>(intel-foundry.ghe.com)"]
         Docs["Product Docs<br/>(PDF/DOCX/XLSX)"]
     end
@@ -162,7 +163,6 @@ graph TB
     KParsing --> Docs
 
     %% External
-    AuthPy --> GitHub
     CopilotClient --> CopilotSDK
 
     %% Disk persistence
@@ -180,11 +180,11 @@ graph TB
 
 | Area | Routes | Access |
 | --- | --- | --- |
-| Auth | `GET /api/auth/github`, `GET /api/auth/github/callback`, `POST /api/auth/admin/login`, `POST /api/logout`, `GET /api/me` | public / session |
-| Jobs | `POST /api/upload`, `GET /api/jobs`, `GET /api/jobs/{id}/status`, `POST /api/jobs/{id}/stop` | owner |
-| Engineer | `GET /api/jobs/{id}/units`, `GET /api/jobs/{id}/clusters`, `POST /api/jobs/{id}/units/{unit_id}/reanalyze`, `GET /api/jobs/{id}/debug-packet` | owner |
-| Feedback / actions | `GET\|POST /api/jobs/{id}/feedback`, `GET\|POST /api/jobs/{id}/actions`, `PATCH /api/jobs/{id}/actions/{action_id}` | owner |
-| Manager | `GET /api/jobs/{id}/manager`, `GET /api/jobs/{id}/comparison` | owner |
+| Access / Admin | `POST /api/auth/admin/login`, `POST /api/logout`, `GET /api/me`; old GitHub OAuth routes return 410 | shared workspace / Admin session |
+| Jobs | `POST /api/upload`, `GET /api/jobs`, `GET /api/jobs/{id}/status`, `POST /api/jobs/{id}/stop` | shared-workspace owner |
+| Engineer | `GET /api/jobs/{id}/units`, `GET /api/jobs/{id}/clusters`, `POST /api/jobs/{id}/units/{unit_id}/reanalyze`, `GET /api/jobs/{id}/debug-packet` | shared-workspace owner |
+| Feedback / actions | `GET\|POST /api/jobs/{id}/feedback`, `GET\|POST /api/jobs/{id}/actions`, `PATCH /api/jobs/{id}/actions/{action_id}` | shared-workspace owner |
+| Manager | `GET /api/jobs/{id}/manager`, `GET /api/jobs/{id}/comparison` | shared-workspace owner |
 | Cache | `DELETE /api/jobs/{id}/cache`, `GET /api/cache/analysis`, `DELETE /api/cache/analysis/{key}` | admin for deletes |
 | Knowledge | `GET /api/knowledge`, `GET /api/knowledge/scan`, `GET /api/knowledge/sections[/{id}]`, `GET /api/knowledge/upload/check`, `POST /api/knowledge/upload`, `GET /api/knowledge/jobs/{id}`, `POST /api/knowledge/rebuild`, `DELETE /api/knowledge/documents/{doc_id}`, `DELETE /api/knowledge` | admin for mutations |
 | Playbooks | `GET\|POST /api/knowledge/playbooks`, `PATCH\|DELETE /api/knowledge/playbooks/{id}` | admin for mutations |
@@ -591,7 +591,7 @@ erDiagram
 | Grounded LLM prompting | curated knowledge pack + reviewed playbooks + approved acronym glossary injected as trusted context |
 | Explicit provider selection | `LLM_PROVIDER=copilot_sdk` (enterprise host enforced) or `offline_stub`; no public GitHub Models path |
 | Pure computation layers | `aggregator.py`, `comparison.py`, `record_views.py` operate on `UnitRecord` lists without I/O |
-| Owner-scoped access | every job, feedback, action, and comparison route checks the authenticated owner; admin-only for cache/knowledge/playbook mutation |
+| Shared workspace boundary | job, feedback, action, and comparison routes retain the owner filter using the same shared principal for guests and Admin; legacy private jobs remain outside that scope; cache deletes and knowledge/playbook mutations require Admin |
 | Optimistic concurrency | investigation actions require `expected_version`; stale writes return conflict |
 | Atomic writes | job state, cache, feedback, actions, playbooks, and knowledge pack use temp file + `os.replace` |
 | PII redaction at boundary | `redaction.py` scrubs serials/IPs/MACs/credentials before LLM, at rest, in feedback notes, and in debug packets |
@@ -600,10 +600,10 @@ erDiagram
 
 ### Frontend (`frontend/src`)
 - **App.jsx** — tab-based SPA shell; batch upload orchestration, polling, and workspace restore.
-- **auth.jsx** — React `AuthContext` (GitHub OAuth + admin login, session expiry).
-- **api.js** — HTTP wrapper mapping to all `/api/*` endpoints; dispatches `cotrace:unauthorized` on 401.
-- **Pages** — Home (upload + recent batches), Engineer (triage worklist, clusters, RCA, evidence, feedback, actions, debug packets), Manager (scoped FPY, Pareto, retest burden, baselines, drill-down, report export), Knowledge (docs, coverage queue, playbooks, acronyms), Login, About.
-- **Components** — `TerminalViewer` (log search with context), `RecentBatches`, `ui.jsx` primitives.
+- **auth.jsx** — React `AuthContext` with a stable shared workspace and optional Admin session. Role changes do not clear navigation or drafts.
+- **api.js** — HTTP wrapper mapping to all `/api/*` endpoints; downgrades expired Admin access on 401 or the explicit Admin-required 403 without routing to a login page.
+- **Pages** — Home (upload + recent batches), Engineer (triage worklist, clusters, RCA, evidence, feedback, actions, debug packets), Manager (scoped FPY, Pareto, retest burden, baselines, drill-down, report export), Knowledge (docs, coverage queue, playbooks, acronyms), About.
+- **Components** — `AdminDialog` (password-protected maintenance), `TerminalViewer` (log search with context), `RecentBatches`, `ui.jsx` primitives.
 - **Helpers** — pure view-model modules (`workspaceState`, `jobMonitoring`, `uploadSelection`, `diagnosisPresentation`, `evidenceReferences`, `logEvidence`, `unitAttempts`, `managerMetrics`, `managerReport`), each covered by `node:test`.
 
 ### Backend (`backend/app`)
@@ -634,13 +634,13 @@ small file-backed stores therefore sit beside, rather than inside, the generated
     `dependencies.py` behind narrow protocols.
 - Feedback routes require the job-ownership check. Notes are redacted and bounded on write;
     stored failure metadata is an explicit whitelist. Entries expire with the owning job's TTL and
-    are never exposed across owners.
+    remain scoped to the shared owner. Ordinary visitors share them; legacy private entries are not migrated.
 - Playbook mutation is admin-only. Entries are retained as `draft`, `reviewed`, or `retired` and
     are not deleted by knowledge rebuild or document deletion.
 
 ### Batch Discovery and Scoped Analytics
 
-- Job listing is owner-filtered and paginated with deterministic creation-time/job-ID ordering.
+- Job listing is filtered to the shared workspace and paginated with deterministic creation-time/job-ID ordering.
     It exposes summaries only, never records or log text.
 - Per-job JSON carries backward-compatible optional `BatchMetadata`. Old job-state files load
     with unavailable metadata rather than fabricated values.
@@ -660,9 +660,9 @@ small file-backed stores therefore sit beside, rather than inside, the generated
     diagnoses without references remain compatible.
 - Claim-level source mappings require a separate prompt/provider contract.
 
-### Owner-Scoped Historical Comparison
+### Shared-Workspace Historical Comparison
 
-- The baseline is the newest prior owned, completed, non-duplicate (by `batch_fingerprint`) job
+- The baseline is selected from completed shared-workspace, non-duplicate (by `batch_fingerprint`) jobs
     with the same effective product scope and nonempty results under active lot/station filters.
 - Absolute date filters are not replayed against prior batches; each comparison reports current
     and baseline periods and sample sizes.
@@ -671,10 +671,10 @@ small file-backed stores therefore sit beside, rather than inside, the generated
 - Targets are optional request/session values with provenance `user_entered`; there is no shared
     target store.
 
-### Owner-Only Investigation Actions
+### Shared-Workspace Investigation Actions
 
-- Actions belong to an owned job and target one failed attempt or failure signature, validated
+- Actions belong to a shared-workspace job and target one failed attempt or failure signature, validated
     against current job records before writing.
 - Assignment is an informational label, not an authorization grant.
 - Every transition records actor, timestamp, previous/new status, assignee, and next action.
-- Cross-user collaboration or shared queues are outside this design and require separate approval.
+- All visitors share new actions and queues under the prototype decision. Browser selection/drafts remain local; there is no live collaboration channel or individual identity attribution. Existing optimistic versions continue to detect conflicting updates.

@@ -5,14 +5,14 @@ Co-Trace is a browser-based dashboard for manufacturing FTRunner logs. It parses
 - **Engineer**: triage worklist and signature-keyed failure clusters, search/sort/pagination, per-unit inspection with retry-vs-final-pass comparison, structured RCA (confidence, category, owner, risk, next action) linked to its log evidence, feedback, investigation actions, and redacted debug-packet export.
 - **Manager**: scoped filtering, first-pass yield vs. attempts, yield trend, signature Pareto, station/tester and lot breakdowns, retest burden, qualified baseline comparison against prior batches, clickable drill-down into Engineer, and shift-review report export.
 
-Recent batches can be reopened from the workspace, and the active investigation is restored after a page refresh.
+The app opens Home without sign-in. All visitors share newly created batches, feedback, and actions. Recent batches can be reopened, and explicit investigation URLs are restored after a page refresh. Browser filters and drafts are still local to each browser, not live-synchronized across users.
 
 ## Current State
 
 - `ftrunnerlog01.txt` is the source of truth for identity, timing, PASS/FAIL, `ErrorMsg`, `Errorcode` (SIMS `.itf` no longer authoritative).
 - Failed runs may attach a bounded, redacted `DebugLog.txt` excerpt from nested zips; each batch writes one redacted `<product_code>.json` per product before cleanup.
 - Diagnosis uses `LLM_PROVIDER` (`copilot_sdk` default = enterprise GitHub Copilot, or `offline_stub`); the public GitHub Models path is removed, and passing units never call the LLM.
-- Sign-in can use local admin credentials (`ADMIN_USERNAME`/`ADMIN_PASSWORD`) or optional GitHub OAuth. Jobs are owned by the signer, and knowledge/cache deletes are admin-only.
+- Ordinary use needs no Microsoft/GitHub identity or app login. **Admin** opens a maintenance-only sign-in; cache deletion and knowledge/playbook/acronym mutations remain protected by backend Admin checks.
 - Successful diagnoses are cached and reused across uploads unless force-refreshed or the product/acronym context changes the cache key.
 - Admin-reviewed known-failure playbooks match exact failure signatures and are applied before the cache or Copilot.
 - Engineer feedback and investigation actions (owner, status, handoff) persist per job under `WORK_DIR`.
@@ -67,7 +67,7 @@ npm.cmd install --proxy=http://proxy-us.intel.com:912 --https-proxy=http://proxy
 npm.cmd run dev -- --host localhost
 ```
 
-Open http://localhost:5173 for Vite development. The frontend proxies `/api` to the backend on port `8000`. Use the **Sign in as Admin** path with the local credentials above.
+Open http://localhost:5173 for Vite development. The frontend proxies `/api` to the backend on port `8000` and opens Home directly. To enable **Admin**, set a private `ADMIN_PASSWORD` in the backend environment before starting it. There is no default password. **Exit Admin** returns to regular mode without clearing the current batch or drafts. No password or Copilot credential is stored in browser storage.
 
 Health check:
 
@@ -81,7 +81,7 @@ Expected shape:
 {"status":"ok","llm_provider":"copilot_sdk","copilot_gh_host":"intel-foundry.ghe.com","debug":false,"llm_auth":{"copilot_sdk_available":true,"copilot_token_configured":false}}
 ```
 
-Optional GitHub OAuth sign-in still exists for deployments that need per-user GitHub identities. Configure `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_CALLBACK_URL`, and `GITHUB_ADMIN_USERS`; otherwise local admin sign-in is enough for local/internal testing.
+GitHub app OAuth is retired; its old routes return HTTP 410. Copilot CLI authentication is unchanged and belongs to the backend process. Its credentials must not be distributed to browser users. Confirm organizational approval and licensing for shared backend Copilot usage.
 
 ## Single-Server Run
 
@@ -95,7 +95,7 @@ Set-Location C:\Users\lloganat\source\repos\Co_Trace
 .\.venv\Scripts\python.exe backend\run_backend.py
 ```
 
-If optional OAuth is enabled for single-server mode, set `FRONTEND_URL` to `http://localhost:8000` and open http://localhost:8000.
+For single-server mode, set `FRONTEND_URL` to the exact origin used in the browser (for example `http://localhost:8000`) and open that URL. Set `CORS_ORIGINS` to any additional approved frontend origins. Unexpected browser origins are rejected for API mutations.
 
 ## Common Commands
 
@@ -104,7 +104,7 @@ If optional OAuth is enabled for single-server mode, set `FRONTEND_URL` to `http
 Set-Location C:\Users\lloganat\source\repos\Co_Trace
 .\.venv\Scripts\python.exe -m pytest backend\tests\ -q
 
-# Frontend unit tests and build
+# Frontend helper/component tests and build
 Set-Location C:\Users\lloganat\source\repos\Co_Trace\frontend
 npm.cmd test
 npm.cmd run build
@@ -129,11 +129,12 @@ Most-used environment variables:
 | `COPILOT_GITHUB_TOKEN` | empty | Optional GitHub token passed directly to the Copilot SDK provider. If empty, the SDK uses the logged-in Copilot CLI user. |
 | `COPILOT_GH_HOST` | `intel-foundry.ghe.com` | Enterprise host for Copilot auth/session. Public hosts such as `github.com` are rejected. |
 | `COPILOT_PROXY` | `http://proxy-us.intel.com:912` | Optional proxy for Copilot SDK subprocesses. |
-| `FRONTEND_URL` | `http://localhost:5173` | URL to redirect users back to after sign-in. |
-| `JWT_SECRET` | `dev-only-change-me` | Secret used to sign Co-Trace session cookies. Override outside local throwaway runs. |
+| `FRONTEND_URL` | `http://localhost:5173` | Approved browser origin for API mutations. Set to the deployed app origin. |
+| `CORS_ORIGINS` | localhost and 127.0.0.1 on port 5173 | Additional approved browser origins for API reads/writes. Use exact origins, not a wildcard. |
+| `JWT_SECRET` | random per process | Signs Admin cookies. Configure a strong stable secret (at least 32 characters) for persistent sessions or multiple workers; without it a restart ends Admin sessions. |
 | `COOKIE_SECURE` | `0` | Set to `1` when serving over HTTPS in production/IIS. |
-| `ADMIN_USERNAME` | `admin` | Username for the local maintenance admin login (separate from GitHub). |
-| `ADMIN_PASSWORD` | `admin` | Password for the local maintenance admin login. Set to empty to disable the local admin sign-in path. |
+| `ADMIN_USERNAME` | `admin` | Username for maintenance Admin mode, not a workspace identity. |
+| `ADMIN_PASSWORD` | empty | Private maintenance password. Empty disables Admin sign-in, not the shared app. |
 | `WORK_DIR` | `.cotrace_work` | Per-job uploads, job state, and analysis cache location. |
 | `CLEANUP_JOB_WORKDIR_AFTER_RUN` | `1` | Deletes uploads/extracted files/preprocessed JSON after terminal job state. |
 | `ANALYSIS_CACHE_ENABLED` | `1` | Reuses successful diagnoses across uploads. |
@@ -163,9 +164,11 @@ summaries (never whole documents) are sent alongside the redacted failure excerp
 ## Security and Storage
 
 - Local/generated outputs are gitignored, including `.cotrace_work`, virtualenvs, `node_modules`, `frontend/dist`, `product_docs` / `Product_Docs`, `product_knowledge*.json` artifacts, and `admin_playbooks.json`.
-- Redaction scrubs credentials, IPs, hostnames, usernames, MACs, and serials before LLM analysis; users authenticate via local admin credentials or optional GitHub OAuth, and Co-Trace stores only its signed HttpOnly session cookie.
+- This is a trusted-network prototype, not an authenticated multi-user service. Anyone who can reach it can read shared results, upload, reanalyze, stop shared jobs, and edit shared feedback/actions. Admin protects maintenance, not ordinary data access; restrict deployment with firewall/network controls and use HTTPS for shared access. Origin checks are not authentication.
+- Redaction scrubs credentials, IPs, hostnames, usernames, MACs, and serials before LLM analysis. Only Admin uses a signed HttpOnly, SameSite cookie; enable `COOKIE_SECURE` with HTTPS. Ordinary action history records `shared-workspace`, not an identifiable person. Admin events carry the configured maintenance label, not proof of an individual operator.
 - Uploads, extracted zips, and preprocessed JSON are removed after processing by default; the analysis cache, feedback, and investigation actions persist under `WORK_DIR`. Feedback and exported debug packets are redacted.
-- In production behind IIS, set the chosen auth variables and proxy values once on the server; users just open the app URL and sign in.
+- Existing GitHub/admin-owned job files are preserved but are not automatically exposed in the shared job catalog. All new jobs use the stable `shared-workspace` owner through the existing registry/store contracts. Publishing old jobs and their feedback/actions requires a separately reviewed migration; existing diagnosis cache reuse remains unchanged.
+- Copilot authentication failures retain the existing offline fallback and never redirect to an app login screen. No additional AI request is made to enter Home or Admin mode.
 
 ## Project Layout
 
@@ -184,8 +187,9 @@ backend/app/
   investigation_action_store.py  Investigation actions and handoffs
 
 frontend/src/
-  App.jsx             Authenticated shell and tabs
-  api.js              Fetch wrapper and session recovery
+  App.jsx             Shared Home-first shell and tabs
+  auth.jsx            Shared workspace context and Admin lifecycle
+  api.js              Fetch wrapper and Admin permission expiry handling
   pages/              Upload, diagnostics, analytics, knowledge UI
   components/         UI primitives, recent batches, terminal log viewer
   *.js / *.test.js    Pure view-model helpers with node:test coverage
@@ -195,4 +199,4 @@ frontend/src/
 
 - DebugLog excerpt anchors and character budget may need tuning as more product families are validated.
 - Per-product JSON artifacts are removed by default after processing; disable `CLEANUP_JOB_WORKDIR_AFTER_RUN` to inspect them.
-- Jobs created under a different login are not visible to the current signer, but matching saved diagnoses can still be reused.
+- Shared workspace access does not provide per-person authorization or reliable individual audit attribution. Do not expose it publicly. Legacy private batches are not automatically migrated.
