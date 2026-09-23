@@ -1495,19 +1495,52 @@ function DiagnosisMetadata({ attempt }) {
   if (!hasMetadata) return null
 
   const confidence = modelConfidenceLabel(attempt.confidence)
+  const details = [
+    ['Category', attempt.root_cause_category],
+    ['Confidence', confidence],
+    ['Suggested team', attempt.likely_owner],
+    ['Reported risk', attempt.safety_or_escape_risk],
+  ].filter(([, value]) => value)
 
   return (
-    <div className="mb-3 flex flex-wrap gap-2">
-      {attempt.root_cause_category && <Badge tone="accent">Category: {attempt.root_cause_category}</Badge>}
-      {confidence && <Badge tone="muted">{confidence}</Badge>}
-      {attempt.likely_owner && <Badge tone="muted">Suggested team: {attempt.likely_owner}</Badge>}
-      {attempt.safety_or_escape_risk && (
-        <Badge tone={attempt.safety_or_escape_risk.toLowerCase() === 'low' ? 'pass' : 'warn'}>
-          Reported risk: {attempt.safety_or_escape_risk}
-        </Badge>
-      )}
-      {attempt.needs_more_evidence === true && <Badge tone="warn">Needs more evidence</Badge>}
-    </div>
+    <Disclosure
+      title="Diagnosis details"
+      className="mb-4"
+      trailing={attempt.needs_more_evidence === true && <Badge tone="warn">Needs more evidence</Badge>}
+    >
+      <dl className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-[8rem_minmax(0,1fr)]">
+        {details.map(([label, value]) => (
+          <Fragment key={label}>
+            <dt className="text-muted">{label}</dt>
+            <dd className="break-words text-ink [overflow-wrap:anywhere]">{value}</dd>
+          </Fragment>
+        ))}
+        {attempt.needs_more_evidence != null && (
+          <>
+            <dt className="text-muted">Evidence status</dt>
+            <dd className="text-ink">{attempt.needs_more_evidence ? 'More evidence needed' : 'Sufficient for this hypothesis'}</dd>
+          </>
+        )}
+      </dl>
+    </Disclosure>
+  )
+}
+
+function Disclosure({ title, meta, trailing, className = '', children }) {
+  return (
+    <details className={`group border-y border-border/60 ${className}`}>
+      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 py-2 text-sm font-medium text-ink focus-ring">
+        <span className="flex min-w-0 items-center gap-2">
+          <span aria-hidden="true" className="text-muted transition-transform group-open:rotate-90">›</span>
+          <span>{title}</span>
+          {meta && <span className="truncate text-xs font-normal text-muted">{meta}</span>}
+        </span>
+        {trailing}
+      </summary>
+      <div className="border-t border-border/60 py-3">
+        {children}
+      </div>
+    </details>
   )
 }
 
@@ -1525,8 +1558,7 @@ function VerificationAction({ attempt }) {
 function SupportingEvidence({ attempt, onFocusLine, onReviewKnowledge }) {
   const references = validateEvidenceReferences(attempt.evidence_references, attempt.redacted_snippet || '')
   return (
-    <div className="mb-4">
-      <div className="mb-2 text-xs uppercase tracking-wide text-muted">Supporting evidence</div>
+    <div>
       <EvidenceQuality attempt={attempt} />
       <KnowledgeBadge attempt={attempt} />
       <DebugLogStatus attempt={attempt} />
@@ -1536,7 +1568,7 @@ function SupportingEvidence({ attempt, onFocusLine, onReviewKnowledge }) {
         </p>
       )}
       <div className="mt-3 border-t border-border/60 pt-3">
-        <p className="mb-2 text-xs font-medium text-muted">Sources provided to analysis</p>
+        <p className="mb-2 text-xs font-medium text-muted">Source references</p>
         {references.length === 0 ? (
           <p className="text-xs text-muted">Source references are unavailable for this diagnosis.</p>
         ) : (
@@ -1613,6 +1645,15 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
     ? 'cache cleared'
     : ANALYSIS_SOURCE_LABEL[attempt.analysis_source] || attempt.analysis_source
   const when = attempt.start_time ? attempt.start_time.replace('T', ' ').slice(0, 19) : null
+  const evidenceReferenceCount = validateEvidenceReferences(
+    attempt.evidence_references,
+    attempt.redacted_snippet || '',
+  ).length
+  const evidenceMeta = `${evidenceReferenceCount} source${evidenceReferenceCount === 1 ? '' : 's'}`
+  const feedbackCount = feedbackEntries?.length || 0
+  const actionMeta = investigationAction
+    ? `${feedbackCount} feedback · action ${investigationAction.status.replace('_', ' ')}`
+    : `${feedbackCount} feedback`
 
   return (
     <Panel className="min-w-0 overflow-hidden p-5">
@@ -1655,73 +1696,76 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
         <Guidance attempt={attempt} />
       </div>
 
-      <SupportingEvidence attempt={attempt} onFocusLine={setFocusLine} onReviewKnowledge={onReviewKnowledge} />
-
-      {showSnippet && (
-        <div className="mb-4">
-          <TerminalViewer
-            text={attempt.redacted_snippet || ''}
-            title="Redacted log snippet"
-            errorCode={attempt.error_code || null}
-            failingStep={attempt.failing_step || null}
-            timestamp={when || null}
-            focusLine={focusLine}
-          />
-        </div>
-      )}
-
-      <FeedbackControls
-        attempt={attempt}
-        entries={feedbackEntries}
-        busy={feedbackBusy}
-        onSubmit={onFeedback}
-        note={feedbackDraft}
-        onNoteChange={onFeedbackDraftChange}
-      />
-
-      <InvestigationActionControls
-        attempt={attempt}
-        entry={investigationAction}
-        busy={investigationActionBusy}
-        onCreate={onCreateInvestigationAction}
-        onUpdate={onUpdateInvestigationAction}
-      />
-
-      <div className="mt-4 flex flex-wrap gap-3">
-        <Button onClick={() => onReanalyze(attempt)} disabled={reanalyzing === attempt.unit_id}>
-          {reanalyzing === attempt.unit_id ? 'Re-analyzing…' : 'Re-analyze this attempt'}
-        </Button>
-        {canClearCache && (
-          <Button
-            onClick={() => onClearCache(attempt)}
-            disabled={clearingCache === attempt.analysis_cache_key}
-          >
-            {clearingCache === attempt.analysis_cache_key ? 'Clearing cache…' : 'Clear cached result'}
-          </Button>
+      <Disclosure title="Evidence and sources" meta={evidenceMeta} className="mb-3">
+        <SupportingEvidence attempt={attempt} onFocusLine={setFocusLine} onReviewKnowledge={onReviewKnowledge} />
+        {showSnippet && (
+          <div className="mt-4">
+            <TerminalViewer
+              text={attempt.redacted_snippet || ''}
+              title="Redacted log snippet"
+              errorCode={attempt.error_code || null}
+              failingStep={attempt.failing_step || null}
+              timestamp={when || null}
+              focusLine={focusLine}
+            />
+          </div>
         )}
-        <Button
-          variant="ghost"
-          onClick={() => onExport({
-            unitId: attempt.unit_id,
-            filename: `co-trace-unit-${attempt.serial_number || attempt.unit_id}.md`,
-          })}
-          disabled={exporting === attempt.unit_id}
-        >
-          {exporting === attempt.unit_id ? 'Exporting…' : 'Export packet'}
-        </Button>
-        {(attempt.knowledge_match_status !== 'matched' || attempt.unknown_acronyms?.length > 0) && (
+      </Disclosure>
+
+      <Disclosure title="Feedback and actions" meta={actionMeta}>
+        <FeedbackControls
+          attempt={attempt}
+          entries={feedbackEntries}
+          busy={feedbackBusy}
+          onSubmit={onFeedback}
+          note={feedbackDraft}
+          onNoteChange={onFeedbackDraftChange}
+        />
+
+        <InvestigationActionControls
+          attempt={attempt}
+          entry={investigationAction}
+          busy={investigationActionBusy}
+          onCreate={onCreateInvestigationAction}
+          onUpdate={onUpdateInvestigationAction}
+        />
+
+        <div className="flex flex-wrap gap-3">
+          <Button onClick={() => onReanalyze(attempt)} disabled={reanalyzing === attempt.unit_id}>
+            {reanalyzing === attempt.unit_id ? 'Re-analyzing…' : 'Re-analyze this attempt'}
+          </Button>
+          {canClearCache && (
+            <Button
+              onClick={() => onClearCache(attempt)}
+              disabled={clearingCache === attempt.analysis_cache_key}
+            >
+              {clearingCache === attempt.analysis_cache_key ? 'Clearing cache…' : 'Clear cached result'}
+            </Button>
+          )}
           <Button
             variant="ghost"
-            onClick={() => onReviewKnowledge?.({
-              productCode: attempt.product_code,
-              acronym: attempt.unknown_acronyms?.[0] || null,
-              playbookId: attempt.playbook_id,
+            onClick={() => onExport({
+              unitId: attempt.unit_id,
+              filename: `co-trace-unit-${attempt.serial_number || attempt.unit_id}.md`,
             })}
+            disabled={exporting === attempt.unit_id}
           >
-            Review knowledge
+            {exporting === attempt.unit_id ? 'Exporting…' : 'Export packet'}
           </Button>
-        )}
-      </div>
+          {(attempt.knowledge_match_status !== 'matched' || attempt.unknown_acronyms?.length > 0) && (
+            <Button
+              variant="ghost"
+              onClick={() => onReviewKnowledge?.({
+                productCode: attempt.product_code,
+                acronym: attempt.unknown_acronyms?.[0] || null,
+                playbookId: attempt.playbook_id,
+              })}
+            >
+              Review knowledge
+            </Button>
+          )}
+        </div>
+      </Disclosure>
     </Panel>
   )
 }
