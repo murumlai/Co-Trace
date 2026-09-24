@@ -11,6 +11,8 @@ test('opens Home, reopens a batch, and navigates the real shell', async ({ page 
   await expect(page.getByText('Sign in with GitHub')).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Recent batches' }).click()
+  await expect(page.getByText('Batches in the shared workspace')).toBeVisible()
+  await expect(page.getByText('0 attempts')).toBeVisible()
   await page.getByRole('button', { name: /Synthetic batch/ }).click()
   await expect(page.getByRole('heading', { name: 'Engineer view' })).toBeVisible()
 

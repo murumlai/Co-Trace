@@ -7,8 +7,8 @@ from .aggregator import build_manager_view, filter_records
 from .fingerprints import batch_fingerprint
 
 _METRICS = {
-    "first_observed_pass_rate": ("fpy", "fpy_total"),
-    "latest_observed_unit_yield": ("latest_yield", "latest_yield_total"),
+    "first_observed_pass_rate": ("fpy", "fpy_pass", "fpy_total"),
+    "latest_observed_unit_yield": ("latest_yield", "latest_yield_pass", "latest_yield_total"),
 }
 
 
@@ -97,26 +97,38 @@ def compare_jobs(
         return _unavailable(_unavailable_reason(rejection_reasons, history_complete))
 
     comparisons = {}
-    for name, (value_key, denominator_key) in _METRICS.items():
-        current_value = float(current_view["summary"].get(value_key) or 0)
-        baseline_value = float(baseline_view["summary"].get(value_key) or 0)
+    for name, (value_key, numerator_key, denominator_key) in _METRICS.items():
+        current_denominator = int(current_view["summary"].get(denominator_key) or 0)
+        baseline_denominator = int(baseline_view["summary"].get(denominator_key) or 0)
+        current_numerator = int(current_view["summary"].get(numerator_key) or 0)
+        baseline_numerator = int(baseline_view["summary"].get(numerator_key) or 0)
+        available = current_denominator > 0 and baseline_denominator > 0
+        current_value = float(current_view["summary"].get(value_key) or 0) if current_denominator else None
+        baseline_value = float(baseline_view["summary"].get(value_key) or 0) if baseline_denominator else None
         comparisons[name] = {
+            "available": available,
+            "reason": None if available else "Current and baseline both require observed PASS/FAIL outcomes",
             "current": current_value,
             "baseline": baseline_value,
-            "delta_pp": round(current_value - baseline_value, 2),
-            "current_denominator": int(current_view["summary"].get(denominator_key) or 0),
-            "baseline_denominator": int(baseline_view["summary"].get(denominator_key) or 0),
+            "delta_pp": round(current_value - baseline_value, 2) if available else None,
+            "current_numerator": current_numerator,
+            "current_denominator": current_denominator,
+            "baseline_numerator": baseline_numerator,
+            "baseline_denominator": baseline_denominator,
         }
 
     target = None
     if target_percent is not None:
         metric = target_metric if target_metric in _METRICS else "first_observed_pass_rate"
-        value_key = _METRICS[metric][0]
-        current_value = float(current_view["summary"].get(value_key) or 0)
+        value_key, _, denominator_key = _METRICS[metric]
+        denominator = int(current_view["summary"].get(denominator_key) or 0)
+        current_value = float(current_view["summary"].get(value_key) or 0) if denominator else None
         target = {
             "metric": metric,
             "percent": target_percent,
-            "gap_pp": round(current_value - target_percent, 2),
+            "available": denominator > 0,
+            "reason": None if denominator else "Current scope has no observed PASS/FAIL outcomes for this target",
+            "gap_pp": round(current_value - target_percent, 2) if current_value is not None else None,
             "provenance": "user_entered",
         }
 

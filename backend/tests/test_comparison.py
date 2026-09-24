@@ -147,6 +147,44 @@ def test_user_entered_target_has_explicit_provenance_and_percentage_point_gap():
     assert result["target"] == {
         "metric": "latest_observed_unit_yield",
         "percent": 95,
+        "available": True,
+        "reason": None,
         "gap_pp": 5,
         "provenance": "user_entered",
     }
+
+
+def test_zero_denominator_metrics_and_target_are_unavailable_not_zero_percent():
+    current = _job("current", 40, [_record("c1", "SN1", "UNKNOWN")])
+    baseline = _job("baseline", 20, [_record("b2", "SN2", "UNKNOWN")])
+
+    result = compare_jobs(
+        current,
+        [baseline],
+        target_metric="latest_observed_unit_yield",
+        target_percent=95,
+    )
+
+    metric = result["metrics"]["latest_observed_unit_yield"]
+    assert metric["available"] is False
+    assert metric["current"] is None
+    assert metric["baseline"] is None
+    assert metric["delta_pp"] is None
+    assert metric["current_numerator"] == 0
+    assert metric["current_denominator"] == 0
+    assert result["target"]["available"] is False
+    assert result["target"]["gap_pp"] is None
+
+
+def test_observed_zero_success_remains_available():
+    current = _job("current", 40, [_record("c1", "SN1", "FAIL")])
+    baseline = _job("baseline", 20, [_record("b1", "SN1", "PASS")])
+
+    result = compare_jobs(current, [baseline])
+
+    metric = result["metrics"]["latest_observed_unit_yield"]
+    assert metric["available"] is True
+    assert metric["current"] == 0
+    assert metric["current_numerator"] == 0
+    assert metric["current_denominator"] == 1
+    assert metric["delta_pp"] == -100

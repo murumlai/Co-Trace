@@ -304,9 +304,9 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
         {topFailure && (
           <MetricCard
             label="Top failed-attempt family"
-            value={`${topFailure.pct}%`}
+            value={formatRate(topFailure.pct, topFailure.count, topFailure.total || s.failed_attempts)}
             tone="fail"
-            hint={`${topFailure.reason} · ${topFailure.count} failed attempts`}
+            hint={topFailure.reason}
           />
         )}
       </div>
@@ -344,7 +344,7 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
                     <td className="py-2">{item.date}</td>
                     <td className="py-2 text-right text-teal">{item.pass}</td>
                     <td className="py-2 text-right text-danger">{item.fail}</td>
-                    <td className="py-2 text-right font-medium">{formatRate(item.yield, item.pass + item.fail)}</td>
+                    <td className="py-2 text-right font-medium">{formatRate(item.yield, item.pass, item.pass + item.fail)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -403,8 +403,8 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
                 </button>
                 </td>
                 <td className="py-2 text-right">{p.count}</td>
-                <td className="py-2 text-right">{p.pct}%</td>
-                <td className="py-2 text-right">{p.cum_pct}%</td>
+                <td className="py-2 text-right">{formatRate(p.pct, p.count, p.total || s.failed_attempts)}</td>
+                <td className="py-2 text-right">{formatRate(p.cum_pct, p.cum_count, p.total || s.failed_attempts)}</td>
               </tr>
             ))}
               </tbody>
@@ -451,7 +451,7 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
                 <td className="py-2 text-right">{station.total}</td>
                 <td className="py-2 text-right text-teal">{station.pass}</td>
                 <td className="py-2 text-right text-danger">{station.fail}</td>
-                <td className="py-2 text-right font-medium">{formatRate(station.total ? (station.fail / station.total) * 100 : 0, station.total)}</td>
+                <td className="py-2 text-right font-medium">{formatRate(station.total ? (station.fail / station.total) * 100 : 0, station.fail, station.total)}</td>
               </tr>
             ))}
               </tbody>
@@ -497,7 +497,7 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
                     <td className="py-2 truncate">{l.lot}</td>
                     <td className="py-2 text-right text-teal">{l.pass}</td>
                     <td className="py-2 text-right text-danger">{l.fail}</td>
-                    <td className="py-2 text-right font-semibold">{formatRate(l.yield, l.total)}</td>
+                    <td className="py-2 text-right font-semibold">{formatRate(l.yield, l.pass, l.total)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -552,10 +552,13 @@ function ComparisonPanel({ comparison, loading, error, targetMetric, targetPerce
               <p className="mt-1 text-xs text-muted">{comparison.scope.current_attempts} current / {comparison.scope.baseline_attempts} baseline attempts</p>
             </div>
           </div>
-          {comparison.target && (
+          {comparison.target && comparison.target.available !== false && (
             <p className="mt-3 text-sm text-ink-2">
               User-entered {comparison.target.percent}% target · gap {formatDelta(comparison.target.gap_pp)} percentage points
             </p>
+          )}
+          {comparison.target?.available === false && (
+            <p className="mt-3 text-sm text-muted">Target unavailable: {comparison.target.reason}</p>
           )}
           <p className="mt-2 text-xs text-muted">{comparison.scope.time_rule}</p>
         </div>
@@ -566,11 +569,23 @@ function ComparisonPanel({ comparison, loading, error, targetMetric, targetPerce
 
 function ComparisonMetric({ label, metric }) {
   if (!metric) return null
+  const available = metric.available ?? (metric.current_denominator > 0 && metric.baseline_denominator > 0)
+  if (!available) {
+    return (
+      <div className="rounded-lg border border-border bg-surface px-4 py-3">
+        <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
+        <p className="mt-1 text-lg font-bold text-muted">— (0/0)</p>
+        <p className="mt-1 text-xs text-muted">{metric.reason}</p>
+      </div>
+    )
+  }
   return (
     <div className="rounded-lg border border-border bg-surface px-4 py-3">
       <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
       <p className={`mt-1 text-2xl font-bold ${metric.delta_pp >= 0 ? 'text-teal' : 'text-danger'}`}>{formatDelta(metric.delta_pp)} pp</p>
-      <p className="mt-1 text-xs text-muted">{metric.current}% ({metric.current_denominator}) vs {metric.baseline}% ({metric.baseline_denominator})</p>
+      <p className="mt-1 text-xs text-muted">
+        {formatRate(metric.current, metric.current_numerator, metric.current_denominator)} vs {formatRate(metric.baseline, metric.baseline_numerator, metric.baseline_denominator)}
+      </p>
     </div>
   )
 }

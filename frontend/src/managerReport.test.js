@@ -19,12 +19,12 @@ test('exports active scope, completeness, KPIs, and aggregate tables', () => {
     },
     scope: { filters: { products: ['P1'], lots: ['L1'], stations: ['S1'] } },
     summary: {
-      fpy: 50, fpy_pass: 1, fpy_total: 2, latest_yield: 100,
+      fpy: 50, fpy_pass: 1, fpy_total: 2, latest_yield: 100, failed_attempts: 1,
       latest_yield_pass: 2, latest_yield_total: 2, failed: 0, unique_units: 2,
       additional_attempt_share: 33.33, retests: 1, total_runs: 3,
       recovered_after_retry: 1, unknown: 0,
     },
-    pareto: [{ reason: '=unsafe', count: 1, pct: 100, cum_pct: 100, unit_ids: ['SN1'] }],
+    pareto: [{ reason: '=unsafe', count: 1, total: 1, cum_count: 1, pct: 100, cum_pct: 100, unit_ids: ['SN1'] }],
     stations: [{ station: 'H / ST1', total: 2, pass: 1, fail: 1 }],
     lots: [{ lot: 'L1', total: 2, pass: 1, fail: 1, yield: 50 }],
     trend: [{ date: '2026-09-21', pass: 1, fail: 1, yield: 50 }],
@@ -45,6 +45,8 @@ test('exports active scope, completeness, KPIs, and aggregate tables', () => {
   assert.match(csv, /Active product filters","P1/)
   assert.match(csv, /2\/3 parsed runs included/)
   assert.match(csv, /Latest observed unit yield/)
+  assert.match(csv, /50% \(1\/2\)/)
+  assert.match(csv, /100% \(1\/1\)/)
   assert.match(csv, /"'=unsafe"/)
   assert.match(csv, /Attempt pass-rate trend/)
   assert.match(csv, /Prior batch/)
@@ -52,6 +54,22 @@ test('exports active scope, completeness, KPIs, and aggregate tables', () => {
   assert.match(csv, /Verified investigation actions/)
   assert.match(csv, /Inspect fixture/)
   assert.match(csv, /Not included in aggregate export/)
+})
+
+test('exports unavailable rates distinctly from observed zero success', () => {
+  const csv = buildManagerCsv({
+    batch: {},
+    scope: {},
+    summary: {
+      fpy: 0, fpy_pass: 0, fpy_total: 0,
+      latest_yield: 0, latest_yield_pass: 0, latest_yield_total: 3,
+      failed: 3, unique_units: 3, additional_attempt_share: 0,
+      retests: 0, total_runs: 3, recovered_after_retry: 0, unknown: 0,
+    },
+  })
+
+  assert.match(csv, /First observed pass rate","— \(0\/0\)/)
+  assert.match(csv, /Latest observed unit yield","0% \(0\/3\)/)
 })
 
 test('creates a bounded filesystem-safe report filename', () => {

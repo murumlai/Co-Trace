@@ -60,7 +60,7 @@ export default function RecentBatches({
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <p className="font-display text-sm font-bold text-ink">Recent batches</p>
-              <p className="text-xs text-muted">Only batches available to this account</p>
+              <p className="text-xs text-muted">Batches in the shared workspace</p>
             </div>
             <button type="button" className="rounded-md px-2 py-1 text-xs text-accent hover:bg-accent/10 focus-ring" onClick={onRefresh}>
               Refresh
@@ -119,7 +119,7 @@ export default function RecentBatches({
                 </div>
                 <div className="mt-1 flex items-center justify-between gap-3 text-xs text-muted">
                   <span>{formatCreatedAt(job.created_at)}</span>
-                  <span>{job.unit_count} unit{job.unit_count === 1 ? '' : 's'}</span>
+                  <span>{job.unit_count} attempt{job.unit_count === 1 ? '' : 's'}</span>
                 </div>
               </button>
             ))}

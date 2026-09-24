@@ -4,17 +4,18 @@ import { additionalAttemptMetric, firstObservedPassMetric, formatRate, latestObs
 
 test('formats a first-observed pass rate with its unit denominator', () => {
   assert.deepEqual(firstObservedPassMetric({ fpy: 75, fpy_pass: 3, fpy_total: 4 }), {
-    value: '75%',
-    hint: '3/4 units passed on their first observed attempt',
+    value: '75% (3/4)',
+    hint: 'Units passed on their first observed attempt',
   })
 })
 
 test('does not present zero percent when no PASS or FAIL observation exists', () => {
   assert.deepEqual(firstObservedPassMetric({ fpy: 0, fpy_pass: 0, fpy_total: 0 }), {
-    value: '—',
+    value: '— (0/0)',
     hint: 'No PASS/FAIL first observations',
   })
-  assert.equal(formatRate(0, 0), '—')
+  assert.equal(formatRate(0, 0, 0), '— (0/0)')
+  assert.equal(formatRate(0, 0, 4), '0% (0/4)')
 })
 
 test('latest outcomes reconcile passed, failed, and unknown units', () => {
@@ -28,15 +29,15 @@ test('formats latest unit yield and additional-attempt share with explicit denom
     latest_yield_pass: 8,
     latest_yield_total: 10,
   }), {
-    value: '80%',
-    hint: '8/10 latest PASS/FAIL unit outcomes',
+    value: '80% (8/10)',
+    hint: 'Latest PASS/FAIL unit outcomes',
   })
   assert.deepEqual(additionalAttemptMetric({
     additional_attempt_share: 25,
     retests: 3,
     total_runs: 12,
   }), {
-    value: '25%',
-    hint: "3/12 attempts beyond each unit's first observed attempt",
+    value: '25% (3/12)',
+    hint: "Attempts beyond each unit's first observed attempt",
   })
 })

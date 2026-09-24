@@ -1,18 +1,22 @@
-export function formatRate(percentage, denominator) {
-  return Number(denominator) > 0 ? `${Number(percentage || 0)}%` : '—'
+export function formatRate(percentage, numerator, denominator) {
+  const observed = Number(denominator || 0)
+  const successes = Number(numerator || 0)
+  return observed > 0
+    ? `${Number(percentage || 0)}% (${successes}/${observed})`
+    : '— (0/0)'
 }
 
 export function firstObservedPassMetric(summary) {
   const denominator = Number(summary?.fpy_total || 0)
   if (!denominator) {
     return {
-      value: '—',
+      value: formatRate(0, 0, 0),
       hint: 'No PASS/FAIL first observations',
     }
   }
   return {
-    value: formatRate(summary.fpy, denominator),
-    hint: `${summary.fpy_pass}/${denominator} units passed on their first observed attempt`,
+    value: formatRate(summary.fpy, summary.fpy_pass, denominator),
+    hint: 'Units passed on their first observed attempt',
   }
 }
 
@@ -23,9 +27,9 @@ export function latestOutcomeTotal(summary) {
 export function latestObservedYieldMetric(summary) {
   const denominator = Number(summary?.latest_yield_total || 0)
   return {
-    value: formatRate(summary?.latest_yield, denominator),
+    value: formatRate(summary?.latest_yield, summary?.latest_yield_pass, denominator),
     hint: denominator
-      ? `${summary.latest_yield_pass}/${denominator} latest PASS/FAIL unit outcomes`
+      ? 'Latest PASS/FAIL unit outcomes'
       : 'No latest PASS/FAIL unit outcomes',
   }
 }
@@ -33,9 +37,9 @@ export function latestObservedYieldMetric(summary) {
 export function additionalAttemptMetric(summary) {
   const denominator = Number(summary?.total_runs || 0)
   return {
-    value: formatRate(summary?.additional_attempt_share, denominator),
+    value: formatRate(summary?.additional_attempt_share, summary?.retests, denominator),
     hint: denominator
-      ? `${summary.retests}/${denominator} attempts beyond each unit's first observed attempt`
+      ? "Attempts beyond each unit's first observed attempt"
       : 'No observed attempts',
   }
 }

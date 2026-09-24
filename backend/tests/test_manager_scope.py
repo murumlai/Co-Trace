@@ -65,6 +65,7 @@ def test_product_filter_calculates_first_and_latest_within_selection():
 
     assert view["summary"] == {
         "total_runs": 2,
+        "failed_attempts": 1,
         "unique_units": 1,
         "passed": 1,
         "failed": 0,

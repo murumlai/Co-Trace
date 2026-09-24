@@ -135,6 +135,7 @@ def compute_summary(records: list[UnitRecord]) -> dict:
 
     summary = {
         "total_runs": total,
+        "failed_attempts": sum(1 for record in records if record.result == "FAIL"),
         "unique_units": len(attempts),
         "passed": passed,
         "failed": failed,
@@ -207,6 +208,8 @@ def compute_pareto(records: list[UnitRecord], top: int = 10) -> list[dict]:
             "signature": signature,
             "reason": labels[signature],
             "count": count,
+            "total": total,
+            "cum_count": cum,
             "pct": round(count / total * 100.0, 2) if total else 0.0,
             "cum_pct": round(cum / total * 100.0, 2) if total else 0.0,
             "attempt_ids": [record.unit_id for record in grouped[signature]],
