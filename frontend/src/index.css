@@ -181,4 +181,12 @@ summary {
     break-inside: avoid;
     box-shadow: none !important;
   }
+
+  .manager-print-details > summary {
+    display: none !important;
+  }
+
+  .manager-print-details > :not(summary) {
+    display: block !important;
+  }
 }

@@ -188,3 +188,26 @@ def test_observed_zero_success_remains_available():
     assert metric["current_numerator"] == 0
     assert metric["current_denominator"] == 1
     assert metric["delta_pp"] == -100
+
+
+def test_current_time_scope_is_not_replayed_on_baseline():
+    current = _job("current", 40, [
+        _record("c1", "SN1", "FAIL"),
+        _record("c2", "SN2", "PASS"),
+    ])
+    baseline = _job("baseline", 20, [
+        _record("b1", "SN3", "FAIL"),
+        _record("b2", "SN4", "PASS"),
+    ])
+
+    result = compare_jobs(
+        current,
+        [baseline],
+        start_time="2026-09-22T00:00:00",
+    )
+
+    assert result["available"] is True
+    assert result["scope"]["current_attempts"] == 1
+    assert result["scope"]["baseline_attempts"] == 2
+    assert result["scope"]["current_start_time"] == "2026-09-22T00:00:00"
+    assert result["scope"]["time_rule"] == "Current metrics use the active time scope; the baseline uses its own full observed period."

@@ -89,6 +89,8 @@ export const api = {
     ;(scope.products || []).forEach((value) => params.append('product', value))
     ;(scope.lots || []).forEach((value) => params.append('lot', value))
     ;(scope.stations || []).forEach((value) => params.append('station', value))
+    if (scope.startTime) params.set('start_time', scope.startTime)
+    if (scope.endTime) params.set('end_time', scope.endTime)
     if (scope.targetPercent !== '' && scope.targetPercent != null) {
       params.set('target_metric', scope.targetMetric || 'first_observed_pass_rate')
       params.set('target_percent', String(scope.targetPercent))

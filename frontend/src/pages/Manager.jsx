@@ -71,6 +71,8 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
     products: scope.products,
     lots: scope.lots,
     stations: scope.stations,
+    startTime: scope.startTime,
+    endTime: scope.endTime,
     targetMetric: scope.targetMetric,
     targetPercent: scope.targetPercent,
   })
@@ -242,28 +244,6 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
         activeCount={activeScopeCount}
         loading={loading}
         onChange={onScopeChange}
-      />
-      <ComparisonPanel
-        comparison={comparison}
-        loading={comparisonLoading}
-        error={comparisonError}
-        targetMetric={scope.targetMetric}
-        targetPercent={scope.targetPercent}
-        onTargetChange={(update) => onScopeChange?.({ ...scope, ...update })}
-      />
-      <ActionQueue
-        entries={actions}
-        error={actionsError}
-        busy={actionBusy}
-        onRetry={() => setActionsReload((value) => value + 1)}
-        onStatusChange={updateActionStatus}
-        onOpen={(entry) => onDrillDown({
-          attempt_id: entry.unit_id || null,
-          signature: entry.signature || null,
-          label: entry.error_code || entry.next_action,
-          attempt_ids: entry.unit_id ? [entry.unit_id] : [],
-          unit_ids: [],
-        })}
       />
 
       {loading && <p role="status" className="mb-4 text-sm text-muted">Updating selected scope…</p>}
@@ -509,6 +489,29 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
       </div>
       </>
       )}
+
+      <ComparisonPanel
+        comparison={comparison}
+        loading={comparisonLoading}
+        error={comparisonError}
+        targetMetric={scope.targetMetric}
+        targetPercent={scope.targetPercent}
+        onTargetChange={(update) => onScopeChange?.({ ...scope, ...update })}
+      />
+      <ActionQueue
+        entries={actions}
+        error={actionsError}
+        busy={actionBusy}
+        onRetry={() => setActionsReload((value) => value + 1)}
+        onStatusChange={updateActionStatus}
+        onOpen={(entry) => onDrillDown({
+          attempt_id: entry.unit_id || null,
+          signature: entry.signature || null,
+          label: entry.error_code || entry.next_action,
+          attempt_ids: entry.unit_id ? [entry.unit_id] : [],
+          unit_ids: [],
+        })}
+      />
     </div>
   )
 }
@@ -525,47 +528,59 @@ function SortButton({ label, column, sort, onChange }) {
 function ComparisonPanel({ comparison, loading, error, targetMetric, targetPercent, onTargetChange }) {
   const first = comparison?.metrics?.first_observed_pass_rate
   const latest = comparison?.metrics?.latest_observed_unit_yield
+  const status = loading
+    ? 'Checking…'
+    : error
+      ? 'Unavailable'
+      : comparison?.available
+        ? `Baseline: ${comparison.baseline.display_name}`
+        : comparison?.reason || 'Unavailable'
   return (
-    <section className="print-avoid-break mb-6 border-y border-border bg-surface/50 py-4" aria-labelledby="comparison-heading">
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h2 id="comparison-heading" className="font-display text-sm font-bold text-ink">Qualified comparison</h2>
+    <details className="manager-print-details group print-avoid-break mt-6 border-y border-border bg-surface/50">
+      <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 py-3 focus-ring">
+        <span id="comparison-heading" className="font-display text-sm font-bold text-ink">Qualified comparison</span>
+        <span className={`text-xs ${error ? 'text-danger' : 'text-muted'}`}>{status}</span>
+      </summary>
+      <div className="border-t border-border py-4" aria-labelledby="comparison-heading">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-4">
+          <div>
           <p className="text-xs text-muted">Newest prior shared, completed, non-duplicate batch with the same product and active lot/station scope.</p>
-        </div>
-        <div className="no-print flex flex-wrap gap-2">
-          <select value={targetMetric} onChange={(event) => onTargetChange({ targetMetric: event.target.value })} aria-label="Target metric" className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-ink focus-ring">
-            <option value="first_observed_pass_rate">First observed pass rate target</option>
-            <option value="latest_observed_unit_yield">Latest unit yield target</option>
-          </select>
-          <input type="number" min="0" max="100" step="0.1" value={targetPercent} onChange={(event) => onTargetChange({ targetPercent: event.target.value })} placeholder="Target %" aria-label="User-entered target percent" className="w-28 rounded-lg border border-border bg-surface px-3 py-2 text-xs text-ink focus-ring" />
-        </div>
-      </div>
-      {loading && <p role="status" className="text-sm text-muted">Checking comparable batches…</p>}
-      {error && <p role="alert" className="text-sm text-danger">Comparison unavailable: {error}</p>}
-      {!loading && !error && comparison && !comparison.available && <p className="text-sm text-muted">{comparison.reason}</p>}
-      {!loading && comparison?.available && (
-        <div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <ComparisonMetric label="First observed pass rate" metric={first} />
-            <ComparisonMetric label="Latest observed unit yield" metric={latest} />
-            <div className="rounded-lg border border-border bg-surface px-4 py-3">
-              <p className="text-xs uppercase tracking-wide text-muted">Baseline</p>
-              <p className="mt-1 truncate text-sm font-semibold text-ink" title={comparison.baseline.display_name}>{comparison.baseline.display_name}</p>
-              <p className="mt-1 text-xs text-muted">{comparison.scope.current_attempts} current / {comparison.scope.baseline_attempts} baseline attempts</p>
-            </div>
           </div>
-          {comparison.target && comparison.target.available !== false && (
-            <p className="mt-3 text-sm text-ink-2">
-              User-entered {comparison.target.percent}% target · gap {formatDelta(comparison.target.gap_pp)} percentage points
-            </p>
-          )}
-          {comparison.target?.available === false && (
-            <p className="mt-3 text-sm text-muted">Target unavailable: {comparison.target.reason}</p>
-          )}
-          <p className="mt-2 text-xs text-muted">{comparison.scope.time_rule}</p>
+          <div className="no-print flex flex-wrap gap-2">
+            <select value={targetMetric} onChange={(event) => onTargetChange({ targetMetric: event.target.value })} aria-label="Target metric" className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-ink focus-ring">
+              <option value="first_observed_pass_rate">First observed pass rate target</option>
+              <option value="latest_observed_unit_yield">Latest unit yield target</option>
+            </select>
+            <input type="number" min="0" max="100" step="0.1" value={targetPercent} onChange={(event) => onTargetChange({ targetPercent: event.target.value })} placeholder="Target %" aria-label="User-entered target percent" className="w-28 rounded-lg border border-border bg-surface px-3 py-2 text-xs text-ink focus-ring" />
+          </div>
         </div>
-      )}
-    </section>
+        {loading && <p role="status" className="text-sm text-muted">Checking comparable batches…</p>}
+        {error && <p role="alert" className="text-sm text-danger">Comparison unavailable: {error}</p>}
+        {!loading && !error && comparison && !comparison.available && <p className="text-sm text-muted">{comparison.reason}</p>}
+        {!loading && comparison?.available && (
+          <div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <ComparisonMetric label="First observed pass rate" metric={first} />
+              <ComparisonMetric label="Latest observed unit yield" metric={latest} />
+              <div className="rounded-lg border border-border bg-surface px-4 py-3">
+                <p className="text-xs uppercase tracking-wide text-muted">Baseline</p>
+                <p className="mt-1 truncate text-sm font-semibold text-ink" title={comparison.baseline.display_name}>{comparison.baseline.display_name}</p>
+                <p className="mt-1 text-xs text-muted">{comparison.scope.current_attempts} current / {comparison.scope.baseline_attempts} baseline attempts</p>
+              </div>
+            </div>
+            {comparison.target && comparison.target.available !== false && (
+              <p className="mt-3 text-sm text-ink-2">
+                User-entered {comparison.target.percent}% target · gap {formatDelta(comparison.target.gap_pp)} percentage points
+              </p>
+            )}
+            {comparison.target?.available === false && (
+              <p className="mt-3 text-sm text-muted">Target unavailable: {comparison.target.reason}</p>
+            )}
+            <p className="mt-2 text-xs text-muted">{comparison.scope.time_rule}</p>
+          </div>
+        )}
+      </div>
+    </details>
   )
 }
 
@@ -595,19 +610,18 @@ function ComparisonMetric({ label, metric }) {
 function ActionQueue({ entries, error, busy, onRetry, onStatusChange, onOpen }) {
   const active = entries.filter((entry) => entry.status !== 'resolved')
   return (
-    <section className="print-avoid-break mb-6" aria-labelledby="action-queue-heading">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div>
-          <h2 id="action-queue-heading" className="font-display text-sm font-bold text-ink">Investigation actions</h2>
-          <p className="text-xs text-muted">Shared workflow state; assignee labels identify responsibility, not access.</p>
-        </div>
+    <details className="manager-print-details group print-avoid-break border-b border-border">
+      <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 py-3 focus-ring">
+        <span id="action-queue-heading" className="font-display text-sm font-bold text-ink">Investigation actions</span>
         <Badge tone={error || active.length ? 'warn' : 'pass'}>{error ? 'Unavailable' : `${active.length} active`}</Badge>
-      </div>
-      {error && <div role="alert" className="mb-2 flex items-center justify-between rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"><span>{error}</span><Button variant="ghost" className="px-2 py-1" onClick={onRetry}>Retry</Button></div>}
-      {!error && entries.length === 0 ? (
-        <p className="rounded-lg border border-border bg-surface px-4 py-3 text-sm text-muted">No investigation actions for this batch.</p>
-      ) : !error ? (
-        <div className="overflow-x-auto rounded-lg border border-border bg-surface">
+      </summary>
+      <div className="border-t border-border py-4" aria-labelledby="action-queue-heading">
+        <p className="mb-3 text-xs text-muted">Shared workflow state; assignee labels identify responsibility, not access.</p>
+        {error && <div role="alert" className="mb-2 flex items-center justify-between rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"><span>{error}</span><Button variant="ghost" className="px-2 py-1" onClick={onRetry}>Retry</Button></div>}
+        {!error && entries.length === 0 ? (
+          <p className="rounded-lg border border-border bg-surface px-4 py-3 text-sm text-muted">No investigation actions for this batch.</p>
+        ) : !error ? (
+          <div className="overflow-x-auto rounded-lg border border-border bg-surface">
           <table className="w-full min-w-[44rem] text-sm">
             <thead><tr className="border-b border-border bg-surface-2 text-left text-muted"><th className="px-3 py-2 font-medium">Failure</th><th className="px-3 py-2 font-medium">Next action</th><th className="px-3 py-2 font-medium">Owner</th><th className="px-3 py-2 font-medium">Status</th><th className="px-3 py-2 font-medium">Updated</th></tr></thead>
             <tbody>{entries.map((entry) => (
@@ -620,9 +634,10 @@ function ActionQueue({ entries, error, busy, onRetry, onStatusChange, onOpen }) 
               </tr>
             ))}</tbody>
           </table>
-        </div>
-      ) : null}
-    </section>
+          </div>
+        ) : null}
+      </div>
+    </details>
   )
 }
 
