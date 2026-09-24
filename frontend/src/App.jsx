@@ -49,6 +49,7 @@ function Shell() {
   const [engineerDrillDown, setEngineerDrillDown] = useState(null)
   const [engineerViewState, setEngineerViewState] = useState({ ...DEFAULT_ENGINEER_VIEW_STATE })
   const [engineerFeedbackDrafts, setEngineerFeedbackDrafts] = useState({})
+  const [engineerActionDrafts, setEngineerActionDrafts] = useState({})
   const [managerScope, setManagerScope] = useState({ ...DEFAULT_MANAGER_SCOPE })
   const [knowledgeReview, setKnowledgeReview] = useState(null)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -76,7 +77,7 @@ function Shell() {
   }, [theme])
 
   useEffect(() => {
-    const hasDrafts = Object.values(engineerFeedbackDrafts).some((value) => value.trim())
+    const hasDrafts = Object.values(engineerFeedbackDrafts).some((value) => value.trim()) || Object.keys(engineerActionDrafts).length > 0
     if (!hasDrafts) return undefined
     const warnBeforeUnload = (event) => {
       event.preventDefault()
@@ -84,7 +85,7 @@ function Shell() {
     }
     window.addEventListener('beforeunload', warnBeforeUnload)
     return () => window.removeEventListener('beforeunload', warnBeforeUnload)
-  }, [engineerFeedbackDrafts])
+  }, [engineerActionDrafts, engineerFeedbackDrafts])
 
   useEffect(() => {
     if (!menuOpen || adminOpen) return undefined
@@ -214,6 +215,7 @@ function Shell() {
     setEngineerDrillDown(null)
     setEngineerViewState({ ...DEFAULT_ENGINEER_VIEW_STATE })
     setEngineerFeedbackDrafts({})
+    setEngineerActionDrafts({})
     setManagerScope({ ...DEFAULT_MANAGER_SCOPE })
     setWarnings(jobWarnings)
     setTab(preferredResultsView)
@@ -222,6 +224,10 @@ function Shell() {
   }
 
   const startBatch = async (files, options = {}) => {
+    if (
+      (Object.values(engineerFeedbackDrafts).some((value) => value.trim()) || Object.keys(engineerActionDrafts).length > 0) &&
+      !window.confirm('Start a new batch and discard unsaved feedback or action edits?')
+    ) return
     const token = runToken.current + 1
     runToken.current = token
     setBatchRunning(true)
@@ -464,6 +470,10 @@ function Shell() {
   }
 
   const clearRestoredWorkspace = () => {
+    if (
+      (Object.values(engineerFeedbackDrafts).some((value) => value.trim()) || Object.keys(engineerActionDrafts).length > 0) &&
+      !window.confirm('Start a new batch and discard unsaved feedback or action edits?')
+    ) return
     runToken.current += 1
     setJobId(null)
     setActiveJobId(null)
@@ -475,6 +485,7 @@ function Shell() {
     setEngineerDrillDown(null)
     setEngineerViewState({ ...DEFAULT_ENGINEER_VIEW_STATE })
     setEngineerFeedbackDrafts({})
+    setEngineerActionDrafts({})
     setManagerScope({ ...DEFAULT_MANAGER_SCOPE })
     navigateToTab('home', {
       jobId: null,
@@ -713,6 +724,8 @@ function Shell() {
             onViewStateChange={setEngineerViewState}
             feedbackDrafts={engineerFeedbackDrafts}
             onFeedbackDraftsChange={setEngineerFeedbackDrafts}
+            actionDrafts={engineerActionDrafts}
+            onActionDraftsChange={setEngineerActionDrafts}
           />
         )}
         {tab === 'manager' && (

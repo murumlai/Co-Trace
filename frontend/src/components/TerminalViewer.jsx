@@ -58,7 +58,7 @@ export default function TerminalViewer({
   errorCode = null,
   failingStep = null,
   timestamp = null,
-  focusLine = null,
+  focusRequest = null,
 }) {
   const [query, setQuery] = useState('')
   const [activeMatch, setActiveMatch] = useState(0)
@@ -67,6 +67,7 @@ export default function TerminalViewer({
   const searchId = useId()
   const sectionRef = useRef(null)
   const lineRefs = useRef(new Map())
+  const consumedFocusRequest = useRef(null)
 
   const view = useMemo(() => buildEvidenceView(text, query), [query, text])
   const hasContent = useMemo(
@@ -85,11 +86,10 @@ export default function TerminalViewer({
   }, [currentLine])
 
   useEffect(() => {
-    if (focusLine != null) {
-      setQuery('')
-      lineRefs.current.get(focusLine)?.scrollIntoView({ block: 'center' })
-    }
-  }, [focusLine, view.lines])
+    if (!focusRequest || consumedFocusRequest.current === focusRequest.requestId) return
+    consumedFocusRequest.current = focusRequest.requestId
+    lineRefs.current.get(focusRequest.line)?.scrollIntoView({ block: 'center' })
+  }, [focusRequest])
 
   const navigateMatches = (direction) => {
     setActiveMatch((current) => moveMatch(current, direction, view.matchIndexes.length))
@@ -193,7 +193,7 @@ export default function TerminalViewer({
                 }}
                 className={[
                   'flex min-w-0 gap-3 border-l-2 px-2 leading-relaxed',
-                  n === currentLine || n === focusLine ? 'border-term-accent bg-term-accent/10' : 'border-transparent',
+                  n === currentLine || n === focusRequest?.line ? 'border-term-accent bg-term-accent/10' : 'border-transparent',
                 ].join(' ')}
               >
                 <span className="w-10 shrink-0 select-none text-right text-xs text-term-muted/60">

@@ -154,3 +154,53 @@ test('Back returns from an Engineer drill-down to the prior Manager scope', asyn
   await expect(page).toHaveURL(/tab=manager/)
   expect(fixture.unexpected).toEqual([])
 })
+
+test('Engineer Back restores queue focus and action drafts survive tab navigation', async ({ page }) => {
+  const failure = {
+    unit_id: 'attempt-1',
+    serial_number: 'SN-1',
+    product_code: 'P1',
+    result: 'FAIL',
+    classification: 'fail',
+    error_code: 'E1',
+    error_message: 'Fixture failure',
+    failing_step: 'Power check',
+    duration_s: 2,
+    start_time: '2026-09-24T08:00:00',
+    analysis_source: 'llm',
+    analysis_context_source: 'error_message',
+    root_cause: 'Fixture contact',
+    suggested_solution: 'Inspect fixture',
+    evidence_references: [],
+  }
+  const fixture = await installApiFixture(page, new Map([
+    ['GET /api/jobs/synthetic-job/units', {
+      units: [{
+        serial_number: 'SN-1',
+        unit_id: 'attempt-1',
+        classification: 'fail',
+        result: 'FAIL',
+        attempt_count: 1,
+        failure_count: 1,
+        final: failure,
+        failures: [failure],
+      }],
+      run_count: 1,
+    }],
+  ]))
+  await page.goto('/?job=synthetic-job&tab=engineer')
+
+  await page.getByRole('button', { name: 'Details' }).click()
+  await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible()
+  await page.getByText('Feedback and actions', { exact: true }).click()
+  await page.getByLabel('Action assignee').fill('Product team')
+  await page.getByRole('button', { name: 'Manager', exact: true }).click()
+  await page.getByRole('button', { name: 'Engineer', exact: true }).click()
+  await page.getByText('Feedback and actions', { exact: true }).click()
+  await expect(page.getByLabel('Action assignee')).toHaveValue('Product team')
+  await page.getByRole('button', { name: 'Back', exact: true }).click()
+
+  await expect(page.getByRole('button', { name: 'Details' })).toBeFocused()
+  await expect(page.getByLabel('Filter by serial number').getByRole('option', { name: 'Failing units' })).toHaveCount(0)
+  expect(fixture.unexpected).toEqual([])
+})

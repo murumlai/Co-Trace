@@ -130,7 +130,7 @@ const compareGroups = (sortBy) => (left, right) => {
   )
 }
 
-export default function Engineer({ jobId, drillDown, onClearDrillDown, onReturnToManager, onReviewKnowledge, initialViewState, onViewStateChange, feedbackDrafts = {}, onFeedbackDraftsChange }) {
+export default function Engineer({ jobId, drillDown, onClearDrillDown, onReturnToManager, onReviewKnowledge, initialViewState, onViewStateChange, feedbackDrafts = {}, onFeedbackDraftsChange, actionDrafts = {}, onActionDraftsChange }) {
   const { isAdmin } = useAuth()
   const activeJob = useRef(jobId)
   activeJob.current = jobId
@@ -170,6 +170,18 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReturnT
   const [feedbackBusy, setFeedbackBusy] = useState(null)
   const [investigationActionBusy, setInvestigationActionBusy] = useState(null)
   const [actionError, setActionError] = useState('')
+  const returnFocusUnit = useRef(null)
+  const draftPrefix = `${jobId || 'none'}:`
+  const currentFeedbackDrafts = Object.fromEntries(
+    Object.entries(feedbackDrafts)
+      .filter(([key]) => key.startsWith(draftPrefix))
+      .map(([key, value]) => [key.slice(draftPrefix.length), value]),
+  )
+  const currentActionDrafts = Object.fromEntries(
+    Object.entries(actionDrafts)
+      .filter(([key]) => key.startsWith(draftPrefix))
+      .map(([key, value]) => [key.slice(draftPrefix.length), value]),
+  )
 
   useEffect(() => {
     if (!jobId) {
@@ -352,18 +364,13 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReturnT
   const setClassFilter = (cls) => {
     setFilter(cls)
     setSerialFilter('all')
-    setQuickFilter(cls === 'all' ? 'all' : `class:${cls}`)
+    setQuickFilter('all')
   }
 
   const setDropdownFilter = (value) => {
     setQuickFilter(value)
     if (value === 'all') {
       setFilter('all')
-      setSerialFilter('all')
-      return
-    }
-    if (value.startsWith('class:')) {
-      setFilter(value.slice('class:'.length))
       setSerialFilter('all')
       return
     }
@@ -429,6 +436,17 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReturnT
     : shown
   const selectedIndex = expanded ? shown.findIndex((unit) => unit.unit_id === expanded) : -1
   const selectedUnit = selectedIndex >= 0 ? shown[selectedIndex] : null
+
+  useEffect(() => {
+    if (expanded || !returnFocusUnit.current) return
+    const unitId = returnFocusUnit.current
+    returnFocusUnit.current = null
+    requestAnimationFrame(() => {
+      const row = document.querySelector(`[data-unit-id="${CSS.escape(unitId)}"]`)
+      row?.scrollIntoView({ block: 'nearest' })
+      row?.focus()
+    })
+  }, [expanded])
 
   useEffect(() => {
     setPage(1)
@@ -580,7 +598,11 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReturnT
       })
       if (activeJob.current !== requestJob) return
       setFeedbackEntries((current) => [...current, entry])
-      onFeedbackDraftsChange?.((current) => ({ ...current, [attempt.unit_id]: '' }))
+      onFeedbackDraftsChange?.((current) => {
+        const next = { ...current }
+        delete next[`${requestJob}:${attempt.unit_id}`]
+        return next
+      })
     } catch (err) {
       if (activeJob.current !== requestJob) return
       setActionError(err.message)
@@ -603,6 +625,11 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReturnT
       })
       if (activeJob.current !== requestJob) return
       setInvestigationActions((current) => [...current, created])
+      onActionDraftsChange?.((current) => {
+        const next = { ...current }
+        delete next[`${requestJob}:${attempt.unit_id}`]
+        return next
+      })
     } catch (error) {
       if (activeJob.current !== requestJob) return
       setActionError(error.message)
@@ -625,6 +652,11 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReturnT
       })
       if (activeJob.current !== requestJob) return
       setInvestigationActions((current) => current.map((item) => item.action_id === updated.action_id ? updated : item))
+      onActionDraftsChange?.((current) => {
+        const next = { ...current }
+        delete next[`${requestJob}:${entry.action_id}`]
+        return next
+      })
     } catch (error) {
       if (activeJob.current !== requestJob) return
       if (error.status === 409) setActionsReload((value) => value + 1)
@@ -651,8 +683,10 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReturnT
     feedbackBusy,
     onFeedback: submitFeedback,
     visibleColumns,
-    feedbackDrafts,
-    onFeedbackDraftChange: (attemptId, value) => onFeedbackDraftsChange?.((current) => ({ ...current, [attemptId]: value })),
+    feedbackDrafts: currentFeedbackDrafts,
+    onFeedbackDraftChange: (attemptId, value) => onFeedbackDraftsChange?.((current) => ({ ...current, [`${jobId}:${attemptId}`]: value })),
+    actionDrafts: currentActionDrafts,
+    onActionDraftChange: (draftId, value) => onActionDraftsChange?.((current) => ({ ...current, [`${jobId}:${draftId}`]: value })),
     investigationActions: actionsError ? [] : investigationActions,
     investigationActionBusy,
     onCreateInvestigationAction: actionsError ? undefined : createInvestigationAction,
@@ -791,12 +825,10 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReturnT
           <select
             value={quickFilter}
             onChange={(event) => setDropdownFilter(event.target.value)}
+            aria-label="Filter by serial number"
             className="min-w-0 max-w-full rounded-lg border border-border bg-surface px-3.5 py-2 text-sm font-medium text-ink-2 focus-ring"
           >
-            <option value="all">All units</option>
-            <option value="class:fail">Failing units</option>
-            <option value="class:retry_pass">Retry-pass units</option>
-            <option value="class:first_pass">First-pass units</option>
+            <option value="all">All serial numbers</option>
             <optgroup label="Serial number">
               {serials.map((serial) => (
                 <option key={serial} value={`serial:${serial}`}>
@@ -871,7 +903,10 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReturnT
           selectedIndex={selectedIndex}
           total={shown.length}
           onSelect={(unitId) => setExpanded(unitId)}
-          onBack={() => setExpanded(null)}
+          onBack={() => {
+            returnFocusUnit.current = expanded
+            setExpanded(null)
+          }}
           onPrevious={() => selectUnitAt(selectedIndex - 1)}
           onNext={() => selectUnitAt(selectedIndex + 1)}
           detailProps={detailProps}
@@ -1103,6 +1138,7 @@ function InspectionWorkspace({ units, selected, selectedIndex, total, onSelect, 
             <button
               key={unit.unit_id}
               type="button"
+              data-unit-id={unit.unit_id}
               aria-current={unit.unit_id === selected.unit_id ? 'true' : undefined}
               onClick={() => onSelect(unit.unit_id)}
               className={[
@@ -1123,7 +1159,7 @@ function InspectionWorkspace({ units, selected, selectedIndex, total, onSelect, 
       <section className="min-w-0" aria-labelledby="selected-unit-heading">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
-            <Button variant="ghost" className="px-2 py-1.5 lg:hidden" onClick={onBack}>Back</Button>
+            <Button variant="ghost" className="px-2 py-1.5" onClick={onBack}>Back</Button>
             <div className="min-w-0">
               <p className="text-xs text-muted">Unit {selectedIndex + 1} of {total}</p>
               <h2 id="selected-unit-heading" className="truncate font-display text-lg font-bold text-ink">{selected.serial_number || selected.unit_id}</h2>
@@ -1142,7 +1178,7 @@ function InspectionWorkspace({ units, selected, selectedIndex, total, onSelect, 
 }
 
 
-function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, visibleColumns, feedbackDrafts, onFeedbackDraftChange, investigationActions, investigationActionBusy, onCreateInvestigationAction, onUpdateInvestigationAction }) {
+function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, visibleColumns, feedbackDrafts, onFeedbackDraftChange, actionDrafts, onActionDraftChange, investigationActions, investigationActionBusy, onCreateInvestigationAction, onUpdateInvestigationAction }) {
   const columnCount = 6 + visibleColumns.length
   return (
     <TableShell tableClassName="min-w-[1100px] table-fixed">
@@ -1196,6 +1232,7 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                 <td className="px-4 py-3 text-right whitespace-nowrap">
                   {hasDetails ? (
                     <button
+                      data-unit-id={u.unit_id}
                       className="rounded-md px-2 py-1 text-accent hover:bg-accent/10 focus-ring"
                       onClick={() => setExpanded(expanded === u.unit_id ? null : u.unit_id)}
                     >
@@ -1224,6 +1261,8 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                         onFeedback={onFeedback}
                         feedbackDrafts={feedbackDrafts}
                         onFeedbackDraftChange={onFeedbackDraftChange}
+                        actionDrafts={actionDrafts}
+                        onActionDraftChange={onActionDraftChange}
                         investigationActions={investigationActions}
                         investigationActionBusy={investigationActionBusy}
                         onCreateInvestigationAction={onCreateInvestigationAction}
@@ -1241,7 +1280,7 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
   )
 }
 
-function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, feedbackDrafts, onFeedbackDraftChange, investigationActions, investigationActionBusy, onCreateInvestigationAction, onUpdateInvestigationAction }) {
+function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, feedbackDrafts, onFeedbackDraftChange, actionDrafts, onActionDraftChange, investigationActions, investigationActionBusy, onCreateInvestigationAction, onUpdateInvestigationAction }) {
   return (
     <div className="space-y-4">
       {units.map((u) => {
@@ -1273,6 +1312,7 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
               </div>
               {hasDetails && (
                 <button
+                  data-unit-id={u.unit_id}
                   className="shrink-0 rounded-md px-2 py-1 text-sm text-accent hover:bg-accent/10 focus-ring"
                   onClick={() => setExpanded(expanded === u.unit_id ? null : u.unit_id)}
                 >
@@ -1298,6 +1338,8 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                   onFeedback={onFeedback}
                   feedbackDrafts={feedbackDrafts}
                   onFeedbackDraftChange={onFeedbackDraftChange}
+                  actionDrafts={actionDrafts}
+                  onActionDraftChange={onActionDraftChange}
                   investigationActions={investigationActions}
                   investigationActionBusy={investigationActionBusy}
                   onCreateInvestigationAction={onCreateInvestigationAction}
@@ -1312,7 +1354,7 @@ function CardsView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
   )
 }
 
-function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, feedbackDrafts = {}, onFeedbackDraftChange, investigationActions = [], investigationActionBusy, onCreateInvestigationAction, onUpdateInvestigationAction }) {
+function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, feedbackDrafts = {}, onFeedbackDraftChange, actionDrafts = {}, onActionDraftChange, investigationActions = [], investigationActionBusy, onCreateInvestigationAction, onUpdateInvestigationAction }) {
   const passedAfter =
     u.classification === 'retry_pass'
       ? `Passed after ${u.failure_count} failed attempt${u.failure_count === 1 ? '' : 's'}.`
@@ -1352,6 +1394,8 @@ function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearing
           feedbackDraft={feedbackDrafts[attempt.unit_id] || ''}
           onFeedbackDraftChange={(value) => onFeedbackDraftChange?.(attempt.unit_id, value)}
           investigationAction={investigationActions.find((entry) => entry.unit_id === attempt.unit_id) || null}
+          actionDrafts={actionDrafts}
+          onActionDraftChange={onActionDraftChange}
           investigationActionBusy={investigationActionBusy}
           onCreateInvestigationAction={onCreateInvestigationAction}
           onUpdateInvestigationAction={onUpdateInvestigationAction}
@@ -1677,8 +1721,8 @@ function PlaybookNotice({ attempt, onReviewKnowledge }) {
   )
 }
 
-function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, feedbackDraft, onFeedbackDraftChange, investigationAction, investigationActionBusy, onCreateInvestigationAction, onUpdateInvestigationAction }) {
-  const [focusLine, setFocusLine] = useState(null)
+function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing, onReanalyze, clearingCache, onClearCache, exporting, onExport, onReviewKnowledge, feedbackEntries, feedbackBusy, onFeedback, feedbackDraft, onFeedbackDraftChange, investigationAction, actionDrafts, onActionDraftChange, investigationActionBusy, onCreateInvestigationAction, onUpdateInvestigationAction }) {
+  const [focusRequest, setFocusRequest] = useState(null)
   const canClearCache =
     !!onClearCache &&
     attempt.analysis_cache_key && ['llm', 'local-cache'].includes(attempt.analysis_source)
@@ -1740,7 +1784,14 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
       </div>
 
       <Disclosure title="Evidence and sources" meta={evidenceMeta} className="mb-3">
-        <SupportingEvidence attempt={attempt} onFocusLine={setFocusLine} onReviewKnowledge={onReviewKnowledge} />
+        <SupportingEvidence
+          attempt={attempt}
+          onFocusLine={(line) => setFocusRequest((current) => ({
+            line,
+            requestId: (current?.requestId || 0) + 1,
+          }))}
+          onReviewKnowledge={onReviewKnowledge}
+        />
         {showSnippet && (
           <div className="mt-4">
             <TerminalViewer
@@ -1749,7 +1800,7 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
               errorCode={attempt.error_code || null}
               failingStep={attempt.failing_step || null}
               timestamp={when || null}
-              focusLine={focusLine}
+              focusRequest={focusRequest}
             />
           </div>
         )}
@@ -1769,6 +1820,8 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
           <InvestigationActionControls
             attempt={attempt}
             entry={investigationAction}
+            draft={actionDrafts[investigationAction?.action_id || attempt.unit_id]}
+            onDraftChange={(value) => onActionDraftChange?.(investigationAction?.action_id || attempt.unit_id, value)}
             busy={investigationActionBusy}
             onCreate={onCreateInvestigationAction}
             onUpdate={onUpdateInvestigationAction}
@@ -1889,19 +1942,15 @@ const ACTION_STATUSES = [
 
 const entryActionHandler = (entry, onCreate, onUpdate) => entry ? onUpdate : onCreate
 
-function InvestigationActionControls({ attempt, entry, busy, onCreate, onUpdate }) {
-  const [assignee, setAssignee] = useState(entry?.assignee || '')
-  const [nextAction, setNextAction] = useState(entry?.next_action || attempt.next_debug_action || '')
-  const [status, setStatus] = useState(entry?.status || 'open')
-
-  useEffect(() => {
-    setAssignee(entry?.assignee || '')
-    setNextAction(entry?.next_action || attempt.next_debug_action || '')
-    setStatus(entry?.status || 'open')
-  }, [attempt.next_debug_action, entry])
+function InvestigationActionControls({ attempt, entry, draft, onDraftChange, busy, onCreate, onUpdate }) {
+  const values = draft || {
+    assignee: entry?.assignee || '',
+    nextAction: entry?.next_action || attempt.next_debug_action || '',
+    status: entry?.status || 'open',
+  }
+  const updateDraft = (field, value) => onDraftChange?.({ ...values, [field]: value })
 
   const save = async () => {
-    const values = { assignee, nextAction, status }
     try {
       if (entry) await onUpdate(entry, values)
       else await onCreate(attempt, values)
@@ -1918,15 +1967,15 @@ function InvestigationActionControls({ attempt, entry, busy, onCreate, onUpdate 
           <p className="text-xs uppercase tracking-wide text-muted">Investigation action</p>
           <p className="text-xs text-muted">Assignment is informational and does not grant access.</p>
         </div>
-        {entry && <Badge tone={status === 'resolved' ? 'pass' : status === 'blocked' ? 'warn' : 'accent'}>v{entry.version} · {ACTION_STATUSES.find(([value]) => value === status)?.[1]}</Badge>}
+        {entry && <Badge tone={values.status === 'resolved' ? 'pass' : values.status === 'blocked' ? 'warn' : 'accent'}>v{entry.version} · {ACTION_STATUSES.find(([value]) => value === values.status)?.[1]}</Badge>}
       </div>
       <div className="grid gap-2 sm:grid-cols-[10rem_minmax(0,1fr)_9rem_auto]">
-        <Input value={assignee} maxLength={120} onChange={(event) => setAssignee(event.target.value)} placeholder="Team or owner" aria-label="Action assignee" />
-        <Input value={nextAction} maxLength={2000} onChange={(event) => setNextAction(event.target.value)} placeholder="Verified next action" aria-label="Investigation next action" />
-        <select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Investigation status" className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink focus-ring">
+        <Input value={values.assignee} maxLength={120} onChange={(event) => updateDraft('assignee', event.target.value)} placeholder="Team or owner" aria-label="Action assignee" />
+        <Input value={values.nextAction} maxLength={2000} onChange={(event) => updateDraft('nextAction', event.target.value)} placeholder="Verified next action" aria-label="Investigation next action" />
+        <select value={values.status} onChange={(event) => updateDraft('status', event.target.value)} aria-label="Investigation status" className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink focus-ring">
           {ACTION_STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
-        <Button variant="primary" disabled={!nextAction.trim() || saving} onClick={save}>{saving ? 'Saving…' : entry ? 'Update' : 'Create'}</Button>
+        <Button variant="primary" disabled={!values.nextAction.trim() || saving} onClick={save}>{saving ? 'Saving…' : entry ? 'Update' : 'Create'}</Button>
       </div>
       {entry?.history?.length > 0 && (
         <details className="mt-3 text-xs text-muted">
