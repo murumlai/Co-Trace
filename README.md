@@ -107,6 +107,8 @@ Set-Location C:\Users\lloganat\source\repos\Co_Trace
 # Frontend helper/component tests and build
 Set-Location C:\Users\lloganat\source\repos\Co_Trace\frontend
 npm.cmd test
+npm.cmd exec playwright install chromium
+npm.cmd run test:browser
 npm.cmd run build
 
 # Measure preprocessed JSON size
@@ -115,6 +117,8 @@ npm.cmd run build
 # Rebuild the product-knowledge pack from source docs (LLM required)
 .\.venv\Scripts\python.exe backend\scripts\build_product_knowledge.py
 ```
+
+The browser suite starts an isolated Vite server, intercepts every API request with synthetic fixtures, and fails on unexpected API traffic. It does not require the backend or an AI provider. Failure screenshots and traces are written under `frontend/test-results`; the HTML report is written under `frontend/playwright-report`.
 
 ## Configuration
 
