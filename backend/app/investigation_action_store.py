@@ -127,6 +127,8 @@ class DiskInvestigationActionStore:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, ensure_ascii=True, separators=(",", ":"))
             os.replace(temporary, self.path)
+        except OSError as exc:
+            raise ActionStoreUnavailable("Investigation actions cannot be saved") from exc
         finally:
             if os.path.exists(temporary):
                 try:

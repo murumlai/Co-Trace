@@ -120,7 +120,7 @@ def test_failed_atomic_replace_preserves_original_file(tmp_path, monkeypatch):
         raise OSError("disk unavailable")
 
     monkeypatch.setattr(os, "replace", fail_replace)
-    with pytest.raises(OSError, match="disk unavailable"):
+    with pytest.raises(ActionStoreUnavailable, match="cannot be saved"):
         store.update(
             "action-1", "job-1", "42", 1,
             actor_id="42", actor_login="octocat", assignee=None,
@@ -129,6 +129,27 @@ def test_failed_atomic_replace_preserves_original_file(tmp_path, monkeypatch):
 
     assert path.read_bytes() == original
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_unreadable_store_is_unavailable_without_replacement(tmp_path, monkeypatch):
+    path = tmp_path / "actions.json"
+    path.write_text('{"entries":[]}', encoding="utf-8")
+    original = path.read_bytes()
+    real_open = open
+
+    def deny_store_read(target, *args, **kwargs):
+        mode = kwargs.get("mode", args[0] if args else "r")
+        if os.fspath(target) == os.fspath(path) and "r" in mode:
+            raise PermissionError("denied")
+        return real_open(target, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", deny_store_read)
+    store = DiskInvestigationActionStore(str(path))
+
+    with pytest.raises(ActionStoreUnavailable, match="cannot be loaded"):
+        store.create(_entry())
+
+    assert path.read_bytes() == original
 
 
 @pytest.fixture()
