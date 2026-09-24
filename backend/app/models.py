@@ -286,6 +286,7 @@ class SerialUnitGroup(BaseModel):
     failure_count: int
     final: UnitRecord
     failures: list["UnitRecord"] = Field(default_factory=list)
+    chronology_unavailable_reason: Optional[str] = None
 
 
 class JobProgress(BaseModel):
@@ -308,6 +309,7 @@ class BatchMetadata(BaseModel):
     observed_start_time: Optional[str] = None
     observed_end_time: Optional[str] = None
     timestamp_timezone: Literal["offset", "unspecified", "mixed", "unavailable"] = "unavailable"
+    chronology_unavailable_reason: Optional[str] = None
     batch_fingerprint: Optional[str] = None
 
 

@@ -1313,6 +1313,11 @@ function UnitDetails({ u, showSnippet = true, reanalyzing, onReanalyze, clearing
       : null
   return (
     <div className="space-y-4">
+      {u.chronology_unavailable_reason && (
+        <p className="border-l-2 border-warning pl-3 text-sm text-warning">
+          Outcome order unavailable: {u.chronology_unavailable_reason}
+        </p>
+      )}
       {passedAfter && (
         <div className="flex items-center gap-2 text-sm text-warning font-medium">
           <span>↻</span>

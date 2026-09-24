@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import time
 import hashlib
 import json
@@ -25,6 +24,7 @@ from .contracts import ArtifactWriter, FailureAnalyzer, JobRepository, PayloadCl
 from .job_registry import registry
 from .models import BatchMetadata
 from .preprocessor import FtrunnerPreprocessor, get_preprocessor, write_product_jsons
+from .timestamp_ordering import observed_period
 from .upload_storage import cleanup_job_workdir, get_job_input_root
 
 log = logging.getLogger("cotrace.orchestrator")
@@ -236,29 +236,13 @@ def _raise_if_cancelled(job: Any) -> None:
         raise JobCancelled()
 
 
-_TIMEZONE_SUFFIX = re.compile(r"(?:Z|[+-]\d{2}:?\d{2})$")
-
-
 def _batch_metadata(
     current: BatchMetadata,
     run_folders: list[str],
     records: list[Any],
     incomplete: list[str],
 ) -> BatchMetadata:
-    timestamps = [
-        value
-        for record in records
-        for value in (record.start_time, record.end_time)
-        if value
-    ]
-    timezone_flags = {_TIMEZONE_SUFFIX.search(value) is not None for value in timestamps}
-    timezone = "unavailable"
-    if timezone_flags == {True}:
-        timezone = "offset"
-    elif timezone_flags == {False}:
-        timezone = "unspecified"
-    elif timezone_flags:
-        timezone = "mixed"
+    period = observed_period(records)
     missing_debuglog = sum(
         1
         for record in records
@@ -272,9 +256,10 @@ def _batch_metadata(
         "unknown_result_count": sum(1 for record in records if record.result == "UNKNOWN"),
         "missing_debuglog_count": missing_debuglog,
         "product_codes": sorted({record.product_code for record in records if record.product_code}),
-        "observed_start_time": min(timestamps) if timestamps else None,
-        "observed_end_time": max(timestamps) if timestamps else None,
-        "timestamp_timezone": timezone,
+        "observed_start_time": period.start_time,
+        "observed_end_time": period.end_time,
+        "timestamp_timezone": period.timezone_style,
+        "chronology_unavailable_reason": period.unavailable_reason,
         "batch_fingerprint": _batch_fingerprint(records),
     })
 

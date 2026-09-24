@@ -76,6 +76,9 @@ def test_batch_metadata_reports_mixed_and_unavailable_timezones():
     )
 
     assert mixed.timestamp_timezone == "mixed"
+    assert mixed.observed_start_time is None
+    assert mixed.observed_end_time is None
+    assert mixed.chronology_unavailable_reason == "Mixed timezone styles prevent determining the observed period"
     assert unavailable.observed_start_time is None
     assert unavailable.observed_end_time is None
     assert unavailable.timestamp_timezone == "unavailable"

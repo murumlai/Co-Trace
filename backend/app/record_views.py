@@ -8,6 +8,7 @@ from collections.abc import Iterable
 
 from .models import Classification, SerialUnitGroup, UnitRecord
 from .redaction import redact
+from .timestamp_ordering import order_chronologically
 
 _WS = re.compile(r"\s+")
 _NUM = re.compile(r"\d+")
@@ -36,7 +37,7 @@ def latest_records_by_serial(records: list[UnitRecord]) -> list[UnitRecord]:
     for record in records:
         attempts[_unit_key(record)].append(record)
 
-    latest = [max(group, key=_latest_sort_key) for group in attempts.values()]
+    latest = [order_chronologically(group).records[-1] for group in attempts.values()]
     latest.sort(key=_latest_sort_key, reverse=True)
     return latest
 
@@ -72,19 +73,21 @@ def group_units_by_serial(records: list[UnitRecord]) -> list[SerialUnitGroup]:
 
     groups: list[SerialUnitGroup] = []
     for group in attempts.values():
-        ordered = sorted(group, key=_latest_sort_key)
+        ordering = order_chronologically(group)
+        ordered = ordering.records
         final = ordered[-1]
         failures = [a for a in ordered if a.result == "FAIL"]
         groups.append(
             SerialUnitGroup(
                 serial_number=final.serial_number,
                 unit_id=final.unit_id,
-                classification=classify_attempts(ordered),
-                result=final.result,
+                classification="unknown" if ordering.unavailable_reason else classify_attempts(ordered),
+                result="UNKNOWN" if ordering.unavailable_reason else final.result,
                 attempt_count=len(ordered),
                 failure_count=len(failures),
                 final=final,
                 failures=failures,
+                chronology_unavailable_reason=ordering.unavailable_reason,
             )
         )
 
@@ -142,7 +145,7 @@ def build_debug_packet(
             f"- Products: {_field_list(record.product_code for record in attempts)}",
         ])
 
-    ordered = sorted(attempts, key=_latest_sort_key)
+    ordered = order_chronologically(attempts).records
     lines.extend(["", "## Attempt history", ""])
     for index, attempt in enumerate(ordered[:10], start=1):
         lines.extend(_attempt_lines(attempt, index))

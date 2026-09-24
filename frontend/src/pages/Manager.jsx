@@ -276,6 +276,11 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
           {scoped.missing_timestamp_excluded} attempt{scoped.missing_timestamp_excluded === 1 ? '' : 's'} excluded because the selected time range could not be compared to its timestamp.
         </div>
       )}
+      {s.chronology_unavailable_units > 0 && (
+        <div className="mb-4 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
+          {s.chronology_unavailable_units} unit{s.chronology_unavailable_units === 1 ? '' : 's'} excluded from first/latest rates because attempt order is unavailable.
+        </div>
+      )}
 
       {!s.total_runs ? (
         <EmptyMetricsState scoped />
@@ -672,6 +677,9 @@ function BatchQualityStatus({ batch }) {
         <p className="mt-0.5 break-words text-xs text-muted">
           {period} · Timezone {batch.timestamp_timezone === 'offset' ? 'from source offsets' : batch.timestamp_timezone || 'unavailable'}
         </p>
+        {batch.chronology_unavailable_reason && (
+          <p className="mt-1 text-xs text-warning">{batch.chronology_unavailable_reason}</p>
+        )}
       </div>
       <div className="text-right">
         <p className={gaps ? 'text-sm font-semibold text-warning' : 'text-sm font-semibold text-teal'}>

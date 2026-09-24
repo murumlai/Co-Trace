@@ -6,7 +6,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
 from .models import UnitRecord
-from .record_views import latest_records_by_serial, signature_for
+from .record_views import signature_for
+from .timestamp_ordering import order_chronologically
 
 _MISSING = "__missing__"
 
@@ -96,30 +97,31 @@ def filter_records(
     return selected, missing_timestamp_excluded
 
 
-def _first_attempts(records: list[UnitRecord]) -> list[UnitRecord]:
-    """First test attempt per serial number (earliest start_time)."""
-    by_serial: dict[str, UnitRecord] = {}
-    for r in records:
-        key = r.serial_number or r.unit_id
-        cur = by_serial.get(key)
-        if cur is None or (r.start_time or "") < (cur.start_time or ""):
-            by_serial[key] = r
-    return list(by_serial.values())
-
-
 def compute_summary(records: list[UnitRecord]) -> dict:
     total = len(records)
-    firsts = _first_attempts(records)
+    attempts: dict[str, list[UnitRecord]] = defaultdict(list)
+    for record in records:
+        attempts[_unit_id(record)].append(record)
+
+    ordered = [order_chronologically(group) for group in attempts.values()]
+    available = [ordering for ordering in ordered if not ordering.unavailable_reason]
+    firsts = [ordering.records[0] for ordering in available]
+    latest = [ordering.records[-1] for ordering in available]
+    unavailable_reasons = sorted({
+        ordering.unavailable_reason
+        for ordering in ordered
+        if ordering.unavailable_reason
+    })
 
     fpy_pass = sum(1 for r in firsts if r.result == "PASS")
     fpy_total = sum(1 for r in firsts if r.result in ("PASS", "FAIL"))
     fpy = (fpy_pass / fpy_total * 100.0) if fpy_total else 0.0
 
-    # Passed/Failed reflect one final result per unit (latest attempt), not runs.
-    latest = latest_records_by_serial(records)
+    # Passed/Failed reflect one final result per unit with comparable chronology.
     passed = sum(1 for r in latest if r.result == "PASS")
     failed = sum(1 for r in latest if r.result == "FAIL")
-    unknown = sum(1 for r in latest if r.result == "UNKNOWN")
+    unavailable_count = len(ordered) - len(available)
+    unknown = sum(1 for r in latest if r.result == "UNKNOWN") + unavailable_count
     latest_total = passed + failed
     latest_yield = (passed / latest_total * 100.0) if latest_total else 0.0
     first_by_unit = {_unit_id(record): record for record in firsts}
@@ -128,12 +130,12 @@ def compute_summary(records: list[UnitRecord]) -> dict:
         for record in latest
         if record.result == "PASS" and first_by_unit[_unit_id(record)].result == "FAIL"
     )
-    retests = total - len(firsts)
+    retests = total - len(attempts)
     additional_attempt_share = (retests / total * 100.0) if total else 0.0
 
-    return {
+    summary = {
         "total_runs": total,
-        "unique_units": len(firsts),
+        "unique_units": len(attempts),
         "passed": passed,
         "failed": failed,
         "unknown": unknown,
@@ -147,6 +149,10 @@ def compute_summary(records: list[UnitRecord]) -> dict:
         "recovered_after_retry": recovered_after_retry,
         "additional_attempt_share": round(additional_attempt_share, 2),
     }
+    if unavailable_count:
+        summary["chronology_unavailable_units"] = unavailable_count
+        summary["chronology_unavailable_reasons"] = unavailable_reasons
+    return summary
 
 
 def compute_trend(records: list[UnitRecord]) -> list[dict]:

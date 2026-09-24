@@ -135,6 +135,30 @@ class TestGroupUnitsBySerial:
         snb = next(r for r in latest if r.serial_number == "SNB")
         assert snb.result == "PASS"
 
+    def test_aware_offsets_determine_retry_classification_by_utc_instant(self):
+        records = [
+            _rec("later-pass", "SN1", "PASS", "2026-01-01T09:00:00Z"),
+            _rec("earlier-fail", "SN1", "FAIL", "2026-01-01T10:00:00+02:00"),
+        ]
+
+        group = group_units_by_serial(records)[0]
+
+        assert group.classification == "retry_pass"
+        assert group.final.unit_id == "later-pass"
+        assert group.chronology_unavailable_reason is None
+
+    def test_incomparable_attempt_times_do_not_claim_a_final_outcome(self):
+        records = [
+            _rec("aware", "SN1", "FAIL", "2026-01-01T09:00:00Z"),
+            _rec("naive", "SN1", "PASS", "2026-01-01T10:00:00"),
+        ]
+
+        group = group_units_by_serial(records)[0]
+
+        assert group.classification == "unknown"
+        assert group.result == "UNKNOWN"
+        assert group.chronology_unavailable_reason == "Mixed timezone styles prevent chronological ordering"
+
 
 def test_unit_debug_packet_is_redacted_and_bounded():
     record = _rec("u1", "SN1", "FAIL", "2026-01-01T10:00:00")
