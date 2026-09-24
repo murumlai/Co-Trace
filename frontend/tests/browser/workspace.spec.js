@@ -171,7 +171,14 @@ test('Engineer Back restores queue focus and action drafts survive tab navigatio
     analysis_context_source: 'error_message',
     root_cause: 'Fixture contact',
     suggested_solution: 'Inspect fixture',
-    evidence_references: [],
+    redacted_snippet: 'first line\nmatching evidence\nthird line',
+    evidence_references: [{
+      kind: 'log_excerpt',
+      reference_id: 'log:attempt-1:2-2',
+      label: 'Redacted DebugLog excerpt',
+      line_start: 2,
+      line_end: 2,
+    }],
   }
   const fixture = await installApiFixture(page, new Map([
     ['GET /api/jobs/synthetic-job/units', {
@@ -194,10 +201,23 @@ test('Engineer Back restores queue focus and action drafts survive tab navigatio
   await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible()
   await page.getByText('Feedback and actions', { exact: true }).click()
   await page.getByLabel('Action assignee').fill('Product team')
+  await page.getByRole('button', { name: 'Admin', exact: true }).click()
+  await page.getByLabel('Password').fill('fixture-password')
+  await page.getByRole('button', { name: 'Enter Admin' }).click()
+  await page.getByRole('button', { name: 'Exit Admin' }).click()
+  await expect(page.getByLabel('Action assignee')).toHaveValue('Product team')
   await page.getByRole('button', { name: 'Manager', exact: true }).click()
   await page.getByRole('button', { name: 'Engineer', exact: true }).click()
   await page.getByText('Feedback and actions', { exact: true }).click()
   await expect(page.getByLabel('Action assignee')).toHaveValue('Product team')
+  await page.getByText('Evidence and sources', { exact: true }).click()
+  const reference = page.getByRole('button', { name: /Redacted DebugLog excerpt/ })
+  await reference.click()
+  await page.getByLabel('Filter log lines').fill('matching')
+  await reference.click()
+  await expect(page.getByLabel('Filter log lines')).toHaveValue('matching')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Back', exact: true }).click()
 
   await expect(page.getByRole('button', { name: 'Details' })).toBeFocused()

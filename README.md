@@ -17,6 +17,19 @@ The app opens Home without sign-in. All visitors share newly created batches, fe
 - Admin-reviewed known-failure playbooks match exact failure signatures and are applied before the cache or Copilot.
 - Engineer feedback and investigation actions (owner, status, handoff) persist per job under `WORK_DIR`.
 
+## Reliability Update - 2026-09-24
+
+- Shared investigations now remain in place when Admin access starts, ends, or expires; stale requests cannot restore old permissions or overwrite another job view.
+- First/latest outcomes use explicit chronological ordering. Rates show their observed counts, and unavailable chronology or zero-denominator populations are not presented as zero success.
+- Comparisons select only earlier, non-duplicate, non-overlapping batches with the same effective product scope. Current time filters do not get replayed onto the baseline period.
+- Reused diagnoses distinguish currently available source references from evidence consumed when the diagnosis was generated.
+- Investigation action updates are bound to their job, and unreadable or unwritable action storage fails closed without replacing audit data.
+- Refresh, Back/Forward, and explicit investigation links restore compact authorized context, including running jobs and Manager drill-downs larger than 1,000 attempts.
+- Manager places scope and primary metrics before comparison/action editing. CSV and print exports use one immutable scoped snapshot and distinguish assignees from non-personal shared actor labels.
+- Engineer detail offers Back at every width, returns focus to the queue, retains feedback/action drafts during ordinary navigation, and preserves log search after reference navigation.
+
+Optional manual baseline selection, global queue shortcuts, expanded family-action authoring, action-age sorting, and copy-summary controls remain deferred. Human representative-user validation and manual PDF pagination review remain release gates.
+
 ## Input Shape and Parsing
 
 Expected input shape:
@@ -118,7 +131,7 @@ npm.cmd run build
 .\.venv\Scripts\python.exe backend\scripts\build_product_knowledge.py
 ```
 
-The browser suite starts an isolated Vite server, intercepts every API request with synthetic fixtures, and fails on unexpected API traffic. It does not require the backend or an AI provider. Failure screenshots and traces are written under `frontend/test-results`; the HTML report is written under `frontend/playwright-report`.
+The browser suite starts an isolated Vite server, intercepts every API request with synthetic fixtures, and fails on unexpected API traffic. It does not require the backend or an AI provider. It covers desktop, compact desktop, tablet, mobile, both themes, reduced motion, 200 percent zoom, keyboard focus, downloads, and print media. Screenshots, failure traces, and measurement artifacts are written under `frontend/test-results`; the HTML report is written under `frontend/playwright-report`.
 
 ## Configuration
 

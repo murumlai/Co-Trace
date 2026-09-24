@@ -1206,8 +1206,10 @@ function TableView({ units, expanded, setExpanded, reanalyzing, onReanalyze, cle
                 <td className="px-4 py-3 whitespace-nowrap">
                   <StatusBadge status={u.classification} />
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap font-medium">
-                  {u.serial_number || u.unit_id}
+                <td className="px-4 py-3 font-medium">
+                  <span className="block truncate" title={u.serial_number || u.unit_id}>
+                    {u.serial_number || u.unit_id}
+                  </span>
                 </td>
                 {visibleColumns.includes('product') && (
                   <td className="px-4 py-3"><span className="block truncate" title={u.final.product_code || ''}>{u.final.product_code || '—'}</span></td>

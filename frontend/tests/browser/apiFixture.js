@@ -51,6 +51,8 @@ export const managerView = {
 
 const defaultResponses = new Map([
   ['GET /api/me', sharedUser],
+  ['POST /api/auth/admin/login', { user: { ...sharedUser, username: 'admin', is_admin: true } }],
+  ['POST /api/logout', { ok: true }],
   ['POST /api/logs/frontend', { ok: true }],
   ['GET /api/jobs', { items: [completedJob], next_cursor: null }],
   ['GET /api/jobs/synthetic-job/status', {

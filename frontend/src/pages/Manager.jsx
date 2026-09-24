@@ -69,6 +69,27 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
   const [actionBusy, setActionBusy] = useState(null)
   const [actionsReload, setActionsReload] = useState(0)
   const [printSnapshot, setPrintSnapshot] = useState(null)
+
+  useEffect(() => {
+    const openPrintDetails = () => {
+      document.querySelectorAll('.manager-print-details:not([open])').forEach((details) => {
+        details.dataset.openedForPrint = 'true'
+        details.open = true
+      })
+    }
+    const restorePrintDetails = () => {
+      document.querySelectorAll('.manager-print-details[data-opened-for-print="true"]').forEach((details) => {
+        details.open = false
+        delete details.dataset.openedForPrint
+      })
+    }
+    window.addEventListener('beforeprint', openPrintDetails)
+    window.addEventListener('afterprint', restorePrintDetails)
+    return () => {
+      window.removeEventListener('beforeprint', openPrintDetails)
+      window.removeEventListener('afterprint', restorePrintDetails)
+    }
+  }, [])
   const scopeKey = JSON.stringify({
     products: scope.products,
     lots: scope.lots,
