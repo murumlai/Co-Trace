@@ -80,6 +80,8 @@ class UnitRecord(BaseModel):
     suggested_solution: Optional[str] = None
     redacted_snippet: Optional[str] = None
     evidence_references: list[EvidenceReference] = Field(default_factory=list)
+    evidence_consumed: Optional[bool] = None
+    analysis_origin_unit_id: Optional[str] = None
     analysis_source: Optional[str] = None  # "llm" | "stub" | "cached" | "local-cache" | "playbook"
     analysis_context_source: Optional[str] = None  # "debug_excerpt" | "ftrunner_snippet" | "error_message"
     analysis_cache_key: Optional[str] = None
@@ -250,6 +252,7 @@ class AnalysisResult(BaseModel):
     likely_owner: Optional[str] = None
     safety_or_escape_risk: Optional[str] = None
     needs_more_evidence: Optional[bool] = None
+    analysis_origin_unit_id: Optional[str] = None
 
     def as_tuple(self) -> tuple[str, str, str]:
         return self.root_cause, self.suggested_solution, self.source

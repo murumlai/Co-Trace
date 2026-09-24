@@ -229,6 +229,11 @@ class TestAnalyzeJobDedup:
         assert r2.root_cause == "the root cause"
         assert r1.suggested_solution == "the solution"
         assert r2.suggested_solution == "the solution"
+        assert r1.evidence_consumed is True
+        assert r1.analysis_origin_unit_id == "u1"
+        assert r2.evidence_consumed is False
+        assert r2.analysis_origin_unit_id == "u1"
+        assert r2.evidence_references[0].reference_id.startswith("log:u2:")
 
     def test_uses_job_signature_cache_to_skip_llm(self, monkeypatch):
         """If job.signature_cache already has the sig, the LLM stub is not called."""
@@ -250,6 +255,8 @@ class TestAnalyzeJobDedup:
         assert calls["n"] == 0
         assert rec.root_cause == "cached root"
         assert rec.analysis_source == "cached"
+        assert rec.evidence_consumed is False
+        assert rec.analysis_origin_unit_id is None
 
     def test_uses_persistent_cache_hit(self, monkeypatch):
         """If analysis_cache.get_entry returns an entry, the stub is not called."""
@@ -268,6 +275,8 @@ class TestAnalyzeJobDedup:
 
         assert calls["n"] == 0
         assert rec.root_cause == "cached root"
+        assert rec.evidence_consumed is False
+        assert rec.analysis_origin_unit_id is None
 
     def test_empty_persistent_cache_hit_gets_actionable_fallback(self, monkeypatch):
         cached_entry = {"root_cause": "", "suggested_solution": ""}

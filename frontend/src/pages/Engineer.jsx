@@ -1601,7 +1601,9 @@ function SupportingEvidence({ attempt, onFocusLine, onReviewKnowledge }) {
         </p>
       )}
       <div className="mt-3 border-t border-border/60 pt-3">
-        <p className="mb-2 text-xs font-medium text-muted">Source references</p>
+        <p className="mb-2 text-xs font-medium text-muted">
+          {attempt.evidence_consumed === false ? 'Available source references (not diagnosis provenance)' : 'Source references'}
+        </p>
         {references.length === 0 ? (
           <p className="text-xs text-muted">Source references are unavailable for this diagnosis.</p>
         ) : (
@@ -1682,7 +1684,9 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
     attempt.evidence_references,
     attempt.redacted_snippet || '',
   ).length
-  const evidenceMeta = `${evidenceReferenceCount} source${evidenceReferenceCount === 1 ? '' : 's'}`
+  const evidenceMeta = attempt.evidence_consumed === false
+    ? `${evidenceReferenceCount} available source${evidenceReferenceCount === 1 ? '' : 's'} · provenance unavailable`
+    : `${evidenceReferenceCount} source${evidenceReferenceCount === 1 ? '' : 's'}`
   const feedbackCount = feedbackEntries?.length || 0
   const actionMeta = investigationAction
     ? `${feedbackCount} feedback · action ${investigationAction.status.replace('_', ' ')}`

@@ -195,6 +195,9 @@ def _analyze_unit(
     err_msg, snippet, context_source = _redacted_context(rec)
     rec.redacted_snippet = snippet
     rec.analysis_context_source = context_source
+    rec.evidence_references = []
+    rec.evidence_consumed = None
+    rec.analysis_origin_unit_id = None
 
     playbook = _find_reviewed_playbook(playbook_store, sig, rec.product_code)
     if playbook is not None:
@@ -209,7 +212,7 @@ def _analyze_unit(
             )
         job.signature_cache[sig] = cached_analysis
         rec.analysis_cache_key = None
-        _apply_analysis_to_record(rec, cached_analysis)
+        _apply_analysis_to_record(rec, cached_analysis, evidence_consumed=False)
         job.llm_metrics.record_playbook_hit()
         return "playbook"
 
@@ -249,7 +252,12 @@ def _analyze_unit(
         )
         job.signature_cache[sig] = cached_analysis
         display_source = "local-cache" if cached_analysis.source == "local-cache" else "cached"
-        _apply_analysis_to_record(rec, cached_analysis, source=display_source)
+        _apply_analysis_to_record(
+            rec,
+            cached_analysis,
+            source=display_source,
+            evidence_consumed=False,
+        )
         job.llm_metrics.record_cache_hit(rec.analysis_source)
         log.debug("Used cached analysis for unit %s (signature %s).", rec.unit_id, sig)
         return rec.analysis_source
@@ -277,7 +285,7 @@ def _analyze_unit(
                 ),
             )
             job.signature_cache[sig] = cached_analysis
-            _apply_analysis_to_record(rec, cached_analysis)
+            _apply_analysis_to_record(rec, cached_analysis, evidence_consumed=False)
             job.llm_metrics.record_cache_hit(rec.analysis_source)
             log.info("Used saved analysis cache for unit %s (cache %s).", rec.unit_id, cache_key[:8])
             return rec.analysis_source
@@ -304,10 +312,14 @@ def _analyze_unit(
     root, solution = _apply_exact_knowledge_fallback(rec, knowledge, root, solution)
     job.llm_metrics.merge(analysis_result.metrics)
     cached_analysis = analysis_result.without_metrics().model_copy(
-        update={"root_cause": root, "suggested_solution": solution}
+        update={
+            "root_cause": root,
+            "suggested_solution": solution,
+            "analysis_origin_unit_id": rec.unit_id,
+        }
     )
     job.signature_cache[sig] = cached_analysis
-    _apply_analysis_to_record(rec, cached_analysis)
+    _apply_analysis_to_record(rec, cached_analysis, evidence_consumed=True)
     _cache.put(
         cache_key,
         root_cause=root,
@@ -504,10 +516,13 @@ def _apply_analysis_to_record(
     analysis: AnalysisResult,
     *,
     source: str | None = None,
+    evidence_consumed: bool | None = None,
 ) -> None:
     record.root_cause = analysis.root_cause
     record.suggested_solution = analysis.suggested_solution
     record.analysis_source = source or analysis.source
+    record.evidence_consumed = evidence_consumed
+    record.analysis_origin_unit_id = analysis.analysis_origin_unit_id
     record.playbook_id = analysis.playbook_id
     record.confidence = analysis.confidence
     record.root_cause_category = analysis.root_cause_category

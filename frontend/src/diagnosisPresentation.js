@@ -15,6 +15,9 @@ export const CONTEXT_SOURCE_LABEL = {
 export function assessEvidence(attempt = {}) {
   const reasons = []
   const contextSource = attempt.analysis_context_source
+  if (attempt.evidence_consumed === false) {
+    reasons.push('Current source references were not consumed by this reused diagnosis')
+  }
   if (!contextSource) reasons.push('Analysis context metadata is unavailable')
   if (contextSource === 'error_message') reasons.push('Only the error message was available')
   if (attempt.analysis_source === 'stub') reasons.push('Offline placeholder, not a live diagnosis')
@@ -27,7 +30,7 @@ export function assessEvidence(attempt = {}) {
   ) {
     reasons.push(attempt.debuglog_message || 'DebugLog evidence was unavailable')
   }
-  const hasLogContext = ['debug_excerpt', 'ftrunner_snippet'].includes(contextSource)
+  const hasLogContext = ['debug_excerpt', 'ftrunner_snippet'].includes(contextSource) && attempt.evidence_consumed !== false
   return {
     grounded: hasLogContext && reasons.length === 0,
     reasons,

@@ -46,3 +46,16 @@ test('confidence is explicitly model-reported', () => {
   assert.equal(modelConfidenceLabel(0.824), '82% model-reported confidence')
   assert.equal(modelConfidenceLabel(null), null)
 })
+
+test('reused diagnosis separates current evidence from consumed provenance', () => {
+  const assessment = assessEvidence({
+    analysis_source: 'cached',
+    analysis_context_source: 'debug_excerpt',
+    evidence_consumed: false,
+    debuglog_status: 'excerpt',
+  })
+
+  assert.equal(assessment.grounded, false)
+  assert.equal(assessment.sourceLabel, 'Reused in batch')
+  assert.ok(assessment.reasons.includes('Current source references were not consumed by this reused diagnosis'))
+})
