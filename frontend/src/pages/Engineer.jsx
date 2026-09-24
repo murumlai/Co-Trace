@@ -653,10 +653,10 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
     visibleColumns,
     feedbackDrafts,
     onFeedbackDraftChange: (attemptId, value) => onFeedbackDraftsChange?.((current) => ({ ...current, [attemptId]: value })),
-    investigationActions,
+    investigationActions: actionsError ? [] : investigationActions,
     investigationActionBusy,
-    onCreateInvestigationAction: createInvestigationAction,
-    onUpdateInvestigationAction: updateInvestigationAction,
+    onCreateInvestigationAction: actionsError ? undefined : createInvestigationAction,
+    onUpdateInvestigationAction: actionsError ? undefined : updateInvestigationAction,
   }
 
   const selectUnitAt = (index) => {
@@ -1755,13 +1755,19 @@ function FailureBlock({ attempt, index, total, isFinal, showSnippet, reanalyzing
           onNoteChange={onFeedbackDraftChange}
         />
 
-        <InvestigationActionControls
-          attempt={attempt}
-          entry={investigationAction}
-          busy={investigationActionBusy}
-          onCreate={onCreateInvestigationAction}
-          onUpdate={onUpdateInvestigationAction}
-        />
+        {entryActionHandler(investigationAction, onCreateInvestigationAction, onUpdateInvestigationAction) ? (
+          <InvestigationActionControls
+            attempt={attempt}
+            entry={investigationAction}
+            busy={investigationActionBusy}
+            onCreate={onCreateInvestigationAction}
+            onUpdate={onUpdateInvestigationAction}
+          />
+        ) : (
+          <p className="mb-4 border-y border-border/60 py-3 text-sm text-muted">
+            Investigation actions are unavailable. Retry from the status above.
+          </p>
+        )}
 
         <div className="flex flex-wrap gap-3">
           <Button onClick={() => onReanalyze(attempt)} disabled={reanalyzing === attempt.unit_id}>
@@ -1870,6 +1876,8 @@ const ACTION_STATUSES = [
   ['blocked', 'Blocked'],
   ['resolved', 'Resolved'],
 ]
+
+const entryActionHandler = (entry, onCreate, onUpdate) => entry ? onUpdate : onCreate
 
 function InvestigationActionControls({ attempt, entry, busy, onCreate, onUpdate }) {
   const [assignee, setAssignee] = useState(entry?.assignee || '')

@@ -46,7 +46,7 @@ from .knowledge.models import PlaybookCreateRequest, PlaybookUpdateRequest
 from .knowledge.summarizer import ProductKnowledgeError, is_llm_backend_available
 from .logging_config import setup_backend_logging, write_frontend_log
 from .models import AcronymUpsertRequest, AdminLoginRequest, BatchMetadata, FeedbackCreateRequest, FeedbackEntry, FrontendLogRequest, InvestigationActionCreateRequest, InvestigationActionEntry, InvestigationActionEvent, InvestigationActionUpdateRequest, JobListResponse, JobSummary
-from .investigation_action_store import ActionNotFound, ActionVersionConflict
+from .investigation_action_store import ActionNotFound, ActionStoreUnavailable, ActionVersionConflict
 from .redaction import redact
 from .record_views import build_debug_packet, group_units_by_serial
 from .upload_storage import UploadStorageError, save_uploads
@@ -423,7 +423,11 @@ def list_investigation_actions(
     store: Any = Depends(get_investigation_action_store),
 ) -> dict:
     _get_owned_job(job_id, user, reg)
-    return {"entries": [entry.model_dump() for entry in store.list_for_job(job_id, user.github_id)]}
+    try:
+        entries = store.list_for_job(job_id, user.github_id)
+    except ActionStoreUnavailable as exc:
+        raise _action_store_unavailable() from exc
+    return {"entries": [entry.model_dump() for entry in entries]}
 
 
 @app.post("/api/jobs/{job_id}/actions")
@@ -478,7 +482,10 @@ def create_investigation_action(
         expires_at=job.created_at + settings.JOB_TTL_S,
         history=[event],
     )
-    return store.create(entry).model_dump()
+    try:
+        return store.create(entry).model_dump()
+    except ActionStoreUnavailable as exc:
+        raise _action_store_unavailable() from exc
 
 
 @app.patch("/api/jobs/{job_id}/actions/{action_id}")
@@ -499,6 +506,7 @@ def update_investigation_action(
     try:
         updated = store.update(
             action_id,
+            job_id,
             user.github_id,
             request.expected_version,
             actor_id=user.github_id,
@@ -512,7 +520,16 @@ def update_investigation_action(
         raise HTTPException(404, str(exc)) from exc
     except ActionVersionConflict as exc:
         raise HTTPException(409, {"message": str(exc), "current": exc.current.model_dump()}) from exc
+    except ActionStoreUnavailable as exc:
+        raise _action_store_unavailable() from exc
     return updated.model_dump()
+
+
+def _action_store_unavailable() -> HTTPException:
+    return HTTPException(503, {
+        "error": "actions_unavailable",
+        "message": "Investigation actions are temporarily unavailable. Retry or contact the administrator.",
+    })
 
 
 @app.post("/api/jobs/{job_id}/units/{unit_id}/reanalyze")

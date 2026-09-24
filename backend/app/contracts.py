@@ -223,7 +223,14 @@ class InvestigationActionStore(Protocol):
     def list_for_job(self, job_id: str, owner_id: str) -> list[Any]:
         ...
 
-    def update(self, action_id: str, owner_id: str, expected_version: int, **changes: Any) -> Any:
+    def update(
+        self,
+        action_id: str,
+        job_id: str,
+        owner_id: str,
+        expected_version: int,
+        **changes: Any,
+    ) -> Any:
         ...
 
 

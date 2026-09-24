@@ -121,6 +121,7 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
   useEffect(() => {
     if (!jobId) return undefined
     let active = true
+    setActions([])
     setActionsError('')
     api.actions(jobId).then(
       (result) => {
@@ -599,12 +600,12 @@ function ActionQueue({ entries, error, busy, onRetry, onStatusChange, onOpen }) 
           <h2 id="action-queue-heading" className="font-display text-sm font-bold text-ink">Investigation actions</h2>
           <p className="text-xs text-muted">Shared workflow state; assignee labels identify responsibility, not access.</p>
         </div>
-        <Badge tone={active.length ? 'warn' : 'pass'}>{active.length} active</Badge>
+        <Badge tone={error || active.length ? 'warn' : 'pass'}>{error ? 'Unavailable' : `${active.length} active`}</Badge>
       </div>
       {error && <div role="alert" className="mb-2 flex items-center justify-between rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"><span>{error}</span><Button variant="ghost" className="px-2 py-1" onClick={onRetry}>Retry</Button></div>}
-      {entries.length === 0 ? (
+      {!error && entries.length === 0 ? (
         <p className="rounded-lg border border-border bg-surface px-4 py-3 text-sm text-muted">No investigation actions for this batch.</p>
-      ) : (
+      ) : !error ? (
         <div className="overflow-x-auto rounded-lg border border-border bg-surface">
           <table className="w-full min-w-[44rem] text-sm">
             <thead><tr className="border-b border-border bg-surface-2 text-left text-muted"><th className="px-3 py-2 font-medium">Failure</th><th className="px-3 py-2 font-medium">Next action</th><th className="px-3 py-2 font-medium">Owner</th><th className="px-3 py-2 font-medium">Status</th><th className="px-3 py-2 font-medium">Updated</th></tr></thead>
@@ -619,7 +620,7 @@ function ActionQueue({ entries, error, busy, onRetry, onStatusChange, onOpen }) 
             ))}</tbody>
           </table>
         </div>
-      )}
+      ) : null}
     </section>
   )
 }

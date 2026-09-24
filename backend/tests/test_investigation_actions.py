@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from app.investigation_action_store import ActionVersionConflict, DiskInvestigationActionStore
+from app.investigation_action_store import ActionStoreUnavailable, ActionVersionConflict, DiskInvestigationActionStore
 from app.job_registry import JobRegistry
 from app.models import InvestigationActionEntry, InvestigationActionEvent, UnitRecord
 from tests.auth_helpers import auth_headers
@@ -47,7 +47,7 @@ def test_store_updates_version_and_appends_audit_history(tmp_path):
     store.create(_entry())
 
     updated = store.update(
-        "action-1", "42", 1,
+        "action-1", "job-1", "42", 1,
         actor_id="42", actor_login="octocat",
         assignee="Product team", next_action="Measure rail", status="in_progress",
         fields_set={"assignee", "next_action", "status"},
@@ -66,14 +66,14 @@ def test_store_rejects_stale_update_and_preserves_current(tmp_path):
     store = DiskInvestigationActionStore(str(tmp_path / "actions.json"))
     store.create(_entry())
     store.update(
-        "action-1", "42", 1,
+        "action-1", "job-1", "42", 1,
         actor_id="42", actor_login="octocat", assignee=None,
         next_action=None, status="blocked", fields_set={"status"},
     )
 
     with pytest.raises(ActionVersionConflict) as error:
         store.update(
-            "action-1", "42", 1,
+            "action-1", "job-1", "42", 1,
             actor_id="42", actor_login="octocat", assignee=None,
             next_action=None, status="resolved", fields_set={"status"},
         )
@@ -96,6 +96,41 @@ def test_store_expires_entries_and_writes_atomically(tmp_path):
     assert [item["action_id"] for item in payload["entries"]] == ["active"]
 
 
+@pytest.mark.parametrize("payload", ["{broken", '{"entries":[{}]}'])
+def test_store_load_failure_preserves_original_bytes(tmp_path, payload):
+    path = tmp_path / "actions.json"
+    path.write_text(payload, encoding="utf-8")
+    store = DiskInvestigationActionStore(str(path))
+
+    with pytest.raises(ActionStoreUnavailable):
+        store.list_for_job("job-1", "42")
+    with pytest.raises(ActionStoreUnavailable):
+        store.create(_entry("new"))
+
+    assert path.read_text(encoding="utf-8") == payload
+
+
+def test_failed_atomic_replace_preserves_original_file(tmp_path, monkeypatch):
+    path = tmp_path / "actions.json"
+    store = DiskInvestigationActionStore(str(path))
+    store.create(_entry())
+    original = path.read_bytes()
+
+    def fail_replace(source, destination):
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr(os, "replace", fail_replace)
+    with pytest.raises(OSError, match="disk unavailable"):
+        store.update(
+            "action-1", "job-1", "42", 1,
+            actor_id="42", actor_login="octocat", assignee=None,
+            next_action=None, status="resolved", fields_set={"status"},
+        )
+
+    assert path.read_bytes() == original
+    assert not list(tmp_path.glob("*.tmp"))
+
+
 @pytest.fixture()
 def action_api(tmp_path):
     from app.auth import SHARED_WORKSPACE_ID
@@ -112,6 +147,12 @@ def action_api(tmp_path):
             product_code="P1", error_code="E1", error_message="password=secret failed",
             signature="sig-1",
         )
+    ]
+    second_workdir = tmp_path / "job-2"
+    second_workdir.mkdir()
+    second = registry.create("job-2", str(second_workdir), owner_id=SHARED_WORKSPACE_ID, owner_login=SHARED_WORKSPACE_ID)
+    second.records = [
+        UnitRecord(unit_id="unit-2", serial_number="SN2", result="FAIL", signature="sig-2")
     ]
     store = DiskInvestigationActionStore(str(tmp_path / "actions.json"))
     app.dependency_overrides[get_registry] = lambda: registry
@@ -171,3 +212,35 @@ def test_action_api_shares_workspace_but_validates_target(action_api):
         json={"unit_id": "missing", "next_action": "Inspect"},
     )
     assert response.status_code == 404
+
+
+def test_action_api_rejects_same_owner_wrong_job_update(action_api):
+    headers = auth_headers()
+    created = action_api.post(
+        "/api/jobs/job-1/actions",
+        headers=headers,
+        json={"unit_id": "unit-1", "next_action": "Inspect"},
+    ).json()
+
+    response = action_api.patch(
+        f"/api/jobs/job-2/actions/{created['action_id']}",
+        headers=headers,
+        json={"expected_version": 1, "status": "resolved"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Investigation action not found"
+    listed = action_api.get("/api/jobs/job-1/actions", headers=headers).json()["entries"]
+    assert listed[0]["status"] == "open"
+
+
+def test_action_api_reports_corrupt_store_as_unavailable(action_api, tmp_path):
+    path = tmp_path / "actions.json"
+    path.write_text("{broken", encoding="utf-8")
+
+    response = action_api.get("/api/jobs/job-1/actions", headers=auth_headers())
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["error"] == "actions_unavailable"
+    assert str(path) not in response.text
+    assert path.read_text(encoding="utf-8") == "{broken"
