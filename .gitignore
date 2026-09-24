@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 .venv/
 backend/.venv/
+wheelhouse/
 .cotrace_work/
 backend/.cotrace_work/
 
