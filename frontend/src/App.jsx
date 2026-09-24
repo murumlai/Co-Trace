@@ -65,6 +65,7 @@ function Shell() {
   const runToken = useRef(0)
   const uploadAbort = useRef(null)
   const workspaceOwner = useRef(null)
+  const recentJobsRequest = useRef(0)
 
   useEffect(() => {
     const root = document.documentElement
@@ -361,16 +362,18 @@ function Shell() {
 
   async function loadRecentJobs({ replace = false } = {}) {
     if (!username) return
+    const request = ++recentJobsRequest.current
     setRecentJobsLoading(true)
     setRecentJobsError('')
     try {
       const response = await api.jobs({ cursor: replace ? null : recentJobsCursor })
+      if (request !== recentJobsRequest.current) return
       setRecentJobs((current) => replace ? response.items : [...current, ...response.items])
       setRecentJobsCursor(response.next_cursor || null)
     } catch (error) {
-      setRecentJobsError(error.message)
+      if (request === recentJobsRequest.current) setRecentJobsError(error.message)
     } finally {
-      setRecentJobsLoading(false)
+      if (request === recentJobsRequest.current) setRecentJobsLoading(false)
     }
   }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Bar,
   BarChart,
@@ -46,6 +46,8 @@ function ChartCard({ title, subtitle, children }) {
 }
 
 export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SCOPE, onScopeChange }) {
+  const activeJob = useRef(jobId)
+  activeJob.current = jobId
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -191,19 +193,22 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
     URL.revokeObjectURL(url)
   }
   const updateActionStatus = async (entry, status) => {
+    const requestJob = jobId
     setActionBusy(entry.action_id)
     setActionsError('')
     try {
-      const updated = await api.updateAction(jobId, entry.action_id, {
+      const updated = await api.updateAction(requestJob, entry.action_id, {
         expected_version: entry.version,
         status,
       })
+      if (activeJob.current !== requestJob) return
       setActions((current) => current.map((item) => item.action_id === updated.action_id ? updated : item))
     } catch (requestError) {
+      if (activeJob.current !== requestJob) return
       if (requestError.status === 409) setActionsReload((value) => value + 1)
       setActionsError(requestError.message)
     } finally {
-      setActionBusy(null)
+      if (activeJob.current === requestJob) setActionBusy(null)
     }
   }
 

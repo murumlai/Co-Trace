@@ -9,6 +9,13 @@ export function AuthProvider({ children }) {
   const [checking, setChecking] = useState(true)
   const [notice, setNotice] = useState('')
   const generation = useRef(0)
+  const userRef = useRef(SHARED_USER)
+  const adminGrantedAt = useRef(Number.NEGATIVE_INFINITY)
+
+  const updateUser = (nextUser) => {
+    userRef.current = nextUser
+    setUser(nextUser)
+  }
 
   useEffect(() => {
     let active = true
@@ -16,11 +23,12 @@ export function AuthProvider({ children }) {
     api.me({ authOptional: true })
       .then((me) => {
         if (!active || current !== generation.current) return
-        setUser(me)
+        if (me?.is_admin) adminGrantedAt.current = performance.now()
+        updateUser(me)
       })
       .catch(() => {
         if (!active || current !== generation.current) return
-        setUser(SHARED_USER)
+        updateUser(SHARED_USER)
       })
       .finally(() => {
         if (active) setChecking(false)
@@ -31,9 +39,12 @@ export function AuthProvider({ children }) {
   }, [])
 
   useEffect(() => {
-    const onUnauthorized = () => {
+    const onUnauthorized = (event) => {
+      if (!userRef.current?.is_admin) return
+      const requestStartedAt = event.detail?.startedAt
+      if (Number.isFinite(requestStartedAt) && requestStartedAt < adminGrantedAt.current) return
       generation.current += 1
-      setUser(SHARED_USER)
+      updateUser(SHARED_USER)
       setNotice('Admin access is no longer available. Open Admin to sign in again; your workspace is unchanged.')
     }
     window.addEventListener('cotrace:unauthorized', onUnauthorized)
@@ -44,15 +55,17 @@ export function AuthProvider({ children }) {
     const current = ++generation.current
     const res = await api.adminLogin({ username, password })
     if (current !== generation.current) return
-    setUser(res.user)
+    adminGrantedAt.current = performance.now()
+    updateUser(res.user)
     setNotice('')
     return res.user
   }
 
   const logout = async () => {
-    generation.current += 1
+    const current = ++generation.current
     await api.logout()
-    setUser(SHARED_USER)
+    if (current !== generation.current) return
+    updateUser(SHARED_USER)
     setNotice('')
   }
 

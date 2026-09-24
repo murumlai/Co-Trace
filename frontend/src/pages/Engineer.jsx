@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { groupAttempts } from '../unitAttempts'
@@ -132,6 +132,8 @@ const compareGroups = (sortBy) => (left, right) => {
 
 export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewKnowledge, initialViewState, onViewStateChange, feedbackDrafts = {}, onFeedbackDraftsChange }) {
   const { isAdmin } = useAuth()
+  const activeJob = useRef(jobId)
+  activeJob.current = jobId
   const initialView = { ...DEFAULT_ENGINEER_VIEW_STATE, ...(initialViewState || {}) }
   const [units, setUnits] = useState([])
   const [clusters, setClusters] = useState([])
@@ -482,24 +484,28 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
     )
 
   const reanalyze = async (attempt) => {
+    const requestJob = jobId
     setReanalyzing(attempt.unit_id)
     setActionError('')
     try {
-      const updated = await api.reanalyze(jobId, attempt.unit_id)
+      const updated = await api.reanalyze(requestJob, attempt.unit_id)
+      if (activeJob.current !== requestJob) return
       applyUpdatedFailure(updated)
     } catch (err) {
-      setActionError(err.message)
+      if (activeJob.current === requestJob) setActionError(err.message)
     } finally {
-      setReanalyzing(null)
+      if (activeJob.current === requestJob) setReanalyzing(null)
     }
   }
 
   const clearCache = async (attempt) => {
     if (!attempt.analysis_cache_key) return
+    const requestJob = jobId
     setClearingCache(attempt.analysis_cache_key)
     setActionError('')
     try {
       await api.clearAnalysisCache(attempt.analysis_cache_key)
+      if (activeJob.current !== requestJob) return
       setUnits((prev) =>
         prev.map((g) => ({
           ...g,
@@ -511,18 +517,20 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
         })),
       )
     } catch (err) {
-      setActionError(err.message)
+      if (activeJob.current === requestJob) setActionError(err.message)
     } finally {
-      setClearingCache(null)
+      if (activeJob.current === requestJob) setClearingCache(null)
     }
   }
 
   const clearAllCache = async () => {
     if (!jobId || clearingAll || cachedKeyCount === 0) return
+    const requestJob = jobId
     setClearingAll(true)
     setActionError('')
     try {
-      await api.clearJobCache(jobId)
+      await api.clearJobCache(requestJob)
+      if (activeJob.current !== requestJob) return
       setUnits((prev) =>
         prev.map((g) => ({
           ...g,
@@ -532,18 +540,20 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
         })),
       )
     } catch (err) {
-      setActionError(err.message)
+      if (activeJob.current === requestJob) setActionError(err.message)
     } finally {
-      setClearingAll(false)
+      if (activeJob.current === requestJob) setClearingAll(false)
     }
   }
 
   const exportPacket = async ({ unitId, signature, filename }) => {
+    const requestJob = jobId
     const exportKey = unitId || signature
     setExporting(exportKey)
     setActionError('')
     try {
-      const markdown = await api.debugPacket(jobId, { unitId, signature })
+      const markdown = await api.debugPacket(requestJob, { unitId, signature })
+      if (activeJob.current !== requestJob) return
       const url = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown' }))
       const link = document.createElement('a')
       link.href = url
@@ -551,68 +561,77 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
       link.click()
       URL.revokeObjectURL(url)
     } catch (err) {
-      setActionError(err.message)
+      if (activeJob.current === requestJob) setActionError(err.message)
     } finally {
-      setExporting(null)
+      if (activeJob.current === requestJob) setExporting(null)
     }
   }
 
   const submitFeedback = async (attempt, action, note) => {
+    const requestJob = jobId
     const key = `${attempt.unit_id}:${action}`
     setFeedbackBusy(key)
     setActionError('')
     try {
-      const entry = await api.createFeedback(jobId, {
+      const entry = await api.createFeedback(requestJob, {
         unit_id: attempt.unit_id,
         action,
         note: note.trim() || null,
       })
+      if (activeJob.current !== requestJob) return
       setFeedbackEntries((current) => [...current, entry])
       onFeedbackDraftsChange?.((current) => ({ ...current, [attempt.unit_id]: '' }))
     } catch (err) {
+      if (activeJob.current !== requestJob) return
       setActionError(err.message)
       throw err
     } finally {
-      setFeedbackBusy(null)
+      if (activeJob.current === requestJob) setFeedbackBusy(null)
     }
   }
 
   const createInvestigationAction = async (attempt, values) => {
+    const requestJob = jobId
     setInvestigationActionBusy(attempt.unit_id)
     setActionError('')
     try {
-      const created = await api.createAction(jobId, {
+      const created = await api.createAction(requestJob, {
         unit_id: attempt.unit_id,
         assignee: values.assignee || null,
         next_action: values.nextAction,
         status: values.status,
       })
+      if (activeJob.current !== requestJob) return
       setInvestigationActions((current) => [...current, created])
     } catch (error) {
+      if (activeJob.current !== requestJob) return
       setActionError(error.message)
       throw error
     } finally {
-      setInvestigationActionBusy(null)
+      if (activeJob.current === requestJob) setInvestigationActionBusy(null)
     }
   }
 
   const updateInvestigationAction = async (entry, values) => {
+    const requestJob = jobId
     setInvestigationActionBusy(entry.action_id)
     setActionError('')
     try {
-      const updated = await api.updateAction(jobId, entry.action_id, {
+      const updated = await api.updateAction(requestJob, entry.action_id, {
         expected_version: entry.version,
         assignee: values.assignee || null,
         next_action: values.nextAction,
         status: values.status,
       })
+      if (activeJob.current !== requestJob) return
       setInvestigationActions((current) => current.map((item) => item.action_id === updated.action_id ? updated : item))
     } catch (error) {
+      if (activeJob.current !== requestJob) return
       if (error.status === 409) setActionsReload((value) => value + 1)
       setActionError(error.message)
       throw error
     } finally {
-      setInvestigationActionBusy(null)
+      if (activeJob.current === requestJob) setInvestigationActionBusy(null)
     }
   }
 

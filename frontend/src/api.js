@@ -25,7 +25,7 @@ async function request(path, { method = 'GET', body, headers = {}, signal, authO
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}))
     if (!authOptional && (res.status === 401 || (res.status === 403 && detail.detail === 'Admin access required'))) {
-      window.dispatchEvent(new Event('cotrace:unauthorized'))
+      window.dispatchEvent(new CustomEvent('cotrace:unauthorized', { detail: { startedAt: started } }))
     }
     log('warning', 'API request failed', { path, method, status: res.status, durationMs, detail: detail.detail })
     const error = new Error(detail.detail || `Request failed (${res.status})`)

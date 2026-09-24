@@ -15,6 +15,12 @@ vi.mock('./logger', () => ({ log: vi.fn(), debugLog: vi.fn() }))
 const sharedUser = { workspace_id: 'shared-workspace', username: 'shared-workspace', is_admin: false }
 const adminUser = { ...sharedUser, username: 'admin', is_admin: true }
 
+const deferred = () => {
+  let resolve
+  const promise = new Promise((done) => { resolve = done })
+  return { promise, resolve }
+}
+
 async function openAdmin() {
   const button = screen.getByRole('button', { name: 'Admin', exact: true })
   await waitFor(() => expect(button.disabled).toBe(false))
@@ -54,6 +60,30 @@ describe('Shared workspace shell', () => {
     await waitFor(() => expect(apiMocks.jobs).toHaveBeenCalled())
     expect(screen.getByRole('heading', { name: 'Upload test logs' })).toBeTruthy()
     expect(window.location.search).not.toContain('old-job')
+  })
+
+  test('an older catalog response cannot replace a newer refresh', async () => {
+    const firstRequest = deferred()
+    apiMocks.jobs
+      .mockReturnValueOnce(firstRequest.promise)
+      .mockResolvedValueOnce({
+        items: [{ job_id: 'new-job', display_name: 'New batch', status: 'done', result_available: true, unit_count: 1 }],
+        next_cursor: null,
+      })
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Recent batches' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    await screen.findByText('New batch')
+
+    firstRequest.resolve({
+      items: [{ job_id: 'old-job', display_name: 'Old batch', status: 'done', result_available: true, unit_count: 1 }],
+      next_cursor: null,
+    })
+    await act(() => firstRequest.promise)
+
+    expect(screen.queryByText('Old batch')).toBeNull()
+    expect(screen.getAllByText('New batch')).toHaveLength(2)
   })
 
   test('Admin entry and exit retain navigation and never persist the password', async () => {
@@ -102,6 +132,19 @@ describe('Shared workspace shell', () => {
     expect(screen.getByRole('button', { name: 'About', exact: true }).getAttribute('aria-current')).toBe('page')
     expect(screen.queryByText('Sign in with GitHub')).toBeNull()
     expect(screen.getByText(/Admin access is no longer available/)).toBeTruthy()
+  })
+
+  test('a delayed permission failure from before Admin login cannot revoke the new session', async () => {
+    render(<App />)
+    await openAdmin()
+    await screen.findByRole('button', { name: 'Exit Admin' })
+
+    act(() => window.dispatchEvent(new CustomEvent('cotrace:unauthorized', {
+      detail: { startedAt: 0 },
+    })))
+
+    expect(screen.getByRole('button', { name: 'Exit Admin' })).toBeTruthy()
+    expect(screen.queryByText(/Admin access is no longer available/)).toBeNull()
   })
 
   test('Escape in Admin dialog preserves the mobile menu and returns focus', async () => {
