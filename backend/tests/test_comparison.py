@@ -16,10 +16,17 @@ def _record(unit_id: str, serial: str, result: str, product: str = "P1") -> Unit
     )
 
 
-def _job(job_id: str, created_at: float, records: list[UnitRecord], *, status: str = "done") -> Job:
+def _job(
+    job_id: str,
+    created_at: float,
+    records: list[UnitRecord],
+    *,
+    status: str = "done",
+    owner_id: str = "42",
+) -> Job:
     return Job(
         job_id=job_id,
-        owner_id="42",
+        owner_id=owner_id,
         status=status,
         created_at=created_at,
         records=records,
@@ -67,7 +74,63 @@ def test_incomparable_or_missing_fingerprint_returns_unavailable():
     assert compare_jobs(current, [current])["reason"] == "Current batch fingerprint is unavailable"
 
     current.batch.batch_fingerprint = _batch_fingerprint(current.records)
-    assert compare_jobs(current, [current])["reason"] == "No comparable prior non-duplicate batch is available"
+    assert compare_jobs(current, [current])["reason"] == "No earlier comparable batch"
+
+
+def test_never_selects_newer_equal_time_or_different_owner_jobs():
+    current = _job("current", 40, [_record("c1", "SN1", "PASS")])
+    newer = _job("newer", 50, [_record("n1", "SN1", "FAIL")])
+    equal = _job("equal", 40, [_record("e1", "SN1", "FAIL")])
+    private = _job("private", 30, [_record("p1", "SN1", "FAIL")], owner_id="legacy-owner")
+
+    result = compare_jobs(current, [newer, equal, private])
+
+    assert result["available"] is False
+    assert result["reason"] == "No earlier comparable batch"
+
+
+def test_selected_product_subset_ignores_unrelated_candidate_products():
+    current = _job(
+        "current",
+        40,
+        [_record("c1", "SN1", "PASS", "P1"), _record("c2", "SN2", "FAIL", "P2")],
+    )
+    baseline = _job(
+        "baseline",
+        30,
+        [_record("b1", "SN1", "FAIL", "P1"), _record("b2", "SN2", "PASS", "P3")],
+    )
+
+    result = compare_jobs(current, [baseline], product_codes={"P1"})
+
+    assert result["available"] is True
+    assert result["baseline"]["job_id"] == "baseline"
+    assert result["scope"]["products"] == ["P1"]
+
+
+def test_duplicate_and_partially_overlapping_selected_populations_are_rejected():
+    current_records = [_record("c1", "SN1", "PASS"), _record("c2", "SN2", "FAIL")]
+    current = _job("current", 40, current_records)
+    duplicate = _job("duplicate", 30, list(reversed(current_records)))
+    overlap = _job("overlap", 20, [current_records[0], _record("b2", "SN3", "FAIL")])
+
+    duplicate_result = compare_jobs(current, [duplicate])
+    overlap_result = compare_jobs(current, [overlap])
+
+    assert duplicate_result["reason"] == "Only duplicate uploads found"
+    assert overlap_result["reason"] == "Comparable batches overlap the selected attempts"
+
+
+def test_unavailable_legacy_metadata_and_bounded_history_are_disclosed():
+    current = _job("current", 40, [_record("c1", "SN1", "PASS")])
+    legacy = _job("legacy", 30, [_record("b1", "SN1", "FAIL")])
+    legacy.batch.batch_fingerprint = None
+
+    legacy_result = compare_jobs(current, [legacy])
+    bounded_result = compare_jobs(current, [legacy], history_complete=False)
+
+    assert legacy_result["reason"] == "Earlier batch metadata is unavailable"
+    assert bounded_result["reason"] == "No comparable batch in searched history"
 
 
 def test_user_entered_target_has_explicit_provenance_and_percentage_point_gap():

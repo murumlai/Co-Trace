@@ -12,8 +12,6 @@ from __future__ import annotations
 import logging
 import os
 import time
-import hashlib
-import json
 from collections.abc import Callable
 from typing import Any
 
@@ -21,6 +19,7 @@ from . import analyzer as _analyzer_module
 from .analyzer import AnalyzerService
 from .config import settings
 from .contracts import ArtifactWriter, FailureAnalyzer, JobRepository, PayloadCleaner, Preprocessor
+from .fingerprints import batch_fingerprint as _batch_fingerprint
 from .job_registry import registry
 from .models import BatchMetadata
 from .preprocessor import FtrunnerPreprocessor, get_preprocessor, write_product_jsons
@@ -263,27 +262,6 @@ def _batch_metadata(
         "batch_fingerprint": _batch_fingerprint(records),
     })
 
-
-def _batch_fingerprint(records: list[Any]) -> str | None:
-    if not records:
-        return None
-    normalized = sorted((
-        record.serial_number or record.unit_id,
-        record.product_code or "",
-        record.lot_id or "",
-        record.station_id or "",
-        record.host or "",
-        record.start_time or "",
-        record.end_time or "",
-        record.result,
-        record.error_code or "",
-        record.error_message or "",
-    ) for record in records)
-    payload = json.dumps(normalized, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
-
-
-# Legacy private helper kept for external callers that imported it directly.
 def _cleanup_job_workdir(job: Any) -> None:
     removed = cleanup_job_workdir(job.workdir)
     if removed:

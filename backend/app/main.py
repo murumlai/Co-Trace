@@ -591,7 +591,7 @@ def manager_comparison(
     reg: Any = Depends(get_registry),
 ) -> dict:
     job = _get_owned_job(job_id, user, reg)
-    candidates, _ = reg.list_owned(user.github_id, limit=10000)
+    candidates, next_cursor = reg.list_owned(user.github_id, limit=10000)
     return comparison.compare_jobs(
         job,
         candidates,
@@ -600,6 +600,7 @@ def manager_comparison(
         station_keys=set(station),
         target_metric=target_metric,
         target_percent=target_percent,
+        history_complete=next_cursor is None,
     )
 
 

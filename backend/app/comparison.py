@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from .aggregator import build_manager_view
+from .aggregator import build_manager_view, filter_records
+from .fingerprints import batch_fingerprint
 
 _METRICS = {
     "first_observed_pass_rate": ("fpy", "fpy_total"),
@@ -20,32 +21,68 @@ def compare_jobs(
     station_keys: set[str] | None = None,
     target_metric: str | None = None,
     target_percent: float | None = None,
+    history_complete: bool = True,
 ) -> dict:
-    fingerprint = current.batch.batch_fingerprint
-    if not fingerprint:
+    if not current.batch.batch_fingerprint:
         return _unavailable("Current batch fingerprint is unavailable")
 
     products = set(product_codes or current.batch.product_codes)
-    current_view = build_manager_view(
+    current_records, _ = filter_records(
         current.records,
+        product_codes=products,
+        lot_ids=lot_ids,
+        station_keys=station_keys,
+    )
+    current_view = build_manager_view(
+        current_records,
         product_codes=products,
         lot_ids=lot_ids,
         station_keys=station_keys,
     )
     if not current_view["summary"]["total_runs"]:
         return _unavailable("Current comparison scope has no attempts")
+    current_products = {record.product_code for record in current_records}
+    current_fingerprint = batch_fingerprint(current_records)
+    current_attempt_ids = {record.unit_id for record in current_records}
 
     baseline = None
     baseline_view = None
+    rejection_reasons: set[str] = set()
     for candidate in sorted(candidates, key=lambda job: (job.created_at, job.job_id), reverse=True):
-        if candidate.job_id == current.job_id or candidate.status != "done":
+        if candidate.job_id == current.job_id:
             continue
-        if not candidate.batch.batch_fingerprint or candidate.batch.batch_fingerprint == fingerprint:
+        if candidate.owner_id != current.owner_id:
+            rejection_reasons.add("owner")
             continue
-        if products and set(candidate.batch.product_codes) != products:
+        if candidate.created_at >= current.created_at:
+            rejection_reasons.add("not_prior")
+            continue
+        if candidate.status != "done":
+            rejection_reasons.add("not_complete")
+            continue
+        if not candidate.batch.batch_fingerprint:
+            rejection_reasons.add("missing_fingerprint")
+            continue
+        candidate_records, _ = filter_records(
+            candidate.records,
+            product_codes=products,
+            lot_ids=lot_ids,
+            station_keys=station_keys,
+        )
+        candidate_products = {record.product_code for record in candidate_records}
+        if candidate_products != current_products:
+            rejection_reasons.add("product_mismatch")
+            continue
+        candidate_fingerprint = batch_fingerprint(candidate_records)
+        if candidate_fingerprint == current_fingerprint:
+            rejection_reasons.add("duplicate")
+            continue
+        candidate_attempt_ids = {record.unit_id for record in candidate_records}
+        if current_attempt_ids.intersection(candidate_attempt_ids):
+            rejection_reasons.add("overlap")
             continue
         view = build_manager_view(
-            candidate.records,
+            candidate_records,
             product_codes=products,
             lot_ids=lot_ids,
             station_keys=station_keys,
@@ -57,7 +94,7 @@ def compare_jobs(
         break
 
     if baseline is None or baseline_view is None:
-        return _unavailable("No comparable prior non-duplicate batch is available")
+        return _unavailable(_unavailable_reason(rejection_reasons, history_complete))
 
     comparisons = {}
     for name, (value_key, denominator_key) in _METRICS.items():
@@ -108,6 +145,7 @@ def compare_jobs(
             "baseline_attempts": baseline_view["summary"]["total_runs"],
             "current_units": current_view["summary"]["unique_units"],
             "baseline_units": baseline_view["summary"]["unique_units"],
+            "history_complete": history_complete,
             "time_rule": "Each batch uses its full observed period; active absolute date filters are not replayed.",
         },
         "metrics": comparisons,
@@ -125,3 +163,17 @@ def _unavailable(reason: str) -> dict:
         "metrics": {},
         "target": None,
     }
+
+
+def _unavailable_reason(rejections: set[str], history_complete: bool) -> str:
+    if not history_complete:
+        return "No comparable batch in searched history"
+    if "duplicate" in rejections and rejections <= {"duplicate", "not_complete", "missing_fingerprint"}:
+        return "Only duplicate uploads found"
+    if "overlap" in rejections:
+        return "Comparable batches overlap the selected attempts"
+    if "product_mismatch" in rejections:
+        return "No earlier batch has the same selected product population"
+    if "missing_fingerprint" in rejections:
+        return "Earlier batch metadata is unavailable"
+    return "No earlier comparable batch"
