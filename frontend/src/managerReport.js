@@ -10,7 +10,40 @@ export function csvCell(value) {
 
 const row = (...values) => values.map(csvCell).join(',')
 
-export function buildManagerCsv(data, comparison = null, generatedAt = new Date().toISOString(), actions = []) {
+const clone = (value) => JSON.parse(JSON.stringify(value))
+
+export function filterActionsForScope(data, actions = []) {
+  const attemptIds = data?.scope?.attempt_ids
+  if (!Array.isArray(attemptIds)) return [...actions]
+  const attempts = new Set(attemptIds)
+  const signatures = new Set((data.pareto || []).map((item) => item.signature).filter(Boolean))
+  return actions.filter((entry) => (
+    entry.unit_id ? attempts.has(entry.unit_id) : entry.signature ? signatures.has(entry.signature) : false
+  ))
+}
+
+export function createManagerReportSnapshot({
+  jobId,
+  scopeKey,
+  data,
+  comparison = null,
+  actions = [],
+  resourceStates = {},
+  generatedAt = new Date().toISOString(),
+}) {
+  const snapshotData = clone(data)
+  return Object.freeze({
+    jobId,
+    scopeKey,
+    generatedAt,
+    data: snapshotData,
+    comparison: comparison ? clone(comparison) : null,
+    actions: clone(filterActionsForScope(snapshotData, actions)),
+    resourceStates: { ...resourceStates },
+  })
+}
+
+export function buildManagerCsv(data, comparison = null, generatedAt = new Date().toISOString(), actions = [], resourceStates = {}) {
   const summary = data.summary || {}
   const scope = data.scope || {}
   const batch = data.batch || {}
@@ -27,9 +60,12 @@ export function buildManagerCsv(data, comparison = null, generatedAt = new Date(
     row('Active station filters', (filters.stations || []).join('; ')),
     row('Active time filter', filters.start_time || '', filters.end_time || ''),
     row('Definition', 'All measures describe attempts selected within this uploaded batch. First/latest are calculated within the selection.'),
+    row('Actor attribution', 'Assignees show responsibility. Recorded shared-workspace/Admin labels do not identify an individual editor.'),
     row('Completeness', `${batch.included_run_count ?? 'unavailable'}/${batch.discovered_run_count ?? 'unavailable'} parsed runs included`),
     row('Quality flags', `parse excluded=${batch.parse_excluded_count ?? 'unavailable'}; incomplete=${batch.incomplete_folder_count ?? 'unavailable'}; unknown=${batch.unknown_result_count ?? 'unavailable'}; missing DebugLog=${batch.missing_debuglog_count ?? 'unavailable'}`),
     row('Comparison availability', comparison?.available ? 'available' : (comparison?.reason || 'unavailable')),
+    row('Comparison resource', resourceStates.comparison || (comparison ? 'available' : 'unavailable')),
+    row('Investigation-action resource', resourceStates.actions || 'available'),
     row('Comparison baseline', comparison?.baseline?.display_name || ''),
     row('Comparison sample sizes', comparison?.scope ? `${comparison.scope.current_attempts} current attempts; ${comparison.scope.baseline_attempts} baseline attempts` : ''),
     row('First observed pass-rate delta (percentage points)', comparison?.metrics?.first_observed_pass_rate?.delta_pp ?? ''),
@@ -69,14 +105,28 @@ export function buildManagerCsv(data, comparison = null, generatedAt = new Date(
     '',
     row('Recommended actions', 'Not included in aggregate export; use scoped Engineer drill-down and redacted debug packets.'),
     '',
-    row('Verified investigation actions'),
-    row('Failure', 'Next action', 'Owner', 'Status', 'Updated', 'Version'),
-    ...actions.map((item) => row(item.error_code || item.signature || item.unit_id, item.next_action, item.assignee || 'Unassigned', item.status, item.updated_at, item.version)),
+    row('Investigation actions'),
+    row('Failure', 'Next action', 'Assignee', 'Status', 'Updated', 'Version', 'Recorded actor'),
+    ...actions.map((item) => row(
+      item.error_code || item.signature || item.unit_id,
+      item.next_action,
+      item.assignee || 'Unassigned',
+      item.status,
+      item.updated_at,
+      item.version,
+      item.history?.at(-1)?.actor_login || 'unavailable',
+    )),
   ]
   return `${lines.join('\r\n')}\r\n`
 }
 
-export function managerReportFilename(displayName) {
-  const safe = String(displayName || 'batch').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'batch'
-  return `co-trace-${safe}-shift-review.csv`
+export function managerReportFilename(jobId, scopeKey = 'all', generatedAt = new Date().toISOString()) {
+  const safe = (value, fallback, limit) => String(value || fallback)
+    .replace(/[^A-Za-z0-9.-]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, limit) || fallback
+  const job = safe(jobId, 'batch', 48)
+  const scope = safe(scopeKey, 'all', 48)
+  const timestamp = safe(generatedAt.replace(/\.\d{3}Z$/, 'Z'), 'time', 32)
+  return `co-trace_${job}_${scope}_${timestamp}.csv`
 }

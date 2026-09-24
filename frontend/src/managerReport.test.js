@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildManagerCsv, csvCell, managerReportFilename } from './managerReport.js'
+import { buildManagerCsv, createManagerReportSnapshot, csvCell, managerReportFilename } from './managerReport.js'
 
 test('escapes CSV delimiters, quotes, line breaks, and spreadsheet formulas', () => {
   assert.equal(csvCell('a,b"c\nd'), '"a,b""c\nd"')
@@ -51,8 +51,9 @@ test('exports active scope, completeness, KPIs, and aggregate tables', () => {
   assert.match(csv, /Attempt pass-rate trend/)
   assert.match(csv, /Prior batch/)
   assert.match(csv, /provenance=user_entered/)
-  assert.match(csv, /Verified investigation actions/)
+  assert.match(csv, /Investigation actions/)
   assert.match(csv, /Inspect fixture/)
+  assert.match(csv, /Assignees show responsibility/)
   assert.match(csv, /Not included in aggregate export/)
 })
 
@@ -73,6 +74,39 @@ test('exports unavailable rates distinctly from observed zero success', () => {
 })
 
 test('creates a bounded filesystem-safe report filename', () => {
-  assert.equal(managerReportFilename('Line 7 / Product A'), 'co-trace-Line-7-Product-A-shift-review.csv')
-  assert.match(managerReportFilename('='.repeat(200)), /^co-trace-batch-/)
+  assert.equal(
+    managerReportFilename('job/7', 'P1 LOT-A', '2026-09-24T10:11:12.123Z'),
+    'co-trace_job-7_P1-LOT-A_2026-09-24T10-11-12Z.csv',
+  )
+  assert.match(managerReportFilename('='.repeat(200)), /^co-trace_batch_/)
+})
+
+test('captures an immutable scoped snapshot and excludes unrelated actions', () => {
+  const data = {
+    scope: { attempt_ids: ['attempt-1'] },
+    pareto: [{ signature: 'sig-1' }],
+    summary: { total_runs: 1 },
+  }
+  const actions = [
+    { action_id: 'a1', unit_id: 'attempt-1', next_action: 'Keep' },
+    { action_id: 'a2', unit_id: 'attempt-2', next_action: 'Exclude' },
+    { action_id: 'a3', signature: 'sig-1', next_action: 'Keep family' },
+    { action_id: 'a4', signature: 'sig-2', next_action: 'Exclude family' },
+  ]
+
+  const snapshot = createManagerReportSnapshot({
+    jobId: 'job-1',
+    scopeKey: 'scope-1',
+    data,
+    actions,
+    resourceStates: { comparison: 'unavailable', actions: 'available' },
+    generatedAt: '2026-09-24T10:00:00Z',
+  })
+  data.summary.total_runs = 99
+  actions[0].next_action = 'Changed'
+
+  assert.equal(snapshot.data.summary.total_runs, 1)
+  assert.deepEqual(snapshot.actions.map((entry) => entry.action_id), ['a1', 'a3'])
+  assert.equal(snapshot.actions[0].next_action, 'Keep')
+  assert.equal(snapshot.resourceStates.comparison, 'unavailable')
 })

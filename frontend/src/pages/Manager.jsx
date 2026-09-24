@@ -14,7 +14,12 @@ import {
 import { api } from '../api'
 import { Badge, Button, Card, IconWell, MetricCard } from '../components/ui'
 import { additionalAttemptMetric, firstObservedPassMetric, formatRate, latestObservedYieldMetric } from '../managerMetrics'
-import { buildManagerCsv, managerReportFilename } from '../managerReport'
+import {
+  buildManagerCsv,
+  createManagerReportSnapshot,
+  filterActionsForScope,
+  managerReportFilename,
+} from '../managerReport'
 import { DEFAULT_MANAGER_SCOPE } from '../workspaceState'
 
 const AXIS = { fill: 'rgb(var(--color-muted))', fontSize: 12, fontFamily: 'DM Sans' }
@@ -48,7 +53,8 @@ function ChartCard({ title, subtitle, children }) {
 export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SCOPE, onScopeChange }) {
   const activeJob = useRef(jobId)
   activeJob.current = jobId
-  const [data, setData] = useState(null)
+  const [liveData, setData] = useState(null)
+  const [dataIdentity, setDataIdentity] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [reload, setReload] = useState(0)
@@ -56,10 +62,13 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
   const [comparison, setComparison] = useState(null)
   const [comparisonLoading, setComparisonLoading] = useState(false)
   const [comparisonError, setComparisonError] = useState('')
+  const [comparisonIdentity, setComparisonIdentity] = useState(null)
   const [actions, setActions] = useState([])
   const [actionsError, setActionsError] = useState('')
+  const [actionsIdentity, setActionsIdentity] = useState(null)
   const [actionBusy, setActionBusy] = useState(null)
   const [actionsReload, setActionsReload] = useState(0)
+  const [printSnapshot, setPrintSnapshot] = useState(null)
   const scopeKey = JSON.stringify({
     products: scope.products,
     lots: scope.lots,
@@ -87,7 +96,10 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
     setError('')
     api.manager(jobId, scope).then(
       (nextData) => {
-        if (active) setData(nextData)
+        if (active) {
+          setData(nextData)
+          setDataIdentity(`${jobId}:${scopeKey}`)
+        }
       },
       (requestError) => {
         if (active) setError(requestError.message)
@@ -107,7 +119,10 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
     setComparisonError('')
     api.comparison(jobId, scope).then(
       (result) => {
-        if (active) setComparison(result)
+        if (active) {
+          setComparison(result)
+          setComparisonIdentity(`${jobId}:${comparisonKey}`)
+        }
       },
       (requestError) => {
         if (active) setComparisonError(requestError.message)
@@ -127,7 +142,10 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
     setActionsError('')
     api.actions(jobId).then(
       (result) => {
-        if (active) setActions(result.entries || [])
+        if (active) {
+          setActions(result.entries || [])
+          setActionsIdentity(jobId)
+        }
       },
       (requestError) => {
         if (active) setActionsError(requestError.message)
@@ -139,13 +157,13 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
   }, [actionsReload, jobId])
 
   if (!jobId) return <EmptyState />
-  if (loading && !data)
+  if (loading && !liveData)
     return (
       <div className="mx-auto max-w-6xl px-6 py-12">
         <Card role="status" className="p-10 text-center text-muted">Loading metrics…</Card>
       </div>
     )
-  if (error && !data) {
+  if (error && !liveData) {
     return (
       <div className="mx-auto max-w-2xl px-6 py-24 text-center">
         <IconWell className="h-16 w-16 mx-auto mb-6">
@@ -163,8 +181,13 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
       </div>
     )
   }
-  if (!data) return <EmptyMetricsState />
+  if (!liveData) return <EmptyMetricsState />
 
+  const data = printSnapshot?.data || liveData
+  const displayedComparison = printSnapshot ? printSnapshot.comparison : comparison
+  const displayedActions = printSnapshot
+    ? printSnapshot.actions
+    : filterActionsForScope(data, actions)
   const s = data.summary
   const topFailure = data.pareto && data.pareto.length ? data.pareto[0] : null
   const firstObservedPass = firstObservedPassMetric(s)
@@ -186,14 +209,56 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
     key,
     direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
   }))
+  const currentDataIdentity = `${jobId}:${scopeKey}`
+  const currentComparisonIdentity = `${jobId}:${comparisonKey}`
+  const exportReady = !loading && !error && dataIdentity === currentDataIdentity
+  const exportReason = exportReady ? '' : loading ? 'Selected metrics are still loading' : 'Selected metrics are unavailable'
+  const scopeFileKey = [
+    ...scope.products,
+    ...scope.lots,
+    ...scope.stations,
+    scope.startTime,
+    scope.endTime,
+  ].filter(Boolean).join('-') || 'all'
+  const captureSnapshot = () => createManagerReportSnapshot({
+    jobId,
+    scopeKey,
+    data: liveData,
+    comparison: comparisonIdentity === currentComparisonIdentity && !comparisonLoading && !comparisonError
+      ? comparison
+      : null,
+    actions: actionsIdentity === jobId && !actionsError ? actions : [],
+    resourceStates: {
+      comparison: comparisonLoading
+        ? 'loading'
+        : comparisonError || comparisonIdentity !== currentComparisonIdentity ? 'unavailable' : 'available',
+      actions: actionsError || actionsIdentity !== jobId ? 'unavailable' : 'available',
+    },
+  })
   const exportCsv = () => {
-    const csv = buildManagerCsv(data, comparison, undefined, actions)
+    if (!exportReady) return
+    const snapshot = captureSnapshot()
+    const csv = buildManagerCsv(
+      snapshot.data,
+      snapshot.comparison,
+      snapshot.generatedAt,
+      snapshot.actions,
+      snapshot.resourceStates,
+    )
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
     const link = document.createElement('a')
     link.href = url
-    link.download = managerReportFilename(batch.display_name)
+    link.download = managerReportFilename(jobId, scopeFileKey, snapshot.generatedAt)
     link.click()
     URL.revokeObjectURL(url)
+  }
+  const printSummary = () => {
+    if (!exportReady) return
+    const snapshot = captureSnapshot()
+    setPrintSnapshot(snapshot)
+    const reset = () => setPrintSnapshot(null)
+    window.addEventListener('afterprint', reset, { once: true })
+    requestAnimationFrame(() => window.print())
   }
   const updateActionStatus = async (entry, status) => {
     const requestJob = jobId
@@ -227,13 +292,13 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
           </p>
         </div>
         <div className="no-print flex gap-2">
-          <Button onClick={exportCsv}>Export CSV</Button>
-          <Button variant="primary" onClick={() => window.print()}>Print summary</Button>
+          <Button onClick={exportCsv} disabled={!exportReady} title={exportReason || undefined}>Export CSV</Button>
+          <Button variant="primary" onClick={printSummary} disabled={!exportReady} title={exportReason || undefined}>Print summary</Button>
         </div>
       </div>
 
       <div className="print-only mb-4 text-xs text-ink">
-        <p>Generated {new Date().toLocaleString()}</p>
+        <p>Generated {new Date(printSnapshot?.generatedAt || Date.now()).toLocaleString()}</p>
         <p>Measures describe the selected attempts within this uploaded batch. First/latest outcomes are calculated within the active scope.</p>
       </div>
 
@@ -491,16 +556,16 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
       )}
 
       <ComparisonPanel
-        comparison={comparison}
-        loading={comparisonLoading}
-        error={comparisonError}
+        comparison={displayedComparison}
+        loading={printSnapshot ? false : comparisonLoading}
+        error={printSnapshot ? (printSnapshot.resourceStates.comparison === 'unavailable' ? 'Not available in this snapshot' : '') : comparisonError}
         targetMetric={scope.targetMetric}
         targetPercent={scope.targetPercent}
         onTargetChange={(update) => onScopeChange?.({ ...scope, ...update })}
       />
       <ActionQueue
-        entries={actions}
-        error={actionsError}
+        entries={displayedActions}
+        error={printSnapshot ? (printSnapshot.resourceStates.actions === 'unavailable' ? 'Not available in this snapshot' : '') : actionsError}
         busy={actionBusy}
         onRetry={() => setActionsReload((value) => value + 1)}
         onStatusChange={updateActionStatus}

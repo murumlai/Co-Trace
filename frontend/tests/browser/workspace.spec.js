@@ -18,6 +18,10 @@ test('opens Home, reopens a batch, and navigates the real shell', async ({ page 
 
   await page.getByRole('button', { name: 'Manager', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Synthetic batch' })).toBeVisible()
+  const downloadStarted = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Export CSV' }).click()
+  const download = await downloadStarted
+  expect(download.suggestedFilename()).toMatch(/^co-trace_synthetic-job_all_.*\.csv$/)
 
   expect(fixture.unexpected).toEqual([])
   expect(pageErrors).toEqual([])
