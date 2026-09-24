@@ -13,7 +13,7 @@ const completedJob = {
   unit_count: 0,
 }
 
-const managerView = {
+export const managerView = {
   batch: {
     display_name: completedJob.display_name,
     product_codes: [],

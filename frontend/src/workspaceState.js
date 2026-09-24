@@ -11,7 +11,7 @@ const SORTS = new Set([
 ])
 const VIEWS = new Set(['table', 'cards'])
 const ENGINEER_COLUMNS = new Set(['product', 'failure', 'evidence', 'action'])
-const URL_KEYS = ['job', 'tab', 'unit', 'family', 'drill_signature', 'station', 'host', 'lot', 'product', 'scope_lot', 'scope_station', 'start', 'end']
+const URL_KEYS = ['job', 'tab', 'unit', 'family', 'attempt', 'drill_signature', 'station', 'host', 'lot', 'product', 'scope_lot', 'scope_station', 'start', 'end']
 
 export const DEFAULT_ENGINEER_VIEW_STATE = Object.freeze({
   filter: 'all',
@@ -48,19 +48,19 @@ const boundedList = (values, limit = 1000) => Array.from(new Set(
 
 function normalizeDrillDown(value) {
   if (!value || typeof value !== 'object') return null
+  const attemptId = bounded(value.attempt_id)
   const signature = bounded(value.signature)
   const stationId = bounded(value.station_id)
   const host = bounded(value.host)
   const lotId = bounded(value.lot_id)
-  if (!signature && !stationId && !lotId) return null
+  if (!attemptId && !signature && !stationId && !lotId) return null
   return {
+    ...(attemptId ? { attempt_id: attemptId } : {}),
     ...(signature ? { signature } : {}),
     ...(stationId ? { station_id: stationId } : {}),
     ...(host ? { host } : {}),
     ...(lotId ? { lot_id: lotId } : {}),
-    attempt_ids: boundedList(value.attempt_ids),
-    unit_ids: boundedList(value.unit_ids),
-    label: bounded(value.label) || signature || lotId || [host, stationId].filter(Boolean).join(' / '),
+    label: bounded(value.label) || attemptId || signature || lotId || [host, stationId].filter(Boolean).join(' / '),
   }
 }
 
@@ -105,7 +105,7 @@ export function workspaceStorageKey(username) {
   return `cotrace-workspace:${String(username || '').trim().toLocaleLowerCase()}`
 }
 
-export function loadWorkspaceState(storage, username, search = '') {
+export function loadWorkspaceState(storage, username, search = '', { navigation = false } = {}) {
   let saved = {}
   try {
     saved = JSON.parse(storage?.getItem(workspaceStorageKey(username)) || '{}')
@@ -114,32 +114,34 @@ export function loadWorkspaceState(storage, username, search = '') {
   }
 
   const params = new URLSearchParams(search)
+  const explicitNavigation = navigation || URL_KEYS.some((key) => params.has(key))
+  const base = explicitNavigation ? {} : saved
   const fromUrl = {
-    ...saved,
-    tab: params.get('tab') || saved.tab,
-    jobId: params.get('job') || saved.jobId,
+    ...base,
+    tab: params.get('tab') || base.tab,
+    jobId: params.get('job') || base.jobId,
     engineer: {
-      ...(saved.engineer || {}),
-      expanded: params.get('unit') || saved.engineer?.expanded,
-      activeSignature: params.get('family') || saved.engineer?.activeSignature,
+      ...(base.engineer || {}),
+      expanded: params.get('unit') || base.engineer?.expanded,
+      activeSignature: params.get('family') || base.engineer?.activeSignature,
     },
     managerScope: {
-      ...(saved.managerScope || {}),
-      products: params.has('product') ? params.getAll('product') : saved.managerScope?.products,
-      lots: params.has('scope_lot') ? params.getAll('scope_lot') : saved.managerScope?.lots,
-      stations: params.has('scope_station') ? params.getAll('scope_station') : saved.managerScope?.stations,
-      startTime: params.get('start') || saved.managerScope?.startTime,
-      endTime: params.get('end') || saved.managerScope?.endTime,
+      ...(base.managerScope || {}),
+      products: params.has('product') ? params.getAll('product') : base.managerScope?.products,
+      lots: params.has('scope_lot') ? params.getAll('scope_lot') : base.managerScope?.lots,
+      stations: params.has('scope_station') ? params.getAll('scope_station') : base.managerScope?.stations,
+      startTime: params.get('start') || base.managerScope?.startTime,
+      endTime: params.get('end') || base.managerScope?.endTime,
     },
-    drillDown: params.has('drill_signature') || params.has('station') || params.has('lot')
+    drillDown: params.has('attempt') || params.has('drill_signature') || params.has('station') || params.has('lot')
       ? {
-          ...(saved.drillDown || {}),
+          attempt_id: params.get('attempt'),
           signature: params.get('drill_signature'),
           station_id: params.get('station'),
           host: params.get('host'),
           lot_id: params.get('lot'),
         }
-      : saved.drillDown,
+      : base.drillDown,
   }
   return normalizeWorkspaceState(fromUrl)
 }
@@ -179,10 +181,44 @@ export function workspaceSearch(value, currentSearch = '') {
   state.managerScope.stations.forEach((value) => params.append('scope_station', value))
   if (state.managerScope.startTime) params.set('start', state.managerScope.startTime)
   if (state.managerScope.endTime) params.set('end', state.managerScope.endTime)
+  if (state.drillDown?.attempt_id) params.set('attempt', state.drillDown.attempt_id)
   if (state.drillDown?.signature) params.set('drill_signature', state.drillDown.signature)
   if (state.drillDown?.station_id) params.set('station', state.drillDown.station_id)
   if (state.drillDown?.host) params.set('host', state.drillDown.host)
   if (state.drillDown?.lot_id) params.set('lot', state.drillDown.lot_id)
   const query = params.toString()
   return query ? `?${query}` : ''
+}
+
+export function resolveDrillDownSelection(data, descriptor) {
+  if (!descriptor) return null
+  if (descriptor.attempt_id) {
+    return {
+      ...descriptor,
+      attempt_ids: [descriptor.attempt_id],
+      unit_ids: [],
+      selected_attempt_count: 1,
+      selected_unit_count: 0,
+      exact: true,
+    }
+  }
+
+  const match = descriptor.signature
+    ? (data?.pareto || []).find((item) => item.signature === descriptor.signature)
+    : descriptor.station_id
+      ? (data?.stations || []).find((item) => (
+          item.station_id === descriptor.station_id &&
+          (!descriptor.host || item.host === descriptor.host)
+        ))
+      : (data?.lots || []).find((item) => item.lot === descriptor.lot_id)
+
+  return {
+    ...descriptor,
+    attempt_ids: match?.attempt_ids || [],
+    unit_ids: match?.unit_ids || [],
+    selected_attempt_count: match?.count ?? match?.total ?? 0,
+    selected_unit_count: match?.unit_ids?.length || 0,
+    exact: true,
+    selection_unavailable: !match,
+  }
 }

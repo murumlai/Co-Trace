@@ -130,7 +130,7 @@ const compareGroups = (sortBy) => (left, right) => {
   )
 }
 
-export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewKnowledge, initialViewState, onViewStateChange, feedbackDrafts = {}, onFeedbackDraftsChange }) {
+export default function Engineer({ jobId, drillDown, onClearDrillDown, onReturnToManager, onReviewKnowledge, initialViewState, onViewStateChange, feedbackDrafts = {}, onFeedbackDraftsChange }) {
   const { isAdmin } = useAuth()
   const activeJob = useRef(jobId)
   activeJob.current = jobId
@@ -387,7 +387,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
       units
         .filter((unit) => {
           const serial = unit.serial_number || unit.unit_id
-          const hasExactScope = drillDownUnitIds.size > 0 || drillDownAttemptIds.size > 0
+          const hasExactScope = !!drillDown?.exact || drillDownUnitIds.size > 0 || drillDownAttemptIds.size > 0
           const matchesExactScope = !hasExactScope || drillDownUnitIds.has(serial) ||
             groupAttempts(unit).some((attempt) => drillDownAttemptIds.has(attempt.unit_id))
           const matchesClass = filter === 'all' || unit.classification === filter
@@ -436,7 +436,7 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
 
   const drillDownStats = useMemo(() => {
     if (!drillDown) return null
-    if (drillDown.attempt_ids?.length || drillDown.unit_ids?.length) {
+    if (drillDown.exact || drillDown.attempt_ids?.length || drillDown.unit_ids?.length) {
       const exactAttempts = new Set(drillDown.attempt_ids || [])
       const exactUnits = new Set(drillDown.unit_ids || [])
       const matchingUnitCount = units.filter((unit) => {
@@ -444,8 +444,8 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
         return exactUnits.has(serial) || groupAttempts(unit).some((attempt) => exactAttempts.has(attempt.unit_id))
       }).length
       return {
-        attempts: drillDown.attempt_ids?.length || 0,
-        units: exactUnits.size || matchingUnitCount,
+        attempts: drillDown.selected_attempt_count ?? drillDown.attempt_ids?.length ?? 0,
+        units: (drillDown.selected_unit_count ?? exactUnits.size) || matchingUnitCount,
         exact: true,
       }
     }
@@ -718,13 +718,17 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
       )}
 
       {drillDown && drillDownStats && (
-        <div className="mb-4 flex items-center gap-3">
-          <Badge tone="accent">
-            From Manager: {drillDown.label || 'selection'} · {drillDownStats.attempts} matching attempt{drillDownStats.attempts === 1 ? '' : 's'}
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+          <Button variant="ghost" className="px-2 py-1" onClick={onReturnToManager}>
+            Manager
+          </Button>
+          <span aria-hidden="true" className="text-muted">›</span>
+          <span className="min-w-0 break-words text-ink">
+            {drillDown.label || 'selection'} › {drillDownStats.attempts} matching attempt{drillDownStats.attempts === 1 ? '' : 's'}
             {drillDownStats.attempts !== drillDownStats.units
               ? ` across ${drillDownStats.units} unit${drillDownStats.units === 1 ? '' : 's'}`
               : ''}
-          </Badge>
+          </span>
           <Button variant="ghost" className="px-2 py-1" onClick={clearDrillDown}>
             Clear
           </Button>
@@ -733,7 +737,9 @@ export default function Engineer({ jobId, drillDown, onClearDrillDown, onReviewK
 
       {drillDownStats?.exact && (
         <p className="mb-4 text-xs text-muted">
-          Unit rows show each selected unit's latest outcome and available failure evidence; intermediate passing attempts remain included in the Manager count.
+          {drillDown?.selection_unavailable
+            ? `The exact Manager selection is unavailable${drillDown.selection_error ? `: ${drillDown.selection_error}` : '.'}`
+            : "Unit rows show each selected unit's latest outcome and available failure evidence; intermediate passing attempts remain included in the Manager count."}
         </p>
       )}
 

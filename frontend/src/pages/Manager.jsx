@@ -258,6 +258,7 @@ export default function Manager({ jobId, onDrillDown, scope = DEFAULT_MANAGER_SC
         onRetry={() => setActionsReload((value) => value + 1)}
         onStatusChange={updateActionStatus}
         onOpen={(entry) => onDrillDown({
+          attempt_id: entry.unit_id || null,
           signature: entry.signature || null,
           label: entry.error_code || entry.next_action,
           attempt_ids: entry.unit_id ? [entry.unit_id] : [],

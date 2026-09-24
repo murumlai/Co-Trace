@@ -14,6 +14,7 @@ import {
   DEFAULT_ENGINEER_VIEW_STATE,
   DEFAULT_MANAGER_SCOPE,
   loadWorkspaceState,
+  resolveDrillDownSelection,
   saveWorkspaceState,
   workspaceSearch,
 } from './workspaceState'
@@ -127,7 +128,7 @@ function Shell() {
     if (!workspaceReady || !isAuthed || !username || restoringWorkspace) return
     const workspace = {
       tab,
-      jobId: jobId || restoreCandidateId,
+      jobId: jobId || activeJobId || restoreCandidateId,
       engineer: engineerViewState,
       managerScope,
       drillDown: engineerDrillDown,
@@ -135,12 +136,50 @@ function Shell() {
     saveWorkspaceState(sessionStorage, username, workspace)
     const search = workspaceSearch(workspace, window.location.search)
     window.history.replaceState(null, '', `${window.location.pathname}${search}${window.location.hash}`)
-  }, [engineerDrillDown, engineerViewState, isAuthed, jobId, managerScope, restoreCandidateId, restoringWorkspace, tab, username, workspaceReady])
+  }, [activeJobId, engineerDrillDown, engineerViewState, isAuthed, jobId, managerScope, restoreCandidateId, restoringWorkspace, tab, username, workspaceReady])
+
+  const drillDownDescriptorKey = JSON.stringify({
+    attempt_id: engineerDrillDown?.attempt_id,
+    signature: engineerDrillDown?.signature,
+    station_id: engineerDrillDown?.station_id,
+    host: engineerDrillDown?.host,
+    lot_id: engineerDrillDown?.lot_id,
+    exact: engineerDrillDown?.exact,
+  })
+  const managerScopeKey = JSON.stringify(managerScope)
+
+  useEffect(() => {
+    if (!jobId || !engineerDrillDown || engineerDrillDown.exact) return undefined
+    if (engineerDrillDown.attempt_ids?.length || engineerDrillDown.unit_ids?.length) return undefined
+    let active = true
+    const descriptor = engineerDrillDown
+
+    if (descriptor.attempt_id) {
+      setEngineerDrillDown(resolveDrillDownSelection(null, descriptor))
+      return undefined
+    }
+
+    api.manager(jobId, managerScope).then(
+      (data) => {
+        if (active) setEngineerDrillDown(resolveDrillDownSelection(data, descriptor))
+      },
+      (error) => {
+        if (!active) return
+        setEngineerDrillDown({
+          ...resolveDrillDownSelection(null, descriptor),
+          selection_error: error.message,
+        })
+      },
+    )
+    return () => {
+      active = false
+    }
+  }, [drillDownDescriptorKey, jobId, managerScopeKey])
 
   useEffect(() => {
     if (!workspaceReady || !isAuthed || !username) return undefined
     const onPopState = () => {
-      const restored = loadWorkspaceState(sessionStorage, username, window.location.search)
+      const restored = loadWorkspaceState(sessionStorage, username, window.location.search, { navigation: true })
       setTab(restored.tab)
       setEngineerViewState((current) => ({ ...current, ...restored.engineer }))
       setManagerScope(restored.managerScope)
@@ -149,6 +188,16 @@ function Shell() {
       if (restored.jobId && restored.jobId !== currentJobId) {
         setRestoreCandidateId(restored.jobId)
         restoreWorkspaceJob(restored.jobId)
+      } else if (!restored.jobId && currentJobId) {
+        runToken.current += 1
+        setJobId(null)
+        setActiveJobId(null)
+        setRestoreCandidateId(null)
+        setBatchRunning(false)
+        setBatchProgress(null)
+        setWorkspaceError('')
+        setWarnings([])
+        setEngineerFeedbackDrafts({})
       }
     }
     window.addEventListener('popstate', onPopState)
@@ -400,7 +449,7 @@ function Shell() {
 
   const workspaceSnapshot = (overrides = {}) => ({
     tab,
-    jobId: jobId || restoreCandidateId,
+    jobId: jobId || activeJobId || restoreCandidateId,
     engineer: engineerViewState,
     managerScope,
     drillDown: engineerDrillDown,
@@ -658,6 +707,7 @@ function Shell() {
             jobId={jobId}
             drillDown={engineerDrillDown}
             onClearDrillDown={() => setEngineerDrillDown(null)}
+            onReturnToManager={() => navigateToTab('manager')}
             onReviewKnowledge={openKnowledgeReview}
             initialViewState={engineerViewState}
             onViewStateChange={setEngineerViewState}

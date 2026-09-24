@@ -4,6 +4,7 @@ import {
   clearWorkspaceState,
   loadWorkspaceState,
   saveWorkspaceState,
+  resolveDrillDownSelection,
   workspaceSearch,
   workspaceStorageKey,
 } from './workspaceState.js'
@@ -106,7 +107,7 @@ test('workspace storage is identity scoped and removable on sign out', () => {
   assert.equal(loadWorkspaceState(storage, 'second').jobId, 'second-job')
 })
 
-test('preserves exact drill-down identities in session state without putting them in the URL', () => {
+test('persists drill-down selectors without large identity arrays', () => {
   const storage = memoryStorage()
   const state = saveWorkspaceState(storage, 'user', {
     tab: 'engineer',
@@ -121,7 +122,46 @@ test('preserves exact drill-down identities in session state without putting the
   const query = workspaceSearch(state)
   const restored = loadWorkspaceState(storage, 'user', query)
 
-  assert.deepEqual(restored.drillDown.attempt_ids, ['attempt-1', 'attempt-2'])
-  assert.deepEqual(restored.drillDown.unit_ids, ['SN-1'])
+  assert.equal(restored.drillDown.signature, 'sig-1')
+  assert.equal(restored.drillDown.attempt_ids, undefined)
+  assert.equal(restored.drillDown.unit_ids, undefined)
   assert.doesNotMatch(query, /attempt-1|SN-1/)
+})
+
+test('explicit history entries clear omitted scope instead of inheriting saved filters', () => {
+  const storage = memoryStorage()
+  saveWorkspaceState(storage, 'user', {
+    tab: 'manager',
+    jobId: 'old-job',
+    managerScope: { products: ['P1'], lots: ['LOT-1'], stations: ['ST-1'] },
+  })
+
+  const restored = loadWorkspaceState(storage, 'user', '?job=new-job&tab=engineer')
+
+  assert.equal(restored.jobId, 'new-job')
+  assert.deepEqual(restored.managerScope.products, [])
+  assert.deepEqual(restored.managerScope.lots, [])
+  assert.deepEqual(restored.managerScope.stations, [])
+})
+
+test('reconstructs exact drill-down identities from a compact selector', () => {
+  const attemptIds = Array.from({ length: 1205 }, (_, index) => `attempt-${index}`)
+  const resolved = resolveDrillDownSelection({
+    pareto: [{ signature: 'sig-1', count: 1205, attempt_ids: attemptIds, unit_ids: ['SN-1'] }],
+  }, { signature: 'sig-1', label: 'Failure family' })
+
+  assert.equal(resolved.exact, true)
+  assert.equal(resolved.selected_attempt_count, 1205)
+  assert.equal(resolved.attempt_ids.length, 1205)
+  assert.deepEqual(resolved.unit_ids, ['SN-1'])
+})
+
+test('a bare history entry clears a saved investigation', () => {
+  const storage = memoryStorage()
+  saveWorkspaceState(storage, 'user', { tab: 'engineer', jobId: 'job-1' })
+
+  const restored = loadWorkspaceState(storage, 'user', '', { navigation: true })
+
+  assert.equal(restored.tab, 'home')
+  assert.equal(restored.jobId, null)
 })
