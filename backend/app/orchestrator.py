@@ -215,7 +215,7 @@ def _analysis_progress_updater(job: Any) -> Callable[[int, int, str], None]:
         job.processed = processed
         job.total = max(total, 1)
         job.stage = stage
-        if settings.LLM_PROVIDER == "copilot_sdk" and total > 0 and processed < total:
+        if settings.LLM_PROVIDER == "copilot_http" and total > 0 and processed < total:
             if settings.COPILOT_ENABLE_MINI_ENRICH:
                 calls = f"1-2 Copilot calls; mini skips contexts below {settings.COPILOT_MINI_MIN_CONTEXT_CHARS} chars"
                 passes = 2

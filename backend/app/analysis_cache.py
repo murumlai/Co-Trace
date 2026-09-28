@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from .config import settings
+from .config import normalize_llm_provider, settings
 
 log = logging.getLogger("cotrace.cache")
 
@@ -24,6 +24,8 @@ _CACHE_SCHEMA_VERSION = 1
 # Bumped for the structured RCA output contract. Existing v4 entries remain
 # listable and admin-deletable but are unreachable from newly generated keys.
 _CACHE_PROMPT_VERSION = "analysis-v5"
+# SDK-era key label kept so the HTTPS transport reuses existing entries; transport is not identity.
+_COPILOT_CACHE_PROVIDER = "copilot_sdk"
 _lock = threading.Lock()
 
 
@@ -45,7 +47,7 @@ def make_key(
     payload = {
         "schema_version": _CACHE_SCHEMA_VERSION,
         "prompt_version": _CACHE_PROMPT_VERSION,
-        "provider": (settings.LLM_PROVIDER or "").lower(),
+        "provider": _cache_provider(),
         "model_identity": _model_identity(),
         "signature": signature,
         "error_code": error_code or "",
@@ -183,9 +185,14 @@ def _visible_entry(entry: dict[str, Any], *, actor_is_admin: bool) -> dict[str, 
     return visible
 
 
+def _cache_provider() -> str:
+    provider = normalize_llm_provider(settings.LLM_PROVIDER)
+    return _COPILOT_CACHE_PROVIDER if provider == "copilot_http" else provider
+
+
 def _model_identity() -> dict[str, Any]:
-    provider = (settings.LLM_PROVIDER or "").lower()
-    if provider == "copilot_sdk":
+    provider = normalize_llm_provider(settings.LLM_PROVIDER)
+    if provider == "copilot_http":
         return {
             "mini_model": settings.COPILOT_MINI_MODEL,
             "reasoning_model": settings.COPILOT_REASONING_MODEL,

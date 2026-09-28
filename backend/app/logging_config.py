@@ -46,8 +46,9 @@ def setup_backend_logging(debug: bool | None = None) -> None:
     logging.getLogger("app").setLevel(level)
     logging.getLogger("uvicorn.error").setLevel(level)
     logging.getLogger("uvicorn.access").setLevel(logging.DEBUG if debug_enabled else logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.DEBUG if debug_enabled else logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.DEBUG if debug_enabled else logging.WARNING)
+    # Transport loggers stay at WARNING even in debug so request details never reach logs.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     reset_frontend_log(debug_enabled)
     logging.getLogger(BACKEND_LOGGER_NAME).info(

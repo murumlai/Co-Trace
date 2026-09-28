@@ -1,8 +1,13 @@
 """Central configuration. All values overridable via environment variables."""
 from __future__ import annotations
 
+import logging
 import os
 import secrets
+from collections.abc import Iterable
+from urllib.parse import urlsplit
+
+log = logging.getLogger("cotrace.config")
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -10,6 +15,10 @@ def _env_flag(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_hosts(name: str) -> list[str]:
+    return [h.strip().lower().rstrip(".") for h in os.getenv(name, "").split(",") if h.strip()]
 
 
 # Repo root = two levels above this file (backend/app/config.py -> repo root).
@@ -25,28 +34,65 @@ def _repo_path(*parts: str) -> str:
 # public github.com Copilot sessions are not permitted.
 COPILOT_ENTERPRISE_HOST = "intel-foundry.ghe.com"
 _PUBLIC_COPILOT_HOSTS = frozenset({"", "github.com", "api.github.com", "www.github.com"})
+_DEPRECATED_PROVIDER_ALIASES = {"copilot_sdk": "copilot_http"}
+COPILOT_AUTH_MODES = frozenset({"pat_bearer", "exchange"})
+_COPILOT_TLS_TRUST_OPTIONS = frozenset({"system", "certifi"})
+
+
+def normalize_llm_provider(value: str | None) -> str:
+    provider = (value or "").strip().lower()
+    return _DEPRECATED_PROVIDER_ALIASES.get(provider, provider)
+
+
+def validate_copilot_url(url: str, allowed_hosts: Iterable[str], label: str) -> str:
+    """Return ``url`` if it is HTTPS with an allowlisted host; raise ``ValueError`` otherwise."""
+    parts = urlsplit((url or "").strip())
+    host = (parts.hostname or "").lower().rstrip(".")
+    if parts.scheme != "https" or not host:
+        raise ValueError(f"{label} must be an https:// URL.")
+    if parts.username or parts.password:
+        raise ValueError(f"{label} must not embed credentials.")
+    if host not in set(allowed_hosts):
+        raise ValueError(f"{label} host {host!r} is not in COPILOT_ALLOWED_HOSTS.")
+    return url.strip()
 
 
 class Settings:
     # --- LLM provider selection (enterprise Copilot only) ---
-    # One of: "copilot_sdk" (enterprise GitHub Copilot) | "offline_stub" (local
-    # deterministic heuristic). The public GitHub Models path has been removed
-    # and is rejected at startup by validate_enterprise_only().
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "copilot_sdk")
+    # One of: "copilot_http" (enterprise GitHub Copilot over HTTPS) | "offline_stub"
+    # (local deterministic heuristic). "copilot_sdk" is a deprecated alias for
+    # "copilot_http". Other values are rejected by validate_enterprise_only().
+    LLM_PROVIDER: str = normalize_llm_provider(os.getenv("LLM_PROVIDER", "copilot_http"))
 
-    # --- LLM (GitHub Copilot SDK provider — enterprise only) ---
+    # --- LLM (enterprise GitHub Copilot HTTPS provider) ---
     # Two-tier model policy: a cheap "mini" model summarizes/classifies the
     # bounded redacted excerpt; a larger "reasoning" model produces the final
-    # root cause and suggested solution. Both default to the mini model so a
-    # single-model setup works out of the box.
+    # root cause and suggested solution.
     COPILOT_MINI_MODEL: str = os.getenv("COPILOT_MINI_MODEL", "gpt-5.4-mini")
     COPILOT_REASONING_MODEL: str = os.getenv("COPILOT_REASONING_MODEL", "claude-sonnet-5")
     COPILOT_GITHUB_TOKEN: str = os.getenv("COPILOT_GITHUB_TOKEN", "")
-    # Enterprise GitHub host for Copilot auth/session. Defaults to the sanctioned
-    # enterprise host and is hard-enforced at startup; a public host is rejected.
+    # "pat_bearer" sends the PAT to the inference API; "exchange" trades it for a
+    # short-lived Copilot token first. Chosen by the Phase 0 enterprise probe.
+    COPILOT_AUTH_MODE: str = os.getenv("COPILOT_AUTH_MODE", "").strip().lower()
+    COPILOT_TOKEN_URL: str = os.getenv("COPILOT_TOKEN_URL", "").strip()
+    COPILOT_API_BASE_URL: str = os.getenv("COPILOT_API_BASE_URL", "").strip()
+    # Exact hostnames every configured or exchange-returned Copilot URL must match.
+    COPILOT_ALLOWED_HOSTS: list[str] = _env_hosts("COPILOT_ALLOWED_HOSTS")
+    # Registered integration identifier; never reuse another product's value.
+    COPILOT_INTEGRATION_ID: str = os.getenv("COPILOT_INTEGRATION_ID", "").strip()
+    # Deprecated: display-only in logs/health; never used to build request URLs.
     COPILOT_GH_HOST: str = os.getenv("COPILOT_GH_HOST", COPILOT_ENTERPRISE_HOST)
     COPILOT_PROXY: str = os.getenv("COPILOT_PROXY", "http://proxy-us.intel.com:912")
+    # "system" uses the OS certificate store; "certifi" uses the Mozilla bundle.
+    # COPILOT_CA_BUNDLE, when set, overrides both.
+    COPILOT_TLS_TRUST: str = os.getenv("COPILOT_TLS_TRUST", "system").strip().lower()
+    COPILOT_CA_BUNDLE: str = os.getenv("COPILOT_CA_BUNDLE", "").strip()
+    # Overall per-call deadline, including token refresh and the single retry.
     COPILOT_TIMEOUT_S: float = float(os.getenv("COPILOT_TIMEOUT_S", "60"))
+    COPILOT_TOKEN_REFRESH_SKEW: float = float(os.getenv("COPILOT_TOKEN_REFRESH_SKEW", "120"))
+    COPILOT_MAX_RESPONSE_BYTES: int = int(os.getenv("COPILOT_MAX_RESPONSE_BYTES", str(1024 * 1024)))
+    # 0 omits max_tokens from requests; set only after Phase 0 confirms support.
+    COPILOT_MAX_TOKENS: int = int(os.getenv("COPILOT_MAX_TOKENS", "0"))
     # Run the mini enrichment/summarization pass before the reasoning call.
     COPILOT_ENABLE_MINI_ENRICH: bool = _env_flag("COPILOT_ENABLE_MINI_ENRICH", True)
     COPILOT_MINI_MIN_CONTEXT_CHARS: int = int(os.getenv("COPILOT_MINI_MIN_CONTEXT_CHARS", "500"))
@@ -192,19 +238,65 @@ class Settings:
         """Fail fast unless the AI backend is enterprise Copilot (or the local stub).
 
         The public GitHub Models provider has been removed and public github.com
-        Copilot sessions are not permitted; a public COPILOT_GH_HOST is rejected.
+        Copilot sessions are not permitted.
         """
-        provider = (self.LLM_PROVIDER or "").strip().lower()
-        if provider not in ("copilot_sdk", "offline_stub"):
+        requested = (self.LLM_PROVIDER or "").strip().lower()
+        env_requested = (os.getenv("LLM_PROVIDER") or "").strip().lower()
+        if requested in _DEPRECATED_PROVIDER_ALIASES or env_requested in _DEPRECATED_PROVIDER_ALIASES:
+            log.warning("LLM_PROVIDER=copilot_sdk is deprecated; using canonical 'copilot_http'.")
+        provider = normalize_llm_provider(requested)
+        if provider not in ("copilot_http", "offline_stub"):
             raise RuntimeError(
                 f"LLM_PROVIDER={self.LLM_PROVIDER!r} is not permitted. Only "
-                "'copilot_sdk' (enterprise Copilot) or 'offline_stub' are allowed."
+                "'copilot_http' (enterprise Copilot) or 'offline_stub' are allowed."
             )
-        if provider == "copilot_sdk" and (self.COPILOT_GH_HOST or "").strip().lower() in _PUBLIC_COPILOT_HOSTS:
+        self.LLM_PROVIDER = provider
+        if provider == "copilot_http":
+            self.validate_copilot_transport()
+
+    def validate_copilot_transport(self) -> None:
+        """Raise ``RuntimeError`` unless the Copilot HTTPS settings are complete and safe."""
+        if (self.COPILOT_GH_HOST or "").strip().lower() in _PUBLIC_COPILOT_HOSTS:
             raise RuntimeError(
                 f"COPILOT_GH_HOST={self.COPILOT_GH_HOST!r} targets a public GitHub host. "
                 f"Enterprise Copilot host is required (e.g. {COPILOT_ENTERPRISE_HOST})."
             )
+        if not self.COPILOT_GITHUB_TOKEN.strip():
+            raise RuntimeError("COPILOT_GITHUB_TOKEN is required for LLM_PROVIDER=copilot_http.")
+        if self.COPILOT_AUTH_MODE not in COPILOT_AUTH_MODES:
+            raise RuntimeError("COPILOT_AUTH_MODE must be 'pat_bearer' or 'exchange'.")
+        if not self.COPILOT_ALLOWED_HOSTS:
+            raise RuntimeError("COPILOT_ALLOWED_HOSTS must list the approved Copilot hostnames.")
+        if self.COPILOT_AUTH_MODE == "exchange" and not self.COPILOT_TOKEN_URL:
+            raise RuntimeError("COPILOT_TOKEN_URL is required when COPILOT_AUTH_MODE=exchange.")
+        if self.COPILOT_AUTH_MODE == "pat_bearer" and not self.COPILOT_API_BASE_URL:
+            raise RuntimeError("COPILOT_API_BASE_URL is required when COPILOT_AUTH_MODE=pat_bearer.")
+        try:
+            for label, url in (
+                ("COPILOT_TOKEN_URL", self.COPILOT_TOKEN_URL),
+                ("COPILOT_API_BASE_URL", self.COPILOT_API_BASE_URL),
+            ):
+                if url:
+                    validate_copilot_url(url, self.COPILOT_ALLOWED_HOSTS, label)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from None
+        if self.COPILOT_PROXY:
+            proxy = urlsplit(self.COPILOT_PROXY)
+            if proxy.scheme not in ("http", "https") or not proxy.hostname:
+                raise RuntimeError("COPILOT_PROXY must be an http:// or https:// proxy URL.")
+        if self.COPILOT_TIMEOUT_S <= 0:
+            raise RuntimeError("COPILOT_TIMEOUT_S must be greater than 0.")
+        if self.COPILOT_TOKEN_REFRESH_SKEW < 0:
+            raise RuntimeError("COPILOT_TOKEN_REFRESH_SKEW must not be negative.")
+        if self.COPILOT_MAX_RESPONSE_BYTES <= 0:
+            raise RuntimeError("COPILOT_MAX_RESPONSE_BYTES must be greater than 0.")
+        if self.COPILOT_MAX_TOKENS < 0:
+            raise RuntimeError("COPILOT_MAX_TOKENS must not be negative.")
+        if self.COPILOT_TLS_TRUST not in _COPILOT_TLS_TRUST_OPTIONS:
+            raise RuntimeError("COPILOT_TLS_TRUST must be 'system' or 'certifi'.")
+        bundle = self.COPILOT_CA_BUNDLE
+        if bundle and not (os.path.isfile(bundle) and os.access(bundle, os.R_OK)):
+            raise RuntimeError("COPILOT_CA_BUNDLE does not point to a readable file.")
 
 
 settings = Settings()

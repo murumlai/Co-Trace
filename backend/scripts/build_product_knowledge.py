@@ -8,7 +8,8 @@ and writes the three generated artifacts:
 * ``product_knowledge_index.json``
 * ``product_knowledge_sections.jsonl``
 
-Summarization requires an LLM backend (``copilot auth login``); the build fails
+Summarization requires the enterprise Copilot HTTP provider (``LLM_PROVIDER=copilot_http``
+with ``COPILOT_GITHUB_TOKEN`` and transport settings); the build fails
 fast if none is available.
 
 Usage (from the repo root, with the backend venv active)::

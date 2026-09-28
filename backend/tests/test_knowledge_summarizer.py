@@ -209,9 +209,25 @@ class TestKeywords:
 
 
 class TestDefaultChatRequiresLlm:
-    def test_default_chat_raises_when_sdk_unavailable(self, monkeypatch):
+    def test_default_chat_raises_when_provider_unconfigured(self, monkeypatch):
         import app.copilot_client as cc
 
         monkeypatch.setattr(cc, "is_available", lambda: False)
         with pytest.raises(ProductKnowledgeError):
             summarizer_mod._default_chat("sys", "user")
+
+    def test_default_chat_uses_public_complete_interface(self, monkeypatch):
+        import app.copilot_client as cc
+
+        calls = []
+
+        def fake_complete(system_prompt, user_prompt, model):
+            calls.append((system_prompt, user_prompt, model))
+            return cc.CopilotCompletion('{"summary": "ok"}')
+
+        monkeypatch.setattr(cc, "is_available", lambda: True)
+        monkeypatch.setattr(cc, "complete", fake_complete)
+        monkeypatch.setattr(summarizer_mod.settings, "PRODUCT_KNOWLEDGE_SUMMARY_MODEL", "gpt-5.4-mini")
+
+        assert summarizer_mod._default_chat("sys", "user") == '{"summary": "ok"}'
+        assert calls == [("sys", "user", "gpt-5.4-mini")]

@@ -332,8 +332,9 @@ export default function Knowledge({ jobId, reviewFilter, onClearReview }) {
       {!status?.llm_available && (
         <Panel className="p-4 mb-4 border-warning/30 bg-warning/10">
           <p className="text-sm text-warning">
-            No LLM backend detected. Summarization requires it — run <code>copilot auth login</code>{' '}
-            before rebuilding.
+            No LLM backend detected. Summarization requires the enterprise Copilot HTTP provider —
+            configure <code>COPILOT_GITHUB_TOKEN</code> and the Copilot transport settings on the
+            backend before rebuilding.
           </p>
         </Panel>
       )}

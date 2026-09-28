@@ -1,6 +1,6 @@
 """LLM dispatch for failed-unit diagnosis.
 
-Routes to the enterprise GitHub Copilot SDK provider (``copilot_sdk``) or the
+Routes to the enterprise GitHub Copilot HTTPS provider (``copilot_http``) or the
 deterministic local offline stub (``offline_stub``). The public GitHub Models
 path has been removed; enterprise Copilot is the only sanctioned AI backend.
 """
@@ -40,13 +40,12 @@ def analyze_with_metrics(
     """Return (root_cause, suggested_solution, source).
 
     Dispatches to the configured provider (``settings.LLM_PROVIDER``):
-    ``copilot_sdk`` uses the enterprise GitHub Copilot SDK and ``offline_stub``
+    ``copilot_http`` uses enterprise GitHub Copilot over HTTPS and ``offline_stub``
     forces the deterministic local heuristic. ``knowledge_context`` (optional)
     carries curated, trusted product summaries presented separately from the
     untrusted log excerpt.
     """
-    provider = (settings.LLM_PROVIDER or "copilot_sdk").lower()
-    if provider == "offline_stub":
+    if settings.LLM_PROVIDER == "offline_stub":
         root, solution, source = _offline_stub(error_code, error_message)
         return LlmAnalysisResult(
             root_cause=root,
@@ -78,8 +77,8 @@ class OfflineStubProvider:
         return _offline_stub(error_code, error_message)
 
 
-class CopilotSdkProvider:
-    """Enterprise GitHub Copilot SDK provider (requires ``copilot auth login``)."""
+class CopilotHttpProvider:
+    """Enterprise GitHub Copilot HTTPS provider."""
 
     def analyze(
         self,

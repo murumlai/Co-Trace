@@ -157,20 +157,20 @@ def _user_prompt(section: ExtractedSection) -> str:
 
 
 def _default_chat(system_prompt: str, user_prompt: str) -> str:
-    """Production chat backend: GPT 5.4-mini via the Copilot SDK."""
+    """Production chat backend: GPT 5.4-mini via enterprise Copilot over HTTPS."""
     from .. import copilot_client  # noqa: PLC0415 - avoid import cost at module load
 
     if not copilot_client.is_available():
         raise ProductKnowledgeError(
             "Product-knowledge summarization requires an LLM backend, but the "
-            "Copilot SDK is unavailable. Run `copilot auth login` or set "
+            "enterprise Copilot HTTP provider is not configured. Set "
+            "LLM_PROVIDER=copilot_http with COPILOT_GITHUB_TOKEN, COPILOT_AUTH_MODE, "
+            "the mode-specific URL, and COPILOT_ALLOWED_HOSTS, or set "
             "PRODUCT_KNOWLEDGE_ENABLED=0."
         )
-    return copilot_client._run(
-        copilot_client._stream_once(
-            user_prompt, settings.PRODUCT_KNOWLEDGE_SUMMARY_MODEL, system_prompt
-        )
-    )
+    return copilot_client.complete(
+        system_prompt, user_prompt, settings.PRODUCT_KNOWLEDGE_SUMMARY_MODEL
+    ).text
 
 
 class LlmSectionSummarizer:

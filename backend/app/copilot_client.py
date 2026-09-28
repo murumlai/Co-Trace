@@ -1,8 +1,7 @@
-"""GitHub Copilot SDK provider for failed-unit diagnosis.
+"""Enterprise GitHub Copilot HTTPS provider for failed-unit diagnosis.
 
-Adapts the async ``github-copilot-sdk`` streaming pattern (proven in the
-AI_WG devops-log-analyzer app) into a small synchronous provider that mirrors
-``llm_client.analyze``'s contract:
+Calls the approved enterprise Copilot chat-completions endpoint directly with
+``httpx`` and mirrors ``llm_client.analyze``'s contract:
 
     analyze(error_code, error_message, snippet) -> (root_cause, solution, source)
 
@@ -11,52 +10,32 @@ Design notes
 * Two-tier model policy (see ``llm_plan.md``): a cheap *mini* model first
   summarizes/classifies the bounded, already-redacted excerpt; the larger
   *reasoning* model then produces the final root cause and suggested solution.
-  Both default to the same model, so a single-model setup still works.
 * This module never sends raw multi-MB logs anywhere — it only ever receives
   the deterministic, redacted excerpt selected upstream by the preprocessor /
   analyzer.
 * Every failure path degrades gracefully to the deterministic offline stub so
   the pipeline never crashes because Copilot is unavailable or unauthenticated.
-
-Requires ``github-copilot-sdk>=1.0.13`` and a completed ``copilot auth login``
-on the host. When the SDK is not importable this module is inert and callers
-fall back to the stub.
+* No SDK, subprocess, or CLI login is involved. ``COPILOT_AUTH_MODE`` selects
+  whether the PAT is the bearer credential or is exchanged for a short-lived
+  token; every URL must be HTTPS and in ``COPILOT_ALLOWED_HOSTS``.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-import os
 import re
-from typing import Any
+import ssl
+import threading
+import time
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from typing import Any, Protocol
 
-from .config import settings
+import httpx
+
+from .config import settings, validate_copilot_url
 from .models import AnalysisResult, LlmAnalysisResult, LlmModelRole, LlmUsageMetrics
 from .redaction import redact
-
-# ---- Optional SDK import (inert when unavailable) --------------------------
-try:  # pragma: no cover - import guard depends on host environment
-    from copilot import CopilotClient, PermissionHandler  # type: ignore
-
-    try:
-        from copilot import SubprocessConfig  # type: ignore
-    except ImportError:  # SDK 1.x uses keyword options on CopilotClient.
-        SubprocessConfig = None  # type: ignore
-        try:
-            from copilot.types import CopilotClientOptions  # type: ignore
-        except ImportError:
-            CopilotClientOptions = None  # type: ignore
-    else:
-        CopilotClientOptions = None  # type: ignore
-
-    _SDK_AVAILABLE = True
-except ImportError:
-    CopilotClient = None  # type: ignore
-    PermissionHandler = None  # type: ignore
-    SubprocessConfig = None  # type: ignore
-    CopilotClientOptions = None  # type: ignore
-    _SDK_AVAILABLE = False
 
 
 _DIAGNOSE_SYSTEM_PROMPT = (
@@ -119,25 +98,62 @@ _COMPACT_DIAGNOSE_SYSTEM_PROMPT = (
 log = logging.getLogger("cotrace.copilot")
 
 _SECRET_TOKEN_RE = re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]+\b")
-_AUTH_ERROR_MARKERS = (
-    "authentication info",
-    "custom provider",
-    "not authenticated",
-    "authentication failed",
-    "invalid authentication",
-    "invalid auth",
-    "auth token",
-    "unauthorized",
-)
+_MIN_SECRET_LEN = 8
 
 
-def _is_auth_or_session_config_error(exc: Exception) -> bool:
-    message = str(exc).lower()
-    return any(marker in message for marker in _AUTH_ERROR_MARKERS)
+class CopilotError(RuntimeError):
+    """Sanitized Copilot failure; messages never contain bodies, headers, or tokens."""
+
+    def __init__(self, detail: str, status: int | None = None) -> None:
+        self.status = status
+        super().__init__(detail if status is None else f"{detail}, HTTP {status}")
+
+
+class CopilotAuthError(CopilotError):
+    """Authentication, entitlement, or policy rejection."""
+
+
+class CopilotConfigError(CopilotError):
+    """Non-retryable request, allowlist, TLS, or configuration failure."""
+
+
+class CopilotTransientError(CopilotError):
+    """Timeout, network, or retryable HTTP failure after the allowed retry."""
+
+
+class CopilotResponseError(CopilotError):
+    """Non-JSON, empty, or oversized provider response."""
+
+
+def _secret_values() -> list[str]:
+    values = [settings.COPILOT_GITHUB_TOKEN.strip()]
+    transport = _transport
+    if transport is not None:
+        values.extend(transport.secret_values())
+    return sorted({v for v in values if len(v) >= _MIN_SECRET_LEN}, key=len, reverse=True)
+
+
+def _redact_secrets(text: str) -> str:
+    # Short-lived Copilot tokens do not match _SECRET_TOKEN_RE, so redact by value too.
+    for value in _secret_values():
+        text = text.replace(value, "[REDACTED]")
+    return _SECRET_TOKEN_RE.sub("[REDACTED]", text)
+
+
+class _SecretLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = _redact_secrets(record.getMessage())
+        record.args = None
+        if record.exc_info and not record.exc_text:
+            record.exc_text = _redact_secrets(logging.Formatter().formatException(record.exc_info))
+        return True
+
+
+log.addFilter(_SecretLogFilter())
 
 
 def _copilot_error_suffix(exc: Exception) -> str:
-    message = _SECRET_TOKEN_RE.sub("[REDACTED]", redact(str(exc))).strip()
+    message = redact(_redact_secrets(str(exc))).strip()
     message = " ".join(message.split())
     if len(message) > 240:
         message = f"{message[:237]}..."
@@ -199,109 +215,405 @@ _SUMMARIZE_SYSTEM_PROMPT = (
 )
 
 
-def is_available() -> bool:
-    """True when the Copilot SDK is importable in this environment."""
-    return _SDK_AVAILABLE
-
-
 # ---------------------------------------------------------------------------
-# SDK plumbing
+# HTTPS transport
 # ---------------------------------------------------------------------------
-def _create_client() -> Any:
-    env = dict(os.environ)
-    if settings.COPILOT_PROXY:
-        env.setdefault("HTTP_PROXY", settings.COPILOT_PROXY)
-        env.setdefault("HTTPS_PROXY", settings.COPILOT_PROXY)
-    # Enterprise Copilot host is mandatory and hard-enforced: force it so no
-    # ambient/public COPILOT_GH_HOST can redirect the session to public github.com.
-    env["COPILOT_GH_HOST"] = settings.COPILOT_GH_HOST
-    github_token = settings.COPILOT_GITHUB_TOKEN.strip() or None
-    use_logged_in_user = github_token is None
-    if SubprocessConfig is not None:
-        return CopilotClient(SubprocessConfig(
-            env=env,
-            github_token=github_token,
-            use_logged_in_user=use_logged_in_user,
-            log_level="debug" if settings.APP_DEBUG else "info",
-        ))
-    if CopilotClientOptions is None:
-        return CopilotClient(
-            env=env,
-            github_token=github_token,
-            use_logged_in_user=use_logged_in_user,
-            log_level="debug" if settings.APP_DEBUG else "info",
-        )
+_CHAT_COMPLETIONS_PATH = "/chat/completions"
+_RETRYABLE_STATUS = frozenset({408, 429, 502, 503, 504})
+_USER_AGENT = "Co-Trace/1.0"
+
+
+@dataclass(frozen=True)
+class CopilotCompletion:
+    text: str
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
+@dataclass(frozen=True)
+class CopilotCredential:
+    token: str
+    api_base_url: str
+
+
+class TokenProvider(Protocol):
+    refreshable: bool
+
+    def get(self, timeout_s: float) -> CopilotCredential: ...
+
+    def invalidate(self, token: str) -> None: ...
+
+    def secret_values(self) -> tuple[str, ...]: ...
+
+
+def _is_tls_failure(exc: BaseException) -> bool:
+    current: BaseException | None = exc
+    for _ in range(8):
+        if current is None:
+            return False
+        if isinstance(current, ssl.SSLError):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _read_capped(response: httpx.Response, limit: int) -> bytes:
+    declared = response.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > limit:
+        raise CopilotResponseError("response exceeds COPILOT_MAX_RESPONSE_BYTES")
+    body = bytearray()
+    for chunk in response.iter_bytes():
+        body.extend(chunk)
+        if len(body) > limit:
+            raise CopilotResponseError("response exceeds COPILOT_MAX_RESPONSE_BYTES")
+    return bytes(body)
+
+
+def _send(
+    client: httpx.Client,
+    method: str,
+    url: str,
+    *,
+    headers: dict[str, str],
+    timeout_s: float,
+    max_bytes: int,
+    json_body: dict[str, Any] | None = None,
+) -> tuple[int, bytes]:
+    """Send one request; return (status, body). Body is read only for 200 responses."""
     try:
-        return CopilotClient(CopilotClientOptions(
-            env=env,
-            github_token=github_token,
-            use_logged_in_user=use_logged_in_user,
-        ))
-    except TypeError:
-        return CopilotClient(CopilotClientOptions(env=env))
+        with client.stream(
+            method, url, headers=headers, json=json_body, timeout=timeout_s, follow_redirects=False
+        ) as response:
+            if response.status_code != 200:
+                return response.status_code, b""
+            return response.status_code, _read_capped(response, max_bytes)
+    except httpx.TimeoutException as exc:
+        raise CopilotTransientError(f"request timed out ({type(exc).__name__})") from None
+    except (httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+        if _is_tls_failure(exc):
+            raise CopilotConfigError("TLS verification failed") from None
+        raise CopilotTransientError(f"connection failed ({type(exc).__name__})") from None
+    except httpx.HTTPError as exc:
+        raise CopilotConfigError(f"transport error ({type(exc).__name__})") from None
 
 
-async def _stream_once(prompt: str, model: str, system_prompt: str) -> str:
-    """Run a single non-infinite streaming session and return the full text."""
-    client = _create_client()
-    session = None
-    chunks: list[str] = []
-    errors: list[str] = []
+def _status_error(status: int, what: str) -> CopilotError:
+    if status in (401, 403):
+        return CopilotAuthError(f"{what} rejected", status)
+    if status in _RETRYABLE_STATUS or status >= 500:
+        return CopilotTransientError(f"{what} unavailable", status)
+    return CopilotConfigError(f"{what} failed", status)
+
+
+def _json_object(body: bytes, what: str) -> dict[str, Any]:
     try:
-        await client.start()
-        session = await client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            model=model,
-            available_tools=[],
-            system_message={"mode": "replace", "content": system_prompt},
-            infinite_sessions={"enabled": False},
-            streaming=True,
+        data = json.loads(body)
+    except ValueError:
+        raise CopilotResponseError(f"{what} response is not JSON") from None
+    if not isinstance(data, dict):
+        raise CopilotResponseError(f"{what} response is not a JSON object")
+    return data
+
+
+def _token_count(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def _parse_completion(body: bytes) -> CopilotCompletion:
+    data = _json_object(body, "inference")
+    choices = data.get("choices")
+    first = choices[0] if isinstance(choices, list) and choices else None
+    message = first.get("message") if isinstance(first, dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str) or not content.strip():
+        raise CopilotResponseError("inference response has no assistant content")
+    usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+    return CopilotCompletion(
+        text=content,
+        input_tokens=_token_count(usage.get("prompt_tokens")),
+        output_tokens=_token_count(usage.get("completion_tokens")),
+    )
+
+
+class StaticTokenProvider:
+    """``pat_bearer`` mode: the PAT itself is the inference credential."""
+
+    refreshable = False
+
+    def __init__(self, pat: str, api_base_url: str) -> None:
+        self._credential = CopilotCredential(pat, api_base_url)
+
+    def get(self, timeout_s: float) -> CopilotCredential:  # noqa: ARG002
+        return self._credential
+
+    def invalidate(self, token: str) -> None:  # noqa: ARG002
+        return None
+
+    def secret_values(self) -> tuple[str, ...]:
+        return (self._credential.token,)
+
+
+class ExchangeTokenProvider:
+    """``exchange`` mode: trades the PAT for a short-lived Copilot token cached in memory."""
+
+    refreshable = True
+
+    def __init__(
+        self,
+        client: httpx.Client,
+        *,
+        pat: str,
+        token_url: str,
+        api_base_override: str,
+        allowed_hosts: Iterable[str],
+        refresh_skew_s: float,
+        max_response_bytes: int,
+        headers: dict[str, str],
+        clock: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], float] = time.time,
+    ) -> None:
+        self._client = client
+        self._pat = pat
+        self._token_url = token_url
+        self._api_base_override = api_base_override
+        self._allowed_hosts = tuple(allowed_hosts)
+        self._skew = refresh_skew_s
+        self._max_bytes = max_response_bytes
+        self._headers = headers
+        self._clock = clock
+        self._wall_clock = wall_clock
+        self._lock = threading.Lock()
+        self._credential: CopilotCredential | None = None
+        self._refresh_at = 0.0
+
+    def get(self, timeout_s: float) -> CopilotCredential:
+        with self._lock:
+            if self._credential is not None and self._clock() < self._refresh_at:
+                return self._credential
+            self._credential = None
+            self._credential, self._refresh_at = self._exchange(timeout_s)
+            return self._credential
+
+    def invalidate(self, token: str) -> None:
+        with self._lock:
+            if self._credential is not None and self._credential.token == token:
+                self._credential = None
+
+    def secret_values(self) -> tuple[str, ...]:
+        credential = self._credential
+        return (self._pat,) + ((credential.token,) if credential else ())
+
+    def _exchange(self, timeout_s: float) -> tuple[CopilotCredential, float]:
+        headers = {**self._headers, "Authorization": f"Bearer {self._pat}", "Accept": "application/json"}
+        status, body = _send(
+            self._client, "GET", self._token_url,
+            headers=headers, timeout_s=timeout_s, max_bytes=self._max_bytes,
         )
-        done = asyncio.Event()
-
-        def on_event(event: Any) -> None:
-            event_type = event.type.value if hasattr(event.type, "value") else str(event.type)
-            if event_type == "assistant.message_delta":
-                delta = getattr(event.data, "delta_content", None) or ""
-                if delta:
-                    chunks.append(delta)
-            elif event_type == "assistant.message":
-                if not chunks:
-                    content = getattr(event.data, "content", None) or ""
-                    if content:
-                        chunks.append(content)
-            elif event_type == "session.error":
-                data = event.data
-                message = getattr(data, "message", None) or getattr(data, "error", None) or "session.error"
-                errors.append(str(message))
-                done.set()
-            elif event_type == "session.idle":
-                done.set()
-
-        session.on(on_event)
-        await session.send(prompt)
-        await asyncio.wait_for(done.wait(), timeout=settings.COPILOT_TIMEOUT_S)
-        if errors:
-            raise RuntimeError(errors[-1])
-        content = "".join(chunks)
-        if not content:
-            raise RuntimeError("Copilot stream completed without assistant content.")
-        return content
-    finally:
-        if session is not None:
-            try:
-                await session.disconnect()
-            except Exception:  # noqa: BLE001 - best-effort cleanup
-                pass
+        if status != 200:
+            raise _status_error(status, "token exchange")
+        data = _json_object(body, "token exchange")
+        token = data.get("token")
+        if not isinstance(token, str) or not token.strip():
+            raise CopilotResponseError("token exchange returned no token")
+        lifetime = self._lifetime(data)
+        endpoints = data.get("endpoints")
+        api = endpoints.get("api") if isinstance(endpoints, dict) else None
+        api_base = api.strip() if isinstance(api, str) and api.strip() else self._api_base_override
+        if not api_base:
+            raise CopilotConfigError("token exchange returned no API endpoint")
         try:
-            await client.stop()
-        except Exception:  # noqa: BLE001 - best-effort cleanup
-            pass
+            validate_copilot_url(api_base, self._allowed_hosts, "Copilot API endpoint")
+        except ValueError:
+            raise CopilotConfigError("token exchange returned a non-allowlisted API endpoint") from None
+        refresh_after = max(lifetime / 2, lifetime - self._skew)
+        return CopilotCredential(token.strip(), api_base), self._clock() + refresh_after
+
+    def _lifetime(self, data: dict[str, Any]) -> float:
+        refresh_in = data.get("refresh_in")
+        if isinstance(refresh_in, (int, float)) and not isinstance(refresh_in, bool) and refresh_in > 0:
+            return float(refresh_in)
+        expires_at = data.get("expires_at")
+        if isinstance(expires_at, (int, float)) and not isinstance(expires_at, bool):
+            remaining = float(expires_at) - self._wall_clock()
+            if remaining > 0:
+                return remaining
+        raise CopilotResponseError("token exchange returned no usable lifetime")
 
 
-def _run(coro: Any) -> Any:
-    """Run an async coroutine from the synchronous analyzer thread."""
-    return asyncio.run(coro)
+class CopilotHttpClient:
+    """Non-streaming chat-completions client with one refresh and one transient retry."""
+
+    def __init__(
+        self,
+        client: httpx.Client,
+        tokens: TokenProvider,
+        *,
+        timeout_s: float,
+        max_response_bytes: int,
+        max_tokens: int = 0,
+        headers: dict[str, str] | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._client = client
+        self._tokens = tokens
+        self._timeout_s = timeout_s
+        self._max_bytes = max_response_bytes
+        self._max_tokens = max_tokens
+        self._headers = dict(headers or {})
+        self._clock = clock
+
+    def secret_values(self) -> tuple[str, ...]:
+        return self._tokens.secret_values()
+
+    def complete(self, system_prompt: str, user_prompt: str, model: str) -> CopilotCompletion:
+        deadline = self._clock() + self._timeout_s
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "stream": False,
+        }
+        if self._max_tokens > 0:
+            payload["max_tokens"] = self._max_tokens
+        refreshed = retried = False
+        while True:
+            remaining = deadline - self._clock()
+            if remaining <= 0:
+                raise CopilotTransientError("Copilot call deadline exceeded")
+            try:
+                credential = self._tokens.get(remaining)
+                status, body = _send(
+                    self._client, "POST",
+                    credential.api_base_url.rstrip("/") + _CHAT_COMPLETIONS_PATH,
+                    headers={**self._headers, "Authorization": f"Bearer {credential.token}", "Accept": "application/json"},
+                    json_body=payload,
+                    timeout_s=max(0.001, deadline - self._clock()),
+                    max_bytes=self._max_bytes,
+                )
+            except CopilotTransientError:
+                if retried:
+                    raise
+                retried = True
+                continue
+            if status == 200:
+                return _parse_completion(body)
+            if status == 401 and self._tokens.refreshable and not refreshed:
+                refreshed = True
+                self._tokens.invalidate(credential.token)
+                continue
+            if status in _RETRYABLE_STATUS and not retried:
+                retried = True
+                continue
+            raise _status_error(status, "inference request")
+
+
+_transport_lock = threading.Lock()
+_http_client: httpx.Client | None = None
+_transport: CopilotHttpClient | None = None
+
+
+def _ssl_context() -> ssl.SSLContext:
+    if settings.COPILOT_CA_BUNDLE:
+        return ssl.create_default_context(cafile=settings.COPILOT_CA_BUNDLE)
+    if settings.COPILOT_TLS_TRUST == "certifi":
+        import certifi  # noqa: PLC0415 - httpx dependency, only needed for this option
+
+        return ssl.create_default_context(cafile=certifi.where())
+    # On Windows the stdlib default context loads the OS certificate store.
+    return ssl.create_default_context()
+
+
+def _build_http_client() -> httpx.Client:
+    # trust_env=False: ambient proxy/CA/.netrc variables must not change where credentials go.
+    return httpx.Client(
+        proxy=settings.COPILOT_PROXY or None,
+        verify=_ssl_context(),
+        trust_env=False,
+        follow_redirects=False,
+        timeout=settings.COPILOT_TIMEOUT_S,
+    )
+
+
+def _request_headers() -> dict[str, str]:
+    headers = {"User-Agent": _USER_AGENT}
+    if settings.COPILOT_INTEGRATION_ID:
+        headers["Copilot-Integration-Id"] = settings.COPILOT_INTEGRATION_ID
+    return headers
+
+
+def _build_transport(client: httpx.Client) -> CopilotHttpClient:
+    pat = settings.COPILOT_GITHUB_TOKEN.strip()
+    headers = _request_headers()
+    tokens: TokenProvider
+    if settings.COPILOT_AUTH_MODE == "exchange":
+        tokens = ExchangeTokenProvider(
+            client,
+            pat=pat,
+            token_url=settings.COPILOT_TOKEN_URL,
+            api_base_override=settings.COPILOT_API_BASE_URL,
+            allowed_hosts=settings.COPILOT_ALLOWED_HOSTS,
+            refresh_skew_s=settings.COPILOT_TOKEN_REFRESH_SKEW,
+            max_response_bytes=settings.COPILOT_MAX_RESPONSE_BYTES,
+            headers=headers,
+        )
+    else:
+        tokens = StaticTokenProvider(pat, settings.COPILOT_API_BASE_URL)
+    return CopilotHttpClient(
+        client,
+        tokens,
+        timeout_s=settings.COPILOT_TIMEOUT_S,
+        max_response_bytes=settings.COPILOT_MAX_RESPONSE_BYTES,
+        max_tokens=settings.COPILOT_MAX_TOKENS,
+        headers=headers,
+    )
+
+
+def _get_transport() -> CopilotHttpClient:
+    global _http_client, _transport
+    with _transport_lock:
+        if _transport is None:
+            _http_client = _build_http_client()
+            _transport = _build_transport(_http_client)
+        return _transport
+
+
+def close() -> None:
+    """Close pooled connections and drop cached tokens (FastAPI shutdown)."""
+    global _http_client, _transport
+    with _transport_lock:
+        if _http_client is not None:
+            _http_client.close()
+        _http_client = None
+        _transport = None
+
+
+def is_available() -> bool:
+    """True when the Copilot HTTPS provider is selected and its settings validate. No network I/O."""
+    if settings.LLM_PROVIDER != "copilot_http":
+        return False
+    try:
+        settings.validate_copilot_transport()
+    except RuntimeError:
+        return False
+    return True
+
+
+def complete(system_prompt: str, user_prompt: str, model: str) -> CopilotCompletion:
+    """Run one non-streaming chat completion against the approved enterprise endpoint."""
+    if not is_available():
+        raise CopilotConfigError("Copilot HTTP provider is not configured")
+    return _get_transport().complete(system_prompt, user_prompt, model)
+
+
+def _usage_kwargs(completion: CopilotCompletion) -> dict[str, Any]:
+    exact = completion.input_tokens is not None and completion.output_tokens is not None
+    return {
+        "input_tokens": completion.input_tokens,
+        "output_tokens": completion.output_tokens,
+        "token_counts_estimated": not exact,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -497,7 +809,7 @@ def analyze_with_metrics(
     error_code: str | None, error_message: str | None, snippet: str,
     knowledge_context: str | None = None,
 ) -> LlmAnalysisResult:
-    """Diagnose a failure via the Copilot SDK. Returns (root, solution, source).
+    """Diagnose a failure via enterprise Copilot. Returns (root, solution, source).
 
     Runs at most one mini-enrichment pass plus one reasoning pass. Callers
     (``analyzer._analyze_unit``) already dedupe by failure signature, so this
@@ -505,16 +817,16 @@ def analyze_with_metrics(
     carries curated, trusted product summaries surfaced separately from the
     untrusted log excerpt in the reasoning prompt.
     """
-    if not _SDK_AVAILABLE:
+    if not is_available():
         from . import llm_client
 
-        log.warning("Copilot SDK is unavailable; using the offline stub.")
+        log.warning("Copilot HTTP provider is not configured; using the offline stub.")
         root, solution, _ = llm_client._offline_stub(error_code, error_message)
         return LlmAnalysisResult(
             root_cause=root,
-            suggested_solution=f"{solution} (Copilot SDK not installed.)",
+            suggested_solution=f"{solution}{_copilot_error_suffix(CopilotConfigError('provider is not configured'))}",
             source="stub",
-            metrics=LlmUsageMetrics(provider="copilot_sdk"),
+            metrics=LlmUsageMetrics(provider="copilot_http"),
         )
 
     context = snippet or error_message or ""
@@ -522,7 +834,7 @@ def analyze_with_metrics(
     mini_context_min = max(0, settings.COPILOT_MINI_MIN_CONTEXT_CHARS)
     run_mini = bool(settings.COPILOT_ENABLE_MINI_ENRICH and len(stripped_context) >= mini_context_min)
     use_compact_reasoning = bool(not run_mini and stripped_context and len(stripped_context) < mini_context_min)
-    metrics = LlmUsageMetrics(provider="copilot_sdk")
+    metrics = LlmUsageMetrics(provider="copilot_http")
     active_role: LlmModelRole | None = None
     active_input_chars = 0
 
@@ -548,19 +860,19 @@ def analyze_with_metrics(
             mini_prompt = _build_mini_prompt(context)
             active_input_chars = len(_SUMMARIZE_SYSTEM_PROMPT) + len(mini_prompt)
             try:
-                summary = _run(
-                    _stream_once(
-                        mini_prompt,
-                        settings.COPILOT_MINI_MODEL,
-                        _SUMMARIZE_SYSTEM_PROMPT,
-                    )
-                ).strip()
+                completion = complete(
+                    _SUMMARIZE_SYSTEM_PROMPT,
+                    mini_prompt,
+                    settings.COPILOT_MINI_MODEL,
+                )
+                summary = completion.text.strip()
                 metrics.add_model_call(
                     "mini",
                     model=settings.COPILOT_MINI_MODEL,
                     input_chars=active_input_chars,
                     output_chars=len(summary),
                     credit_tokens_per_credit=settings.LLM_TOKEN_CREDIT_SIZE,
+                    **_usage_kwargs(completion),
                 )
                 log.info("Copilot mini model call finished: %s summary chars.", len(summary))
                 if summary:
@@ -578,9 +890,9 @@ def analyze_with_metrics(
                     credit_tokens_per_credit=settings.LLM_TOKEN_CREDIT_SIZE,
                 )
                 metrics.add_model_error("mini", model=settings.COPILOT_MINI_MODEL)
-                if _is_auth_or_session_config_error(exc):
+                if isinstance(exc, (CopilotAuthError, CopilotConfigError)):
                     active_role = None
-                    log.warning("Copilot mini model call failed because authentication/session configuration is unavailable.", exc_info=True)
+                    log.warning("Copilot mini model call failed because authentication/configuration is unavailable.", exc_info=True)
                     raise
                 log.warning("Copilot mini model call failed; continuing to reasoning with raw context.", exc_info=True)
             finally:
@@ -604,19 +916,19 @@ def analyze_with_metrics(
             knowledge_context,
         )
         active_input_chars = len(system_prompt) + len(diagnose_prompt)
-        content = _run(
-            _stream_once(
-                diagnose_prompt,
-                settings.COPILOT_REASONING_MODEL,
-                system_prompt,
-            )
+        completion = complete(
+            system_prompt,
+            diagnose_prompt,
+            settings.COPILOT_REASONING_MODEL,
         )
+        content = completion.text
         metrics.add_model_call(
             "reasoning",
             model=settings.COPILOT_REASONING_MODEL,
             input_chars=active_input_chars,
             output_chars=len(content),
             credit_tokens_per_credit=settings.LLM_TOKEN_CREDIT_SIZE,
+            **_usage_kwargs(completion),
         )
         analysis = _parse_json_content(content, error_code, error_message)
         log.info("Copilot analysis finished: %s output chars.", len(content))
