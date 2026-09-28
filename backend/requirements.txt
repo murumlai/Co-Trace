@@ -12,10 +12,5 @@ pypdf>=4.2.0
 python-docx>=1.1.2
 openpyxl>=3.1.0
 
-# Optional: GitHub Copilot SDK provider (LLM_PROVIDER=copilot_sdk).
-# Requires `copilot auth login` on the host and proxy access where applicable.
-github-copilot-sdk==1.0.14
-
 # Dev / test tooling
 pytest>=8.0
-pytest-asyncio>=0.23
