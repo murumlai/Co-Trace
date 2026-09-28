@@ -11,7 +11,7 @@ The app opens Home without sign-in. All visitors share newly created batches, fe
 
 - `ftrunnerlog01.txt` is the source of truth for identity, timing, PASS/FAIL, `ErrorMsg`, `Errorcode` (SIMS `.itf` no longer authoritative).
 - Failed runs may attach a bounded, redacted `DebugLog.txt` excerpt from nested zips; each batch writes one redacted `<product_code>.json` per product before cleanup.
-- Diagnosis uses `LLM_PROVIDER` (`copilot_sdk` default = enterprise GitHub Copilot, or `offline_stub`); the public GitHub Models path is removed, and passing units never call the LLM.
+- Diagnosis uses `LLM_PROVIDER` (`copilot_http` default = enterprise GitHub Copilot over HTTPS, or `offline_stub`; `copilot_sdk` is a deprecated alias); the public GitHub Models path is removed, and passing units never call the LLM.
 - Ordinary use needs no Microsoft/GitHub identity or app login. **Admin** opens a maintenance-only sign-in; cache deletion and knowledge/playbook/acronym mutations remain protected by backend Admin checks.
 - Successful diagnoses are cached and reused across uploads unless force-refreshed or the product/acronym context changes the cache key.
 - Admin-reviewed known-failure playbooks match exact failure signatures and are applied before the cache or Copilot.
@@ -58,11 +58,17 @@ $env:HTTPS_PROXY = "http://proxy-us.intel.com:912"
 $env:HTTP_PROXY = "http://proxy-us.intel.com:912"
 $env:NO_PROXY = "localhost,127.0.0.1"
 
-# AI diagnosis uses enterprise GitHub Copilot only (LLM_PROVIDER=copilot_sdk,
-# the default). Authenticate the Copilot CLI against the enterprise host:
-copilot auth login
-$env:COPILOT_GH_HOST = "intel-foundry.ghe.com"   # enterprise host (default; hard-enforced)
-$env:LLM_PROVIDER = "copilot_sdk"
+# AI diagnosis uses enterprise GitHub Copilot over HTTPS only (LLM_PROVIDER=copilot_http,
+# the default). No Copilot CLI, SDK, or `copilot auth login` is needed. Use the endpoints
+# and auth mode approved by the Phase 0 probe in pure_python_deployment.md.
+$env:LLM_PROVIDER = "copilot_http"
+$env:COPILOT_GITHUB_TOKEN = Read-Host "Copilot fine-grained PAT" -MaskInput   # keeps the PAT out of shell history
+$env:COPILOT_AUTH_MODE = "pat_bearer"                                          # or "exchange"
+$env:COPILOT_API_BASE_URL = "https://<approved-copilot-api-host>"
+# $env:COPILOT_TOKEN_URL = "https://<approved-token-exchange-host>/<path>"     # exchange mode only
+$env:COPILOT_ALLOWED_HOSTS = "<approved-copilot-api-host>"                     # comma-separated exact hosts
+# Without Copilot access, use the deterministic local heuristic instead:
+# $env:LLM_PROVIDER = "offline_stub"
 
 $env:ADMIN_USERNAME = "admin"
 $env:JWT_SECRET = [Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(48))
@@ -91,10 +97,10 @@ Invoke-RestMethod http://127.0.0.1:8000/api/health | ConvertTo-Json -Compress
 Expected shape:
 
 ```json
-{"status":"ok","llm_provider":"copilot_sdk","copilot_gh_host":"intel-foundry.ghe.com","debug":false,"llm_auth":{"copilot_sdk_available":true,"copilot_token_configured":false}}
+{"status":"ok","llm_provider":"copilot_http","copilot_gh_host":"intel-foundry.ghe.com","debug":false,"llm_auth":{"copilot_http_configured":true,"copilot_token_configured":true}}
 ```
 
-GitHub app OAuth is retired; its old routes return HTTP 410. Copilot CLI authentication is unchanged and belongs to the backend process. Its credentials must not be distributed to browser users. Confirm organizational approval and licensing for shared backend Copilot usage.
+GitHub app OAuth is retired; its old routes return HTTP 410. The Copilot PAT belongs to the backend process only; it is never sent to browsers, logged, or persisted. Confirm organizational approval and licensing for shared backend Copilot usage.
 
 ## Single-Server Run
 
@@ -139,13 +145,21 @@ Most-used environment variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `LLM_PROVIDER` | `copilot_sdk` | `copilot_sdk` for enterprise Copilot, or `offline_stub` for the deterministic local heuristic. Other values are rejected at startup. |
+| `LLM_PROVIDER` | `copilot_http` | `copilot_http` for enterprise Copilot over HTTPS, or `offline_stub` for the deterministic local heuristic. `copilot_sdk` is a deprecated alias for `copilot_http`. Other values are rejected at startup. |
 | `COPILOT_MINI_MODEL` | `gpt-5.4-mini` | Copilot mini/enrichment model. |
 | `COPILOT_REASONING_MODEL` | `claude-sonnet-5` | Copilot final root-cause model. |
 | `COPILOT_MINI_MIN_CONTEXT_CHARS` | `500` | Shorter failure contexts skip the mini pass and go straight to reasoning. |
-| `COPILOT_GITHUB_TOKEN` | empty | Optional GitHub token passed directly to the Copilot SDK provider. If empty, the SDK uses the logged-in Copilot CLI user. |
-| `COPILOT_GH_HOST` | `intel-foundry.ghe.com` | Enterprise host for Copilot auth/session. Public hosts such as `github.com` are rejected. |
-| `COPILOT_PROXY` | `http://proxy-us.intel.com:912` | Optional proxy for Copilot SDK subprocesses. |
+| `COPILOT_GITHUB_TOKEN` | empty | Fine-grained PAT for the live provider. Required for `copilot_http`; backend-only. |
+| `COPILOT_AUTH_MODE` | empty | `pat_bearer` (PAT is the inference credential) or `exchange` (PAT is traded for a short-lived Copilot token). Required for `copilot_http`. |
+| `COPILOT_API_BASE_URL` | empty | Approved inference base URL. Required for `pat_bearer`; in `exchange` mode used only when the exchange returns no endpoint. |
+| `COPILOT_TOKEN_URL` | empty | Approved token-exchange URL. Required for `exchange`. |
+| `COPILOT_ALLOWED_HOSTS` | empty | Comma-separated exact hostnames. Every configured or exchange-returned Copilot URL must be HTTPS and listed here. |
+| `COPILOT_INTEGRATION_ID` | empty | Registered `Copilot-Integration-Id` header value, sent only when set. Never reuse another product's identifier. |
+| `COPILOT_PROXY` | `http://proxy-us.intel.com:912` | Proxy for Copilot traffic. Ambient `HTTP(S)_PROXY`, `NO_PROXY`, `SSL_CERT_FILE`, and `.netrc` are ignored for Copilot calls. |
+| `COPILOT_TLS_TRUST` | `system` | `system` (OS certificate store) or `certifi`. TLS verification cannot be disabled. |
+| `COPILOT_CA_BUNDLE` | empty | Optional CA bundle path; overrides `COPILOT_TLS_TRUST`. |
+| `COPILOT_TIMEOUT_S` | `60` | Overall per-call deadline, including token refresh and the single retry. |
+| `COPILOT_GH_HOST` | `intel-foundry.ghe.com` | Deprecated; display-only in logs and health. Public hosts such as `github.com` are still rejected. |
 | `FRONTEND_URL` | `http://localhost:5173` | Approved browser origin for API mutations. Set to the deployed app origin. |
 | `CORS_ORIGINS` | localhost and 127.0.0.1 on port 5173 | Additional approved browser origins for API reads/writes. Use exact origins, not a wildcard. |
 | `JWT_SECRET` | random per process | Signs Admin cookies. Configure a strong stable secret (at least 32 characters) for persistent sessions or multiple workers; without it a restart ends Admin sessions. |
@@ -165,7 +179,7 @@ Most-used environment variables:
 
 See [backend/app/config.py](backend/app/config.py) for the full settings list and defaults.
 
-For the default `copilot_sdk` provider, authenticate against `intel-foundry.ghe.com` with either `copilot auth login` or `COPILOT_GITHUB_TOKEN`. Public GitHub Models access is not available in this app.
+For the default `copilot_http` provider, the backend fails to start unless the PAT, auth mode, mode-specific URL, and allowlist are valid. Local development without a PAT uses `LLM_PROVIDER=offline_stub`; product-knowledge summarization still requires `copilot_http`. Public GitHub Models access is not available in this app.
 
 ## Product-Aware Diagnosis
 
@@ -194,7 +208,7 @@ backend/app/
   main.py             FastAPI routes, auth, static SPA serving
   preprocessor.py     FTRunner parsing and DebugLog discovery
   analyzer.py         Failure dedup, cache, provider routing
-  copilot_client.py   Enterprise Copilot SDK adapter
+  copilot_client.py   Enterprise Copilot HTTPS adapter (httpx)
   knowledge/          Product-aware diagnosis pipeline and playbook store
   job_registry.py     Disk-backed job state and recent-batch listing
   analysis_cache.py   Disk-backed diagnosis cache

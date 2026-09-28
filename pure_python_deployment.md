@@ -46,7 +46,7 @@ Run a minimal, non-secret connectivity probe from the production network using t
    - Copilot API base URL, preferably the response's `endpoints.api` value;
    - any required client/integration headers.
 5. Validate that every configured or returned endpoint is HTTPS and belongs to the explicit enterprise-approved host allowlist.
-6. Confirm the TLS trust source. `httpx` trusts the `certifi` bundle, not the Windows certificate store, so an enterprise-issued chain may fail. Choose either a `COPILOT_CA_BUNDLE` file or the OS trust store through `truststore`.
+6. Confirm the TLS trust source. `httpx` trusts the `certifi` bundle by default, not the Windows certificate store, so an enterprise-issued chain may fail. Choose `COPILOT_TLS_TRUST=system` (stdlib `ssl.create_default_context()`, which loads the Windows certificate store), `certifi`, or a `COPILOT_CA_BUNDLE` file.
 7. Send one minimal, non-sensitive request to the approved completion endpoint for each configured model:
    - `gpt-5.4-mini`;
    - `claude-sonnet-5`.
@@ -65,7 +65,7 @@ Update `backend/app/config.py` with explicit transport settings:
 - `COPILOT_API_BASE_URL`: approved inference base URL; required in `pat_bearer` mode, and an override in `exchange` mode only when the exchange does not return an endpoint.
 - `COPILOT_ALLOWED_HOSTS`: comma-separated exact hostnames from Phase 0. This positive allowlist is the primary host control; the existing `_PUBLIC_COPILOT_HOSTS` denylist is not sufficient because it only covers `github.com` variants and omits public Copilot API hosts.
 - `COPILOT_PROXY`: passed explicitly to `httpx` as `proxy=`.
-- `COPILOT_CA_BUNDLE` or an OS-trust-store option backed by `truststore`, per the Phase 0 TLS decision; TLS verification must never be disabled. Add `truststore` to `backend/requirements.txt` only if that option is chosen.
+- `COPILOT_TLS_TRUST` (`system` default, or `certifi`) and optional `COPILOT_CA_BUNDLE`, which overrides both, per the Phase 0 TLS decision; TLS verification must never be disabled. The stdlib OS-store option needs no extra dependency.
 - `COPILOT_TIMEOUT_S`: keep its current meaning as the overall per-call deadline. Retries, token refresh, and backoff all fit inside it, so the `up to Ns per uncached signature` estimate in `orchestrator.py` stays accurate. Derive per-attempt timeouts from the remaining budget.
 - `COPILOT_TOKEN_REFRESH_SKEW`: `exchange` mode only; refresh shortly before expiry, initially 120 seconds.
 - `COPILOT_MAX_RESPONSE_BYTES`: cap on the response body read from the provider.

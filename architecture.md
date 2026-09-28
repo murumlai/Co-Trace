@@ -54,7 +54,7 @@ graph TB
         end
 
         subgraph LLM["LLM Providers"]
-            CopilotClient["copilot_client.py<br/>Copilot SDK (2-tier)"]
+            CopilotClient["copilot_client.py<br/>Copilot HTTPS (2-tier)"]
             LlmClient["llm_client.py<br/>GitHub Models / stub"]
         end
 
@@ -79,7 +79,7 @@ graph TB
     subgraph External["External Services"]
         GitHub["GitHub OAuth"]
         Models_API["GitHub Models API"]
-        CopilotSDK["GitHub Copilot SDK"]
+        CopilotSDK["Enterprise GitHub Copilot API<br/>(allowlisted HTTPS)"]
         Docs["Product Docs<br/>(PDF/DOCX/XLSX)"]
     end
 
@@ -580,7 +580,7 @@ erDiagram
 | Cache-aside with source tracking | in-memory signature cache → disk `analysis_cache.py` → LLM |
 | Signature deduplication | one LLM call per `SHA1(error_code + normalized message)` per job |
 | Grounded LLM prompting | curated knowledge pack + approved acronym glossary injected as trusted context |
-| Graceful degradation | Copilot SDK → GitHub Models → deterministic offline stub |
+| Graceful degradation | Enterprise Copilot HTTPS → deterministic offline stub |
 | Atomic writes | job state, cache, and knowledge pack use temp file + `os.replace` |
 | PII redaction at boundary | `redaction.py` scrubs serials/IPs/MACs/credentials before LLM + at-rest |
 

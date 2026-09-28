@@ -73,7 +73,7 @@ graph TB
 
         subgraph LLM["LLM Providers"]
             LlmClient["llm_client.py<br/>provider dispatch + offline stub"]
-            CopilotClient["copilot_client.py<br/>enterprise Copilot SDK (2-tier)"]
+            CopilotClient["copilot_client.py<br/>enterprise Copilot HTTPS via httpx (2-tier)"]
         end
 
         subgraph KnowledgeSub["knowledge/ subsystem"]
@@ -99,7 +99,7 @@ graph TB
     end
 
     subgraph External["External Services"]
-        CopilotSDK["Enterprise GitHub Copilot<br/>(intel-foundry.ghe.com)"]
+        CopilotSDK["Enterprise GitHub Copilot API<br/>(allowlisted HTTPS, PAT or exchanged token)"]
         Docs["Product Docs<br/>(PDF/DOCX/XLSX)"]
     end
 
@@ -589,7 +589,7 @@ erDiagram
 | Layered diagnosis precedence | reviewed playbook → in-job signature cache → disk `analysis_cache.py` → LLM |
 | Signature deduplication | one diagnosis per `SHA1(error_code + normalized message)` per job |
 | Grounded LLM prompting | curated knowledge pack + reviewed playbooks + approved acronym glossary injected as trusted context |
-| Explicit provider selection | `LLM_PROVIDER=copilot_sdk` (enterprise host enforced) or `offline_stub`; no public GitHub Models path |
+| Explicit provider selection | `LLM_PROVIDER=copilot_http` (HTTPS host allowlist enforced; `copilot_sdk` is a deprecated alias) or `offline_stub`; no public GitHub Models path, SDK, or CLI subprocess |
 | Pure computation layers | `aggregator.py`, `comparison.py`, `record_views.py` operate on `UnitRecord` lists without I/O |
 | Shared workspace boundary | job, feedback, action, and comparison routes retain the owner filter using the same shared principal for guests and Admin; legacy private jobs remain outside that scope; cache deletes and knowledge/playbook mutations require Admin |
 | Optimistic concurrency | investigation actions require `expected_version`; stale writes return conflict |
