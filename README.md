@@ -64,9 +64,9 @@ $env:NO_PROXY = "localhost,127.0.0.1"
 $env:LLM_PROVIDER = "copilot_http"
 $env:COPILOT_GITHUB_TOKEN = Read-Host "Copilot fine-grained PAT" -MaskInput   # keeps the PAT out of shell history
 $env:COPILOT_AUTH_MODE = "pat_bearer"                                          # or "exchange"
-$env:COPILOT_API_BASE_URL = "https://<approved-copilot-api-host>"
+$env:COPILOT_API_BASE_URL = "https://copilot-api.intel-foundry.ghe.com"          # default; not the web host
 # $env:COPILOT_TOKEN_URL = "https://<approved-token-exchange-host>/<path>"     # exchange mode only
-$env:COPILOT_ALLOWED_HOSTS = "<approved-copilot-api-host>"                     # comma-separated exact hosts
+$env:COPILOT_ALLOWED_HOSTS = "copilot-api.intel-foundry.ghe.com"               # default; comma-separated exact hosts
 # Without Copilot access, use the deterministic local heuristic instead:
 # $env:LLM_PROVIDER = "offline_stub"
 
@@ -151,13 +151,13 @@ Most-used environment variables:
 | `COPILOT_MINI_MIN_CONTEXT_CHARS` | `500` | Shorter failure contexts skip the mini pass and go straight to reasoning. |
 | `COPILOT_GITHUB_TOKEN` | empty | Fine-grained PAT for the live provider. Required for `copilot_http`; backend-only. |
 | `COPILOT_AUTH_MODE` | empty | `pat_bearer` (PAT is the inference credential) or `exchange` (PAT is traded for a short-lived Copilot token). Required for `copilot_http`. |
-| `COPILOT_API_BASE_URL` | empty | Approved inference base URL. Required for `pat_bearer`; in `exchange` mode used only when the exchange returns no endpoint. |
+| `COPILOT_API_BASE_URL` | `https://copilot-api.intel-foundry.ghe.com` | Inference base URL. Required for `pat_bearer`; in `exchange` mode used only when the exchange returns no endpoint. The web host `intel-foundry.ghe.com` is rejected at startup (it answers with a 302 to `/login`). |
 | `COPILOT_TOKEN_URL` | empty | Approved token-exchange URL. Required for `exchange`. |
-| `COPILOT_ALLOWED_HOSTS` | empty | Comma-separated exact hostnames. Every configured or exchange-returned Copilot URL must be HTTPS and listed here. |
+| `COPILOT_ALLOWED_HOSTS` | `copilot-api.intel-foundry.ghe.com` | Comma-separated exact hostnames. Every configured or exchange-returned Copilot URL must be HTTPS and listed here. |
 | `COPILOT_INTEGRATION_ID` | empty | Registered `Copilot-Integration-Id` header value, sent only when set. Never reuse another product's identifier. |
 | `COPILOT_PROXY` | `http://proxy-us.intel.com:912` | Proxy for Copilot traffic. Ambient `HTTP(S)_PROXY`, `NO_PROXY`, `SSL_CERT_FILE`, and `.netrc` are ignored for Copilot calls. |
 | `COPILOT_TLS_TRUST` | `system` | `system` (OS certificate store) or `certifi`. TLS verification cannot be disabled. |
-| `COPILOT_CA_BUNDLE` | empty | Optional CA bundle path; overrides `COPILOT_TLS_TRUST`. |
+| `COPILOT_CA_BUNDLE` | empty | Optional PEM CA bundle trusted in addition to `COPILOT_TLS_TRUST`. Needed under IIS when the corporate CA is only in a user's store: run `backend\scripts\export_ca_bundle.py <file.pem> --check` on the server, grant the app pool identity read access, and point this at the file. |
 | `COPILOT_TIMEOUT_S` | `60` | Overall per-call deadline, including token refresh and the single retry. |
 | `COPILOT_GH_HOST` | `intel-foundry.ghe.com` | Deprecated; display-only in logs and health. Public hosts such as `github.com` are still rejected. |
 | `FRONTEND_URL` | `http://localhost:5173` | Approved browser origin for API mutations. Set to the deployed app origin. |

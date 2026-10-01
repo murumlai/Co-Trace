@@ -17,8 +17,8 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
-def _env_hosts(name: str) -> list[str]:
-    return [h.strip().lower().rstrip(".") for h in os.getenv(name, "").split(",") if h.strip()]
+def _env_hosts(name: str, default: str = "") -> list[str]:
+    return [h.strip().lower().rstrip(".") for h in os.getenv(name, default).split(",") if h.strip()]
 
 
 # Repo root = two levels above this file (backend/app/config.py -> repo root).
@@ -33,6 +33,8 @@ def _repo_path(*parts: str) -> str:
 # Enterprise Copilot is the ONLY sanctioned AI backend. Public GitHub Models and
 # public github.com Copilot sessions are not permitted.
 COPILOT_ENTERPRISE_HOST = "intel-foundry.ghe.com"
+# The web host answers API calls with a 302 to /login; inference lives on this host.
+COPILOT_ENTERPRISE_API_HOST = f"copilot-api.{COPILOT_ENTERPRISE_HOST}"
 _PUBLIC_COPILOT_HOSTS = frozenset({"", "github.com", "api.github.com", "www.github.com"})
 _DEPRECATED_PROVIDER_ALIASES = {"copilot_sdk": "copilot_http"}
 COPILOT_AUTH_MODES = frozenset({"pat_bearer", "exchange"})
@@ -75,16 +77,18 @@ class Settings:
     # short-lived Copilot token first. Chosen by the Phase 0 enterprise probe.
     COPILOT_AUTH_MODE: str = os.getenv("COPILOT_AUTH_MODE", "").strip().lower()
     COPILOT_TOKEN_URL: str = os.getenv("COPILOT_TOKEN_URL", "").strip()
-    COPILOT_API_BASE_URL: str = os.getenv("COPILOT_API_BASE_URL", "").strip()
+    COPILOT_API_BASE_URL: str = os.getenv(
+        "COPILOT_API_BASE_URL", f"https://{COPILOT_ENTERPRISE_API_HOST}"
+    ).strip()
     # Exact hostnames every configured or exchange-returned Copilot URL must match.
-    COPILOT_ALLOWED_HOSTS: list[str] = _env_hosts("COPILOT_ALLOWED_HOSTS")
+    COPILOT_ALLOWED_HOSTS: list[str] = _env_hosts("COPILOT_ALLOWED_HOSTS", COPILOT_ENTERPRISE_API_HOST)
     # Registered integration identifier; never reuse another product's value.
     COPILOT_INTEGRATION_ID: str = os.getenv("COPILOT_INTEGRATION_ID", "").strip()
     # Deprecated: display-only in logs/health; never used to build request URLs.
     COPILOT_GH_HOST: str = os.getenv("COPILOT_GH_HOST", COPILOT_ENTERPRISE_HOST)
     COPILOT_PROXY: str = os.getenv("COPILOT_PROXY", "http://proxy-us.intel.com:912")
     # "system" uses the OS certificate store; "certifi" uses the Mozilla bundle.
-    # COPILOT_CA_BUNDLE, when set, overrides both.
+    # COPILOT_CA_BUNDLE, when set, is trusted in addition to either.
     COPILOT_TLS_TRUST: str = os.getenv("COPILOT_TLS_TRUST", "system").strip().lower()
     COPILOT_CA_BUNDLE: str = os.getenv("COPILOT_CA_BUNDLE", "").strip()
     # Overall per-call deadline, including token refresh and the single retry.
@@ -271,6 +275,12 @@ class Settings:
             raise RuntimeError("COPILOT_TOKEN_URL is required when COPILOT_AUTH_MODE=exchange.")
         if self.COPILOT_AUTH_MODE == "pat_bearer" and not self.COPILOT_API_BASE_URL:
             raise RuntimeError("COPILOT_API_BASE_URL is required when COPILOT_AUTH_MODE=pat_bearer.")
+        api_host = (urlsplit(self.COPILOT_API_BASE_URL).hostname or "").lower().rstrip(".")
+        if api_host == COPILOT_ENTERPRISE_HOST:
+            raise RuntimeError(
+                f"COPILOT_API_BASE_URL points at the GitHub web host {COPILOT_ENTERPRISE_HOST!r}; "
+                f"use https://{COPILOT_ENTERPRISE_API_HOST}."
+            )
         try:
             for label, url in (
                 ("COPILOT_TOKEN_URL", self.COPILOT_TOKEN_URL),

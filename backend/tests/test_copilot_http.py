@@ -399,7 +399,7 @@ def test_redirects_are_never_followed():
     rec = Recorder({CHAT_PATH: [httpx.Response(302, headers={"location": "https://attacker.test/steal"})]})
     http = _http(_client(rec, follow_redirects=True), cc.StaticTokenProvider(PAT, API_BASE), Clock())
 
-    with pytest.raises(cc.CopilotConfigError):
+    with pytest.raises(cc.CopilotConfigError, match="redirected"):
         http.complete("s", "u", "m")
     assert [str(r.url) for r in rec.requests] == [f"{API_BASE}{CHAT_PATH}"]
 
@@ -487,6 +487,27 @@ def test_ca_bundle_and_certifi_trust_build_verifying_contexts(configured, monkey
     context = cc._ssl_context()
     assert context.verify_mode == ssl.CERT_REQUIRED
     assert context.check_hostname is True
+
+
+def test_ca_bundle_adds_to_system_trust(configured, monkeypatch):
+    import certifi
+
+    calls = []
+    real = ssl.create_default_context
+    monkeypatch.setattr(cc.ssl, "create_default_context", lambda **kw: calls.append(kw) or real(**kw))
+    monkeypatch.setattr(settings, "COPILOT_CA_BUNDLE", certifi.where())
+
+    with_bundle = cc._ssl_context().cert_store_stats()["x509_ca"]
+    assert calls == [{}]
+    assert with_bundle >= real(cafile=certifi.where()).cert_store_stats()["x509_ca"]
+
+
+def test_api_base_on_web_host_is_rejected_with_hint(configured, monkeypatch):
+    monkeypatch.setattr(settings, "COPILOT_API_BASE_URL", "https://intel-foundry.ghe.com")
+    monkeypatch.setattr(settings, "COPILOT_ALLOWED_HOSTS", ["intel-foundry.ghe.com"])
+
+    with pytest.raises(RuntimeError, match="copilot-api.intel-foundry.ghe.com"):
+        configured.validate_enterprise_only()
 
 
 def test_integration_id_header_is_sent_only_when_configured(configured, monkeypatch):

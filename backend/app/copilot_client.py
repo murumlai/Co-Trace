@@ -300,6 +300,8 @@ def _send(
 def _status_error(status: int, what: str) -> CopilotError:
     if status in (401, 403):
         return CopilotAuthError(f"{what} rejected", status)
+    if 300 <= status < 400:
+        return CopilotConfigError(f"{what} was redirected; check the configured Copilot URL", status)
     if status in _RETRYABLE_STATUS or status >= 500:
         return CopilotTransientError(f"{what} unavailable", status)
     return CopilotConfigError(f"{what} failed", status)
@@ -515,14 +517,17 @@ _transport: CopilotHttpClient | None = None
 
 
 def _ssl_context() -> ssl.SSLContext:
-    if settings.COPILOT_CA_BUNDLE:
-        return ssl.create_default_context(cafile=settings.COPILOT_CA_BUNDLE)
     if settings.COPILOT_TLS_TRUST == "certifi":
         import certifi  # noqa: PLC0415 - httpx dependency, only needed for this option
 
-        return ssl.create_default_context(cafile=certifi.where())
-    # On Windows the stdlib default context loads the OS certificate store.
-    return ssl.create_default_context()
+        context = ssl.create_default_context(cafile=certifi.where())
+    else:
+        # On Windows the stdlib default context loads the OS certificate store.
+        context = ssl.create_default_context()
+    if settings.COPILOT_CA_BUNDLE:
+        # IIS app pool identities may not see CAs imported into a user's store.
+        context.load_verify_locations(cafile=settings.COPILOT_CA_BUNDLE)
+    return context
 
 
 def _build_http_client() -> httpx.Client:
