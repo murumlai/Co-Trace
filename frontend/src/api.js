@@ -1,10 +1,11 @@
+import { appUrl } from './appUrl'
 import { debugLog, log } from './logger'
 
 async function request(path, { method = 'GET', body, headers = {}, signal, authOptional = false, responseType = 'json' } = {}) {
   const started = performance.now()
   let res
   try {
-    res = await fetch(path, {
+    res = await fetch(appUrl(path), {
       method,
       credentials: 'include',
       headers: {

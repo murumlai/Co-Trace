@@ -1,4 +1,6 @@
-const LOG_ENDPOINT = '/api/logs/frontend'
+import { appUrl } from './appUrl'
+
+const LOG_ENDPOINT = appUrl('/api/logs/frontend')
 const SECRET_KEY_RE = /(token|password|passwd|authorization|secret|apikey|api_key)/i
 const DEBUG_ENABLED =
   import.meta.env.VITE_COTRACE_DEBUG === '1' ||
