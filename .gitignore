@@ -25,6 +25,7 @@ frontend_Log.txt
 .vscode/
 
 # Local planning/docs drafts. Keep the top-level README trackable.
+*.docx
 *.md
 !README.md
 .github/skills/python-solid-architect/SKILL.md
