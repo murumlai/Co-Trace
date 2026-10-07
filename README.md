@@ -7,13 +7,15 @@ Co-Trace is a browser-based dashboard for manufacturing FTRunner logs. It parses
 
 The app opens Home without sign-in. All visitors share newly created batches, feedback, and actions. Recent batches can be reopened, and explicit investigation URLs are restored after a page refresh. Browser filters and drafts are still local to each browser, not live-synchronized across users.
 
+The current component, request-flow, and data-lifecycle reference is [architecture_v2.md](architecture_v2.md), reviewed against the implementation on 2026-10-07. Co-Trace supplies the investigation application, not test equipment, enterprise model hosting, or deployment security infrastructure. It does not train models, control equipment, or automatically approve manufacturing actions.
+
 ## Current State
 
 - `ftrunnerlog01.txt` is the source of truth for identity, timing, PASS/FAIL, `ErrorMsg`, `Errorcode` (SIMS `.itf` no longer authoritative).
 - Failed runs may attach a bounded, redacted `DebugLog.txt` excerpt from nested zips; each batch writes one redacted `<product_code>.json` per product before cleanup.
 - Diagnosis uses `LLM_PROVIDER` (`copilot_http` default = enterprise GitHub Copilot over HTTPS, or `offline_stub`; `copilot_sdk` is a deprecated alias); the public GitHub Models path is removed, and passing units never call the LLM.
 - Ordinary use needs no Microsoft/GitHub identity or app login. **Admin** opens a maintenance-only sign-in; cache deletion and knowledge/playbook/acronym mutations remain protected by backend Admin checks.
-- Successful diagnoses are cached and reused across uploads unless force-refreshed or the product/acronym context changes the cache key.
+- Successful model diagnoses are cached across uploads using a context-aware disk key. Within a batch, reuse is by failure signature alone; context changes do not automatically recompute saved results. See the cache limitations below.
 - Admin-reviewed known-failure playbooks match exact failure signatures and are applied before the cache or Copilot.
 - Engineer feedback and investigation actions (owner, status, handoff) persist per job under `WORK_DIR`.
 
@@ -167,6 +169,7 @@ Most-used environment variables:
 | `ADMIN_USERNAME` | `admin` | Username for maintenance Admin mode, not a workspace identity. |
 | `ADMIN_PASSWORD` | empty | Private maintenance password. Empty disables Admin sign-in, not the shared app. |
 | `WORK_DIR` | `.cotrace_work` | Per-job uploads, job state, and analysis cache location. |
+| `JOB_TTL_S` | `2592000` (30 days) | Batch-state lifetime; feedback/actions carry the owning job's expiry. Not a universal retention limit for logs, cache, or knowledge. |
 | `CLEANUP_JOB_WORKDIR_AFTER_RUN` | `1` | Deletes uploads/extracted files/preprocessed JSON after terminal job state. |
 | `ANALYSIS_CACHE_ENABLED` | `1` | Reuses successful diagnoses across uploads. |
 | `FEEDBACK_STORE_FILE` | `WORK_DIR/feedback.json` | Engineer diagnosis feedback. |
@@ -184,20 +187,21 @@ For the default `copilot_http` provider, the backend fails to start unless the P
 ## Product-Aware Diagnosis
 
 Diagnosis can be grounded in curated product context. Supporting PDF/DOCX/XLSX docs are
-ingested once into a repo-root knowledge pack; at runtime only a few matched
+ingested into a repo-root knowledge pack; at diagnosis time only a few selected
 summaries (never whole documents) are sent alongside the redacted failure excerpt.
 
 - **Add docs**: drop them in `Product_Docs/` or `Log_Files_Folder/`, or upload from the **Knowledge** tab (admin). If an uploaded filename already exists in `Product_Docs/`, choose whether to replace it or keep the old file; keeping an already-ingested file does no extra work.
-- **Ingestion**: sections are summarized by `gpt-5.4-mini` (LLM required). Generated artifacts (`product_knowledge*.json`, `*_sections.jsonl`) live at the repo root, are gitignored, and store only curated summaries, never raw document text.
-- **Remove/rebuild**: **Remove from pack** prunes only generated knowledge artifacts and preserves the source document. Rebuild from the Knowledge tab or `backend/scripts/build_product_knowledge.py`; changing knowledge invalidates stale diagnoses through the product/knowledge hash.
+- **Ingestion**: extracted document sections are sent to enterprise Copilot for summarization by `gpt-5.4-mini` (LLM required); ingestion does not send only pre-existing summaries. Generated artifacts (`product_knowledge*.json`, `*_sections.jsonl`) live at the repo root, are gitignored, and store curated knowledge without a raw-section-text field. Approve source documents for this external processing before ingestion.
+- **Upload scope**: a new/replaced document normally triggers a background rebuild from all scanned source documents, not just that file. Upload progress is kept in memory and is lost on backend restart; the source documents and completed knowledge pack remain on disk.
+- **Remove/rebuild**: **Remove from pack** prunes only generated knowledge artifacts and preserves the source document. Rebuild from the Knowledge tab or `backend/scripts/build_product_knowledge.py`; retained documents can be ingested again. Rebuilds affect subsequent knowledge/cache lookups, not diagnoses already saved in completed jobs.
 - **Coverage and playbooks**: the Knowledge tab lists failure families lacking product coverage, and admins can create, edit, or delete reviewed known-failure playbooks (stored in gitignored `admin_playbooks.json`).
 
 ## Security and Storage
 
 - Local/generated outputs are gitignored, including `.cotrace_work`, virtualenvs, `node_modules`, `frontend/dist`, `product_docs` / `Product_Docs`, `product_knowledge*.json` artifacts, and `admin_playbooks.json`.
 - This is a trusted-network prototype, not an authenticated multi-user service. Anyone who can reach it can read shared results, upload, reanalyze, stop shared jobs, and edit shared feedback/actions. Admin protects maintenance, not ordinary data access; restrict deployment with firewall/network controls and use HTTPS for shared access. Origin checks are not authentication.
-- Redaction scrubs credentials, IPs, hostnames, usernames, MACs, and serials before LLM analysis. Only Admin uses a signed HttpOnly, SameSite cookie; enable `COOKIE_SECURE` with HTTPS. Ordinary action history records `shared-workspace`, not an identifiable person. Admin events carry the configured maintenance label, not proof of an individual operator.
-- Uploads, extracted zips, and preprocessed JSON are removed after processing by default; the analysis cache, feedback, and investigation actions persist under `WORK_DIR`. Feedback and exported debug packets are redacted.
+- Pattern-based redaction scrubs recognized credentials, IPs, hostnames, usernames, MACs, and serials from model-bound failure context. It does not guarantee removal of all sensitive or proprietary content, and document ingestion separately sends extracted source sections for summarization. Only Admin uses a signed HttpOnly, SameSite cookie; enable `COOKIE_SECURE` with HTTPS. Ordinary action history records `shared-workspace`, not an identifiable person. Admin events carry the configured maintenance label, not proof of an individual operator.
+- Uploads, extracted zips, and preprocessed JSON are removed after processing by default, but `job_state.json` retains run records and excerpts for reopening batches. Those records include source-derived identifiers, host/error fields, and FTRunner snippets; DebugLog excerpts retain serials for unit grouping. Job state is not a fully redacted or anonymized store. The analysis cache, feedback, and investigation actions also persist under `WORK_DIR`; feedback notes and exported debug packets are redacted. Protect server storage as manufacturing data even after upload cleanup.
 - Existing GitHub/admin-owned job files are preserved but are not automatically exposed in the shared job catalog. All new jobs use the stable `shared-workspace` owner through the existing registry/store contracts. Publishing old jobs and their feedback/actions requires a separately reviewed migration; existing diagnosis cache reuse remains unchanged.
 - Copilot authentication failures retain the existing offline fallback and never redirect to an app login screen. No additional AI request is made to enter Home or Admin mode.
 
@@ -230,4 +234,7 @@ frontend/src/
 
 - DebugLog excerpt anchors and character budget may need tuning as more product families are validated.
 - Per-product JSON artifacts are removed by default after processing; disable `CLEANUP_JOB_WORKDIR_AFTER_RUN` to inspect them.
+- In-job diagnosis reuse is keyed by normalized failure signature, not product or full evidence. Disk keys include product/context and selected knowledge/acronym metadata, but do not independently hash every retrieved family-level section or playbook. Do not assume every knowledge edit invalidates all affected results; use explicit reanalysis where needed.
+- Manager first/latest metrics describe the observed, filtered attempts in an uploaded batch, not lifetime manufacturing yield. Missing or incomparable timestamps can make chronology-dependent metrics unavailable.
+- Background processing and knowledge-upload progress are process-local, not a durable distributed queue. Batch state can be reopened, but interrupted running jobs restore as errors rather than resuming.
 - Shared workspace access does not provide per-person authorization or reliable individual audit attribution. Do not expose it publicly. Legacy private batches are not automatically migrated.

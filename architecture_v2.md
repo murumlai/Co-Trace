@@ -2,6 +2,15 @@
 
 Co_Trace is a manufacturing test-log triage platform. It ingests FTRunner production logs, preprocesses them into normalized records, runs LLM-assisted root-cause analysis (grounded in a curated product-knowledge pack, admin-reviewed playbooks, and an acronym glossary), and surfaces results through Engineer and Manager views with feedback, investigation actions, historical comparison, and redacted handoff exports.
 
+Implementation review: 2026-10-07. This document describes the current code, not a production certification. AI means artificial intelligence; LLM means large language model; RCA means root-cause analysis; FPY means first-pass yield; API means application programming interface; TTL means time to live.
+
+## System Boundary and Deployment
+
+- **Included in Co-Trace:** the React browser application, Python/FastAPI backend, log processing, deterministic metrics, diagnosis orchestration, knowledge management, evidence views, feedback/actions, reports, and file-backed application stores.
+- **Separately provided:** manufacturing test equipment and source logs, authoritative product documents, engineers and administrators, enterprise GitHub Copilot and its pretrained models/licensing, and the host server, storage infrastructure, network protection, certificates, and operational support.
+- **Not implemented:** direct manufacturing execution/quality-system integration, equipment control, automated product-release decisions, individual ordinary-user authorization, model training, a distributed worker queue, or live synchronization between browsers. Engineers act on recommendations outside Co-Trace.
+- **Runtime:** one backend process can serve both the built frontend and API. Development uses Vite on port 5173 with `/api` proxied to port 8000. Upload analysis runs in process through FastAPI background tasks; registries, locks, and knowledge-upload progress are process-local. File persistence does not make this a distributed or automatically resumable job service.
+
 ## System Overview
 
 Prototype access update (2026-09-23): all visitors use one server-controlled `shared-workspace` principal. Home needs no sign-in or personal identity. The existing registry, stores, and dependency boundary are retained; no new service or storage architecture is introduced. Password-protected Admin mode grants maintenance permissions within that same workspace. Copilot authentication stays backend-only. Legacy account-owned jobs are not automatically published, and anonymous history does not identify individuals. Deploy only within a trusted network.
@@ -33,6 +42,7 @@ graph TB
 
         subgraph Helpers["View-model helpers (node:test)"]
             WorkspaceState["workspaceState.js<br/>session restore"]
+            AppUrl["appUrl.js<br/>compact investigation URLs"]
             JobMonitor["jobMonitoring.js"]
             UploadSel["uploadSelection.js"]
             DiagPres["diagnosisPresentation.js"]
@@ -60,6 +70,8 @@ graph TB
             Aggregator["aggregator.py<br/>FPY / Pareto / clusters / scope"]
             Comparison["comparison.py<br/>batch baseline comparison"]
             RecordViews["record_views.py<br/>serial grouping + debug packet"]
+            Chronology["timestamp_ordering.py<br/>comparable first/latest ordering"]
+            Fingerprints["fingerprints.py<br/>batch duplicate detection"]
             Redaction["redaction.py<br/>PII scrubbing"]
         end
 
@@ -67,6 +79,7 @@ graph TB
             JobReg["job_registry.py<br/>job lifecycle + TTL + listing"]
             AnalysisCache["analysis_cache.py<br/>disk cache"]
             UploadStore["upload_storage.py<br/>uploads + zip extract"]
+            KnowledgeJobs["main.py knowledge-upload jobs<br/>in-memory progress only"]
             FeedbackStore["feedback_store.py<br/>engineer feedback"]
             ActionStore["investigation_action_store.py<br/>versioned actions"]
         end
@@ -89,7 +102,7 @@ graph TB
     end
 
     subgraph Disk["Persistent Storage (disk)"]
-        WorkDir[("job_state.json<br/>per-product .json")]
+        WorkDir[("job_state.json<br/>records, excerpts, progress and batch metadata")]
         CacheDir[("analysis_cache.json")]
         FeedbackDisk[("feedback.json")]
         ActionsDisk[("investigation_actions.json")]
@@ -98,9 +111,11 @@ graph TB
         Glossary[("product_acronyms.json")]
     end
 
+    Payloads["Temporary local payloads<br/>uploads, extracted logs, per-product .json"]
+
     subgraph External["External Services"]
-        CopilotSDK["Enterprise GitHub Copilot API<br/>(allowlisted HTTPS, PAT or exchanged token)"]
-        Docs["Product Docs<br/>(PDF/DOCX/XLSX)"]
+        CopilotAPI["Enterprise GitHub Copilot API<br/>(allowlisted HTTPS, PAT or exchanged token)"]
+        Docs["Product Docs<br/>(PDF/DOCX/XLSX; source files retained locally)"]
     end
 
     %% Frontend wiring
@@ -125,10 +140,13 @@ graph TB
     MainPy --> Comparison
     MainPy --> RecordViews
     MainPy --> KService
+    MainPy --> UploadStore
+    MainPy --> KnowledgeJobs
+    KnowledgeJobs --> KService
     Deps --> Config
     Deps --> JobReg
     Deps --> AnalysisCache
-    Deps --> UploadStore
+    Deps --> Orchestrator
     Deps --> FeedbackStore
     Deps --> ActionStore
     Deps --> Analyzer
@@ -142,6 +160,9 @@ graph TB
     Orchestrator --> Analyzer
     Orchestrator --> JobReg
     Orchestrator --> UploadStore
+    Orchestrator --> Fingerprints
+    Orchestrator --> Chronology
+    Preprocessor --> Payloads
     Preprocessor --> Redaction
     Analyzer --> Redaction
     Analyzer --> KPlaybook
@@ -151,7 +172,10 @@ graph TB
     Analyzer --> LlmClient
     LlmClient --> CopilotClient
     Aggregator --> RecordViews
+    Aggregator --> Chronology
     Comparison --> Aggregator
+    Comparison --> Fingerprints
+    RecordViews --> Chronology
 
     %% Knowledge ingestion + retrieval
     KService --> KParsing
@@ -163,11 +187,11 @@ graph TB
     KParsing --> Docs
 
     %% External
-    CopilotClient --> CopilotSDK
+    CopilotClient -->|"diagnosis context or document sections"| CopilotAPI
 
     %% Disk persistence
     JobReg --> WorkDir
-    UploadStore --> WorkDir
+    UploadStore --> Payloads
     AnalysisCache --> CacheDir
     FeedbackStore --> FeedbackDisk
     ActionStore --> ActionsDisk
@@ -186,10 +210,11 @@ graph TB
 | Feedback / actions | `GET\|POST /api/jobs/{id}/feedback`, `GET\|POST /api/jobs/{id}/actions`, `PATCH /api/jobs/{id}/actions/{action_id}` | shared-workspace owner |
 | Manager | `GET /api/jobs/{id}/manager`, `GET /api/jobs/{id}/comparison` | shared-workspace owner |
 | Cache | `DELETE /api/jobs/{id}/cache`, `GET /api/cache/analysis`, `DELETE /api/cache/analysis/{key}` | admin for deletes |
-| Knowledge | `GET /api/knowledge`, `GET /api/knowledge/scan`, `GET /api/knowledge/sections[/{id}]`, `GET /api/knowledge/upload/check`, `POST /api/knowledge/upload`, `GET /api/knowledge/jobs/{id}`, `POST /api/knowledge/rebuild`, `DELETE /api/knowledge/documents/{doc_id}`, `DELETE /api/knowledge` | admin for mutations |
+| Knowledge reads | `GET /api/knowledge`, `GET /api/knowledge/scan`, `GET /api/knowledge/sections[/{id}]`, `GET /api/knowledge/jobs/{id}` | shared workspace |
+| Knowledge maintenance | `GET /api/knowledge/upload/check`, `POST /api/knowledge/upload`, `POST /api/knowledge/rebuild`, `DELETE /api/knowledge/documents/{doc_id}`, `DELETE /api/knowledge` | admin, including the duplicate-file check |
 | Playbooks | `GET\|POST /api/knowledge/playbooks`, `PATCH\|DELETE /api/knowledge/playbooks/{id}` | admin for mutations |
 | Acronyms | `GET\|POST\|DELETE /api/knowledge/acronyms` | admin for mutations |
-| Ops | `GET /api/health`, `POST /api/logs/frontend` | public / session |
+| Ops | `GET /api/health`, `POST /api/logs/frontend` | public; frontend-log writes still pass mutation-origin checks |
 
 ## Analysis Request Flow
 
@@ -205,8 +230,10 @@ sequenceDiagram
     participant PB as playbook_store
     participant Cache as analysis_cache.py
     participant KR as knowledge/retriever
+    participant Glossary as acronym_glossary
     participant LLM as llm_client → copilot_client
     participant Job as job_registry.py
+    participant Uploads as upload_storage.py
 
     User->>FE: Select folders / .txt / .log / .zip
     FE->>API: POST /api/upload
@@ -215,30 +242,42 @@ sequenceDiagram
     API->>Orch: run_job() [BackgroundTask]
 
     Orch->>Pre: parse run folders
-    Pre-->>Orch: UnitRecord[] (redacted)
+    Pre-->>Orch: UnitRecord[] (source fields plus bounded excerpts)
     Orch->>Orch: write per-product .json + BatchMetadata (fingerprint, counts)
-    Orch->>Job: progress.stage = analyzing
+    Orch->>Job: save records and metadata, progress.stage = analysis
 
-    loop each unique error signature
-        Orch->>Anz: analyze failed units
+    loop each failed run (reuse by error signature)
+        Orch->>Anz: analyze failed record
+        Anz->>Anz: redact model-bound failure context
         Anz->>PB: reviewed exact signature match?
         alt playbook hit
-            PB-->>Anz: deterministic diagnosis (never cached)
-        else in-job / disk cache hit
-            Anz->>Cache: lookup(cache key)
-            Cache-->>Anz: cached diagnosis
-        else cache miss
-            Anz->>KR: retrieve product knowledge + playbooks + acronyms
-            KR-->>Anz: grounded context + section IDs
-            Anz->>LLM: analyze_failure(redacted excerpt + context)
-            LLM-->>Anz: structured RCA (root cause, category, confidence, owner, risk, next action)
-            Anz->>Cache: store result
+            PB-->>Anz: deterministic diagnosis (no disk analysis-cache write)
+            Anz->>Anz: retain playbook result in job signature cache
+        else no exact reviewed playbook
+            Anz->>KR: retrieve product summaries and reviewed playbooks
+            KR-->>Anz: current context, section IDs and knowledge hash
+            Anz->>Glossary: resolve approved acronyms and glossary hash
+            Anz->>Anz: build evidence references and disk-cache key
+            alt in-job signature cache hit
+                Anz->>Anz: reuse diagnosis, current evidence not consumed
+            else no in-job hit
+                Anz->>Cache: lookup full context key (unless force refresh)
+                alt disk cache hit
+                    Cache-->>Anz: saved diagnosis, current evidence not consumed
+                else cache miss
+                    Anz->>LLM: analyze_failure(redacted excerpt + context)
+                    LLM-->>Anz: structured RCA or offline heuristic on provider failure
+                    Anz->>Cache: persist successful LLM result only
+                end
+                Anz->>Anz: retain result in job signature cache
+            end
         end
-        Anz-->>Orch: enriched UnitRecord + evidence_references
+        Anz-->>Orch: diagnosis + evidence references and consumption metadata
         Orch->>Job: save progress + LLM metrics
     end
 
-    Orch->>Job: status=done, cleanup workdir
+    Orch->>Job: save status=done and records
+    Orch->>Uploads: remove payloads by default, preserve job_state.json
 
     loop poll
         FE->>API: GET /api/jobs/{id}/status
@@ -309,13 +348,19 @@ erDiagram
         string failing_step
         enum device_class "pan|aic|unknown"
         bool has_debuglog
-        string debug_excerpt "transient"
+        string debuglog_status
+        string debug_excerpt "redacted, serial retained; persisted in job state"
+        string ftrunner_snippet "source-derived; persisted in job state"
+        string redacted_snippet "analysis context"
         string signature "SHA1 dedup key"
         string root_cause
         string suggested_solution
         string analysis_source "llm|cached|local-cache|stub|playbook"
         string analysis_context_source "debug_excerpt|ftrunner_snippet|error_message"
         string analysis_cache_key
+        list evidence_references
+        bool evidence_consumed "nullable; false for reused diagnoses"
+        string analysis_origin_unit_id "origin of in-job diagnosis when known"
         string playbook_id FK
         float confidence
         string root_cause_category
@@ -359,6 +404,7 @@ erDiagram
         enum result
         int attempt_count
         int failure_count
+        string chronology_unavailable_reason
     }
 
     JobStatus {
@@ -400,6 +446,7 @@ erDiagram
         string observed_start_time
         string observed_end_time
         enum timestamp_timezone "offset|unspecified|mixed|unavailable"
+        string chronology_unavailable_reason
         string batch_fingerprint "duplicate re-upload guard"
     }
 
@@ -573,10 +620,11 @@ erDiagram
 
 **Notes**
 
-- `debug_excerpt` / `ExtractedSection.text` are *transient* — used to drive the LLM in-process and never persisted with the curated artifacts.
-- `signature` = `SHA1(error_code + normalized error_message)`; it is the dedup key that maps many `UnitRecord`s to a single playbook match, LLM call, and cache entry.
-- `knowledge_hash` and `acronym_glossary_hash` are folded into the analysis cache key so approving new knowledge/acronyms invalidates stale diagnoses. Invalidation is **targeted, not global**: `product_code` is part of the key, `knowledge_hash` is the per-product manifest hash, and `acronym_glossary_hash` covers only the approved acronym pairs used by that record. A full knowledge rebuild can shift every per-product hash. Changing the model, prompt version, or provider invalidates everything.
-- Playbook diagnoses are deterministic and never written to the analysis cache, so retiring a playbook takes effect without cache cleanup.
+- `ExtractedSection.text` is used during document summarization but is not a field in the generated knowledge pack. Ingestion sends extracted document sections to enterprise Copilot; subsequent failure diagnosis sends only selected knowledge summaries, not the source documents.
+- `debug_excerpt` is not transient: it is included in per-product artifacts and serialized `UnitRecord`s in `job_state.json`. Excerpt extraction retains serial numbers; the analyzer redacts them again for model-bound failure context. Job state also retains source-derived fields such as serial number, host, error message, and FTRunner snippet; it is not a fully redacted or anonymized store.
+- The error-code/normalized-message signature groups failed runs for in-job reuse. The disk-cache key is separate: it includes that signature, redacted context, product, operation, failing step, retrieved section identifiers/categories, knowledge/acronym hashes, and provider/model/prompt identity.
+- Cache invalidation is lookup-based, not deletion or automatic reanalysis of reopened jobs. The batch's in-job cache is keyed only by failure signature, so it can reuse a result across differing products or excerpts in that batch. The richer disk key is not an additional guard on an in-job hit. The knowledge hash comes from the first matching product/alias manifest entry, not a hash of every retrieved family-level section or playbook. Do not assume every context edit invalidates every affected saved diagnosis.
+- Playbook diagnoses are deterministic and retained in the job signature cache, but never written to the disk analysis cache. On subsequent analysis, the reviewed-playbook lookup runs first; a stale in-job playbook result is discarded when there is no current match. Reopening a completed job alone does not recompute its diagnosis.
 - `EvidenceReference` line numbers are redacted excerpt-local; they never claim original source-file line precision.
 - `SectionIndexEntry.byte_offset` / `byte_length` address the exact line in `product_knowledge_sections.jsonl`, so retrieval only deserializes matched sections.
 
@@ -587,14 +635,14 @@ erDiagram
 | Dependency Injection / composition root | `dependencies.py` wires singletons (registry, cache, feedback, actions, playbooks, knowledge); `orchestrator.py` receives collaborators |
 | Protocol-based design (duck typing) | `contracts.py` defines `JobRepository`, `JobStateStore`, `Preprocessor`, `ArtifactWriter`, `LLMProvider`, `AnalysisCache`, `FeedbackStore`, `InvestigationActionStore`, `PlaybookStore`, `FailureAnalyzer`, `PayloadCleaner`, `ProductKnowledgeRetriever` |
 | Layered diagnosis precedence | reviewed playbook → in-job signature cache → disk `analysis_cache.py` → LLM |
-| Signature deduplication | one diagnosis per `SHA1(error_code + normalized message)` per job |
+| Signature deduplication | in-job reuse by normalized failure signature; disk-cache reuse additionally depends on context and model identity |
 | Grounded LLM prompting | curated knowledge pack + reviewed playbooks + approved acronym glossary injected as trusted context |
 | Explicit provider selection | `LLM_PROVIDER=copilot_http` (HTTPS host allowlist enforced; `copilot_sdk` is a deprecated alias) or `offline_stub`; no public GitHub Models path, SDK, or CLI subprocess |
 | Pure computation layers | `aggregator.py`, `comparison.py`, `record_views.py` operate on `UnitRecord` lists without I/O |
 | Shared workspace boundary | job, feedback, action, and comparison routes retain the owner filter using the same shared principal for guests and Admin; legacy private jobs remain outside that scope; cache deletes and knowledge/playbook mutations require Admin |
 | Optimistic concurrency | investigation actions require `expected_version`; stale writes return conflict |
 | Atomic writes | job state, cache, feedback, actions, playbooks, and knowledge pack use temp file + `os.replace` |
-| PII redaction at boundary | `redaction.py` scrubs serials/IPs/MACs/credentials before LLM, at rest, in feedback notes, and in debug packets |
+| Pattern-based redaction | failure context is redacted before LLM diagnosis; feedback notes and debug packets are redacted; serials remain available for unit grouping and persisted job records are not fully redacted. Document ingestion is a separate external-data flow |
 
 ## Component Responsibilities
 
@@ -604,7 +652,7 @@ erDiagram
 - **api.js** — HTTP wrapper mapping to all `/api/*` endpoints; downgrades expired Admin access on 401 or the explicit Admin-required 403 without routing to a login page.
 - **Pages** — Home (upload + recent batches), Engineer (triage worklist, clusters, RCA, evidence, feedback, actions, debug packets), Manager (scoped FPY, Pareto, retest burden, baselines, drill-down, report export), Knowledge (docs, coverage queue, playbooks, acronyms), About.
 - **Components** — `AdminDialog` (password-protected maintenance), `TerminalViewer` (log search with context), `RecentBatches`, `ui.jsx` primitives.
-- **Helpers** — pure view-model modules (`workspaceState`, `jobMonitoring`, `uploadSelection`, `diagnosisPresentation`, `evidenceReferences`, `logEvidence`, `unitAttempts`, `managerMetrics`, `managerReport`), each covered by `node:test`.
+- **Helpers** — view-model and navigation modules (`workspaceState`, `appUrl`, `jobMonitoring`, `uploadSelection`, `diagnosisPresentation`, `evidenceReferences`, `logEvidence`, `unitAttempts`, `managerMetrics`, `managerReport`); helper and shell behavior is covered by the frontend test suite.
 
 ### Backend (`backend/app`)
 - **main.py** — FastAPI routes, middleware, job lifecycle, ownership and admin checks.
@@ -614,10 +662,20 @@ erDiagram
 - **aggregator.py** — pure computation of FPY, Pareto, trends, station breakdowns, failure clusters, and scoped filtering.
 - **comparison.py** — owner-scoped baseline comparison against the newest comparable prior batch.
 - **record_views.py** — signatures, serial grouping, attempt classification, redacted debug-packet export.
+- **timestamp_ordering.py / fingerprints.py** — explicit timestamp comparability and chronological ordering, plus stable batch fingerprints for duplicate detection.
 - **job_registry.py / analysis_cache.py / upload_storage.py** — durable job state and listing, diagnosis cache, and upload handling.
 - **feedback_store.py / investigation_action_store.py** — atomic JSON stores for engineer feedback and versioned investigation actions, expiring with job TTL.
 - **knowledge/** — ingestion (parse → summarize → store), lexical retrieval, admin playbook store, and acronym glossary.
 - **copilot_client.py / llm_client.py** — enterprise Copilot adapter with two-tier model policy, and provider dispatch with deterministic offline stub.
+
+## Data and Job Lifecycle
+
+- Uploads and extracted files are local input payloads. Per-product JSON is an intermediate artifact, not the dashboard's durable source: API views read the registry's `UnitRecord`s. Default completion/error/cancellation cleanup removes payloads but preserves `job_state.json`.
+- Batch records and state can be restored after restart, subject to `JOB_TTL_S` (30 days by default). A job saved as running is restored as an error, not resumed. Feedback and investigation actions carry the owning job's expiry. The diagnosis cache and knowledge stores have separate lifecycles and are not deleted with each batch's payload cleanup.
+- Knowledge uploads retain source documents in `Product_Docs` and normally rebuild the pack from all scanned source documents, not just the new file. Keeping an already-ingested duplicate skips work. Upload progress is held in a bounded, process-local map; it is not the durable batch registry. The explicit rebuild endpoint runs synchronously. Removing a document from the pack or deleting the pack preserves source files, so a later rebuild can ingest them again.
+- Document sections go to enterprise Copilot during ingestion; model-bound failure excerpts and selected curated context go during diagnosis. Summaries are model-generated and are not automatically administrator-approved playbooks. Pattern redaction is not a guarantee of anonymization or removal of proprietary content.
+- The mini enrichment pass is optional and skips short contexts (under 500 characters by default); the reasoning pass produces the diagnosis. A provider error can fall back to a limited offline heuristic, which is not saved to the disk diagnosis cache. Misconfigured live-provider settings instead fail startup; document summarization requires the live provider and has no equivalent offline fallback.
+- The application retains source-derived identifiers and excerpts in job state and writes operational logs. Storage/network protection, retention policy, approved external processing, and provider licensing are deployment responsibilities, not guarantees supplied by redaction or the Admin cookie.
 
 ## Extension Design Records
 
@@ -626,7 +684,7 @@ The following sections record the justification and constraints for each approve
 ### Debug Memory (feedback + playbooks)
 
 The generated knowledge pack cannot own engineer feedback or admin-authored playbooks. Feedback
-must survive a page/job reload, while `KnowledgeService.rebuild()` replaces every generated
+must survive a page/job reload, while `KnowledgeIngestionService.rebuild()` replaces every generated
 `KnowledgeSection` and would erase playbooks that did not originate in a source document. Two
 small file-backed stores therefore sit beside, rather than inside, the generated pack.
 
@@ -654,16 +712,16 @@ small file-backed stores therefore sit beside, rather than inside, the generated
 
 ### Deterministic Evidence Provenance
 
-- Only deterministic sources actually supplied to analysis are recorded; prompts are unchanged.
-- The UI labels these references `Sources provided to analysis`, not citations or proof.
+- Evidence references describe the current record's redacted excerpt and selected knowledge sections. They are not claim-level citations, proof, or a complete immutable copy of the prompt.
+- `evidence_consumed` distinguishes a fresh analysis path from a cached/playbook result that did not consume the current record's evidence. `analysis_origin_unit_id` identifies the originating run for in-job reuse when known; disk reuse does not reconstruct original prompt provenance.
+- The UI distinguishes sources supplied to fresh analysis from references available for a reused diagnosis. Matching a reviewed playbook does not require a new evidence-consuming model call.
 - Removed/rebuilt sections and invalid excerpt bounds render as unavailable. Jobs and cached
     diagnoses without references remain compatible.
 - Claim-level source mappings require a separate prompt/provider contract.
 
 ### Shared-Workspace Historical Comparison
 
-- The baseline is selected from completed shared-workspace, non-duplicate (by `batch_fingerprint`) jobs
-    with the same effective product scope and nonempty results under active lot/station filters.
+- The baseline is the newest eligible completed shared-workspace job created strictly before the current job, with the same effective product population and nonempty results under active lot/station filters. Scoped record fingerprints reject duplicate populations; shared attempt identifiers reject overlap. Stored batch fingerprints must also be available.
 - Absolute date filters are not replayed against prior batches; each comparison reports current
     and baseline periods and sample sizes.
 - Missing fingerprints and incomparable populations return unavailable rather than a fabricated
