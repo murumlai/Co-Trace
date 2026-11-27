@@ -131,7 +131,12 @@ def test_cli_transport_builds_locked_down_command_and_stdin(tmp_path, monkeypatc
                 '{"modelMetrics":{"claude-sonnet-5":{"usage":{"inputTokens":321,"outputTokens":45}}},'
                 '"lastCallInputTokens":321,"lastCallOutputTokens":45}'
             )
-        return cli.CliProcessResult(returncode=0, stdout=b'{"root_cause":"ok"}\n', stderr=b"")
+        jsonl_out = (
+            '{"type":"session.start","data":{"sessionId":"' + session_id + '"}}\n'
+            '{"type":"assistant.message","data":{"content":"{\\"root_cause\\":\\"ok\\"}"}}\n'
+            '{"type":"result","exitCode":0}\n'
+        ).encode("utf-8")
+        return cli.CliProcessResult(returncode=0, stdout=jsonl_out, stderr=b"")
 
     transport = cli.CopilotCliTransport(
         executable=fake_cli_executable,
@@ -150,7 +155,7 @@ def test_cli_transport_builds_locked_down_command_and_stdin(tmp_path, monkeypatc
     cmd = captured["cmd"]
     assert cmd[0] == fake_cli_executable
     assert "--model" in cmd and cmd[cmd.index("--model") + 1] == "claude-sonnet-5"
-    assert "--silent" in cmd
+    assert cmd[cmd.index("--output-format") + 1] == "json"
     assert "--no-color" in cmd
     assert "--no-ask-user" in cmd
     assert "--disable-builtin-mcps" in cmd
@@ -159,7 +164,8 @@ def test_cli_transport_builds_locked_down_command_and_stdin(tmp_path, monkeypatc
     assert "--no-auto-update" in cmd
     assert "--disable-client-telemetry" in cmd
     assert "--sync-session=off" in cmd
-    assert cmd[cmd.index("--available-tools") + 1] == ""
+    assert cmd[cmd.index("--available-tools") + 1] == "__none__"
+    assert "--deny-tool" in cmd
     assert cmd[cmd.index("--reasoning-effort") + 1] == "low"
     # Prompt must travel via stdin, never in CLI arguments.
     assert "SYSTEM RULE" not in " ".join(cmd)
@@ -259,6 +265,32 @@ def test_cli_transport_falls_back_to_last_call_tokens_and_none(fake_cli_executab
     )
     c2 = t2.complete("s", "u", "auto")
     assert (c2.input_tokens, c2.output_tokens) == (None, None)
+
+
+def test_cli_transport_parses_jsonl_assistant_message_and_checkpoint_usage(fake_cli_executable):
+    from app import copilot_cli_client as cli
+    from app.copilot_client import CopilotResponseError
+
+    jsonl_payload = (
+        '{"type":"session.start","data":{"sessionId":"abc"}}\n'
+        '{"type":"assistant.message","data":{"content":"{\\"root_cause\\":\\"Long unwrapped diagnosis text\\",\\"confidence\\":0.92}"}}\n'
+        '{"type":"session.usage_checkpoint","data":{"accountingSnapshot":{"lastCallInputTokens":987,"lastCallOutputTokens":65}}}\n'
+    ).encode("utf-8")
+    transport = cli.CopilotCliTransport(
+        executable=fake_cli_executable,
+        runner=lambda *_a: cli.CliProcessResult(0, jsonl_payload, b""),
+    )
+    comp = transport.complete("s", "u", "claude-sonnet-5")
+    assert comp.text == '{"root_cause":"Long unwrapped diagnosis text","confidence":0.92}'
+    assert (comp.input_tokens, comp.output_tokens) == (987, 65)
+
+    no_msg_jsonl = b'{"type":"session.start","data":{}}\n{"type":"result","exitCode":0}\n'
+    empty_t = cli.CopilotCliTransport(
+        executable=fake_cli_executable,
+        runner=lambda *_a: cli.CliProcessResult(0, no_msg_jsonl, b""),
+    )
+    with pytest.raises(CopilotResponseError, match="empty"):
+        empty_t.complete("s", "u", "claude-sonnet-5")
 
 
 def test_cli_transport_limits_concurrency(fake_cli_executable):

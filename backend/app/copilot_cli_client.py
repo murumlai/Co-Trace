@@ -142,17 +142,43 @@ def _classify_cli_error(returncode: int, stderr_text: str) -> Exception:
     return CopilotTransientError(f"Copilot CLI execution failed{suffix}")
 
 
-def _parse_usage_file(usage_path: str) -> tuple[int | None, int | None]:
-    if not os.path.isfile(usage_path):
-        return None, None
-    try:
-        with open(usage_path, encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, ValueError):
-        return None, None
-    if not isinstance(data, dict):
-        return None, None
+def _parse_jsonl_stdout(stdout_text: str) -> tuple[str, int | None, int | None]:
+    """Extract unwrapped assistant text (and optional usage) from ``--output-format json`` JSONL."""
+    messages: list[str] = []
+    usage_in: int | None = None
+    usage_out: int | None = None
+    parsed_any = False
+    for raw_line in (stdout_text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict) or not isinstance(event.get("type"), str):
+            continue
+        parsed_any = True
+        event_type = event["type"]
+        data = event.get("data")
+        if event_type == "assistant.message" and isinstance(data, dict):
+            content = data.get("content")
+            if isinstance(content, str) and content.strip():
+                messages.append(content.strip())
+        elif event_type == "session.usage_checkpoint" and isinstance(data, dict):
+            snapshot = data.get("accountingSnapshot")
+            if isinstance(snapshot, dict):
+                snap_in, snap_out = _extract_usage_from_dict(snapshot)
+                if snap_in is not None or snap_out is not None:
+                    usage_in, usage_out = snap_in, snap_out
+    if messages:
+        return messages[-1], usage_in, usage_out
+    if parsed_any:
+        return "", usage_in, usage_out
+    return stdout_text.strip(), None, None
 
+
+def _extract_usage_from_dict(data: dict[str, Any]) -> tuple[int | None, int | None]:
     model_metrics = data.get("modelMetrics")
     if isinstance(model_metrics, dict) and model_metrics:
         in_total = 0
@@ -180,6 +206,19 @@ def _parse_usage_file(usage_path: str) -> tuple[int | None, int | None]:
     valid_in = last_in if isinstance(last_in, int) and not isinstance(last_in, bool) and last_in > 0 else None
     valid_out = last_out if isinstance(last_out, int) and not isinstance(last_out, bool) and last_out > 0 else None
     return valid_in, valid_out
+
+
+def _parse_usage_file(usage_path: str) -> tuple[int | None, int | None]:
+    if not os.path.isfile(usage_path):
+        return None, None
+    try:
+        with open(usage_path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None, None
+    if not isinstance(data, dict):
+        return None, None
+    return _extract_usage_from_dict(data)
 
 
 def _copilot_home_dir(env: dict[str, str]) -> str:
@@ -229,7 +268,8 @@ class CopilotCliTransport:
             self._executable,
             "--model",
             clean_model,
-            "--silent",
+            "--output-format",
+            "json",
             "--no-color",
             "--stream",
             "off",
@@ -243,7 +283,13 @@ class CopilotCliTransport:
             "--log-level",
             "none",
             "--available-tools",
-            "",
+            "__none__",
+            "--deny-tool",
+            "shell",
+            "--deny-tool",
+            "write",
+            "--deny-tool",
+            "url",
             "--session-id",
             session_id,
             "--usage-output-file",
@@ -289,11 +335,14 @@ class CopilotCliTransport:
                     stderr_text = result.stderr.decode("utf-8", errors="replace").strip()
                     if result.returncode != 0:
                         raise _classify_cli_error(result.returncode, stderr_text)
-                    if not stdout_text:
+                    content_text, event_in, event_out = _parse_jsonl_stdout(stdout_text)
+                    if not content_text:
                         raise CopilotResponseError("Copilot CLI returned empty output")
                     input_tokens, output_tokens = _parse_usage_file(usage_file)
+                    if input_tokens is None and output_tokens is None:
+                        input_tokens, output_tokens = event_in, event_out
                     return CopilotCompletion(
-                        text=stdout_text,
+                        text=content_text,
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
                     )
