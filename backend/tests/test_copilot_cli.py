@@ -96,3 +96,211 @@ def test_copilot_cli_validates_proxy_and_ca_bundle(cli_configured, monkeypatch, 
     ca_file.write_text("-----BEGIN CERTIFICATE-----\n", encoding="utf-8")
     monkeypatch.setattr(settings, "COPILOT_CA_BUNDLE", str(ca_file))
     cli_configured.validate_enterprise_only()
+
+
+# ---------------------------------------------------------------------------
+# Commit 2: Locked-down CLI transport tests (mocked subprocess)
+# ---------------------------------------------------------------------------
+
+def test_cli_transport_builds_locked_down_command_and_stdin(tmp_path, monkeypatch, fake_cli_executable):
+    from app import copilot_cli_client as cli
+
+    copilot_home = tmp_path / "copilot_home"
+    monkeypatch.setenv("COPILOT_HOME", str(copilot_home))
+    monkeypatch.setenv("COPILOT_ALLOW_ALL", "true")
+    monkeypatch.setenv("COPILOT_ASSISTED_APPROVAL", "1")
+
+    captured: dict = {}
+
+    def fake_runner(cmd, stdin_bytes, cwd, env, timeout_s):
+        captured["cmd"] = cmd
+        captured["stdin"] = stdin_bytes.decode("utf-8")
+        captured["cwd"] = cwd
+        captured["env"] = env
+        captured["timeout_s"] = timeout_s
+
+        # Simulate CLI writing usage JSON and a session directory.
+        usage_path = cmd[cmd.index("--usage-output-file") + 1]
+        session_id = cmd[cmd.index("--session-id") + 1]
+        captured["session_dir"] = copilot_home / "session-state" / session_id
+        captured["session_dir"].mkdir(parents=True, exist_ok=True)
+        (captured["session_dir"] / "events.jsonl").write_text("{}\n", encoding="utf-8")
+
+        with open(usage_path, "w", encoding="utf-8") as fh:
+            fh.write(
+                '{"modelMetrics":{"claude-sonnet-5":{"usage":{"inputTokens":321,"outputTokens":45}}},'
+                '"lastCallInputTokens":321,"lastCallOutputTokens":45}'
+            )
+        return cli.CliProcessResult(returncode=0, stdout=b'{"root_cause":"ok"}\n', stderr=b"")
+
+    transport = cli.CopilotCliTransport(
+        executable=fake_cli_executable,
+        timeout_s=45.0,
+        reasoning_effort="low",
+        proxy="http://proxy-us.intel.com:912",
+        ca_bundle=str(tmp_path / "corp.pem"),
+        runner=fake_runner,
+    )
+    completion = transport.complete("SYSTEM RULE", "USER DATA", "claude-sonnet-5")
+
+    assert completion.text == '{"root_cause":"ok"}'
+    assert completion.input_tokens == 321
+    assert completion.output_tokens == 45
+
+    cmd = captured["cmd"]
+    assert cmd[0] == fake_cli_executable
+    assert "--model" in cmd and cmd[cmd.index("--model") + 1] == "claude-sonnet-5"
+    assert "--silent" in cmd
+    assert "--no-color" in cmd
+    assert "--no-ask-user" in cmd
+    assert "--disable-builtin-mcps" in cmd
+    assert "--no-custom-instructions" in cmd
+    assert "--disallow-temp-dir" in cmd
+    assert "--no-auto-update" in cmd
+    assert "--disable-client-telemetry" in cmd
+    assert "--sync-session=off" in cmd
+    assert cmd[cmd.index("--available-tools") + 1] == ""
+    assert cmd[cmd.index("--reasoning-effort") + 1] == "low"
+    # Prompt must travel via stdin, never in CLI arguments.
+    assert "SYSTEM RULE" not in " ".join(cmd)
+    assert "USER DATA" not in " ".join(cmd)
+    assert "SYSTEM RULE" in captured["stdin"]
+    assert "USER DATA" in captured["stdin"]
+    # Ambient tool-approval env vars must be stripped.
+    assert "COPILOT_ALLOW_ALL" not in captured["env"]
+    assert "COPILOT_ASSISTED_APPROVAL" not in captured["env"]
+    assert captured["env"]["COPILOT_AUTO_UPDATE"] == "false"
+    assert captured["env"]["HTTPS_PROXY"] == "http://proxy-us.intel.com:912"
+    assert captured["env"]["NODE_EXTRA_CA_CERTS"] == str(tmp_path / "corp.pem")
+    assert captured["timeout_s"] == 45.0
+    # Ephemeral session directory and scratch cwd must be cleaned up.
+    assert not captured["session_dir"].exists()
+    assert not os.path.exists(captured["cwd"])
+
+
+def test_cli_transport_rejects_option_like_model_name(fake_cli_executable):
+    from app import copilot_cli_client as cli
+    from app.copilot_client import CopilotConfigError
+
+    transport = cli.CopilotCliTransport(executable=fake_cli_executable)
+    with pytest.raises(CopilotConfigError, match="model name"):
+        transport.complete("s", "u", "--allow-all")
+
+
+def test_cli_transport_classifies_auth_config_and_transient_errors(fake_cli_executable):
+    from app import copilot_cli_client as cli
+    from app.copilot_client import CopilotAuthError, CopilotConfigError, CopilotTransientError
+
+    cases = [
+        (b"Error: not logged in. Run copilot login.", CopilotAuthError),
+        (b'Execution failed: Model "gpt-5.4-mini" is not available.', CopilotConfigError),
+        (b"503 Service Unavailable upstream", CopilotTransientError),
+    ]
+    for stderr_bytes, expected_exc in cases:
+        transport = cli.CopilotCliTransport(
+            executable=fake_cli_executable,
+            runner=lambda *_a, _err=stderr_bytes: cli.CliProcessResult(1, b"", _err),
+        )
+        with pytest.raises(expected_exc):
+            transport.complete("sys", "usr", "claude-sonnet-5")
+
+
+def test_cli_transport_redacts_tokens_from_error_stderr(fake_cli_executable):
+    from app import copilot_cli_client as cli
+    from app.copilot_client import CopilotAuthError
+
+    secret = "github_pat_11ABCDEF1234567890_SECRET"
+    transport = cli.CopilotCliTransport(
+        executable=fake_cli_executable,
+        runner=lambda *_a: cli.CliProcessResult(1, b"", f"Unauthorized token={secret}".encode()),
+    )
+    with pytest.raises(CopilotAuthError) as exc_info:
+        transport.complete("sys", "usr", "claude-sonnet-5")
+    assert secret not in str(exc_info.value)
+    assert "[REDACTED]" in str(exc_info.value)
+
+
+def test_cli_transport_enforces_response_size_and_non_empty_output(fake_cli_executable):
+    from app import copilot_cli_client as cli
+    from app.copilot_client import CopilotResponseError
+
+    oversized = cli.CopilotCliTransport(
+        executable=fake_cli_executable,
+        max_response_bytes=16,
+        runner=lambda *_a: cli.CliProcessResult(0, b"x" * 32, b""),
+    )
+    with pytest.raises(CopilotResponseError, match="exceeded"):
+        oversized.complete("sys", "usr", "claude-sonnet-5")
+
+    empty = cli.CopilotCliTransport(
+        executable=fake_cli_executable,
+        runner=lambda *_a: cli.CliProcessResult(0, b"   \n", b""),
+    )
+    with pytest.raises(CopilotResponseError, match="empty"):
+        empty.complete("sys", "usr", "claude-sonnet-5")
+
+
+def test_cli_transport_falls_back_to_last_call_tokens_and_none(fake_cli_executable):
+    from app import copilot_cli_client as cli
+
+    def runner_last_call(cmd, *_a):
+        usage_path = cmd[cmd.index("--usage-output-file") + 1]
+        with open(usage_path, "w", encoding="utf-8") as fh:
+            fh.write('{"modelMetrics":{},"lastCallInputTokens":111,"lastCallOutputTokens":22}')
+        return cli.CliProcessResult(0, b'{"ok":true}', b"")
+
+    t1 = cli.CopilotCliTransport(executable=fake_cli_executable, runner=runner_last_call)
+    c1 = t1.complete("s", "u", "auto")
+    assert (c1.input_tokens, c1.output_tokens) == (111, 22)
+
+    t2 = cli.CopilotCliTransport(
+        executable=fake_cli_executable,
+        runner=lambda *_a: cli.CliProcessResult(0, b'{"ok":true}', b""),
+    )
+    c2 = t2.complete("s", "u", "auto")
+    assert (c2.input_tokens, c2.output_tokens) == (None, None)
+
+
+def test_cli_transport_limits_concurrency(fake_cli_executable):
+    import threading
+    import time
+
+    from app import copilot_cli_client as cli
+
+    active = 0
+    peak = 0
+    lock = threading.Lock()
+
+    def slow_runner(*_a):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.05)
+        with lock:
+            active -= 1
+        return cli.CliProcessResult(0, b'{"ok":true}', b"")
+
+    transport = cli.CopilotCliTransport(
+        executable=fake_cli_executable,
+        max_concurrency=1,
+        runner=slow_runner,
+    )
+    threads = [threading.Thread(target=transport.complete, args=("s", "u", "auto")) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert peak == 1
+
+
+def test_cli_module_is_available_without_spawning(cli_configured, monkeypatch):
+    from app import copilot_cli_client as cli
+
+    cli.close()
+    assert cli.is_available() is True
+    assert cli._transport is None
+
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "offline_stub")
+    assert cli.is_available() is False
+
