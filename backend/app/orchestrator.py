@@ -215,14 +215,19 @@ def _analysis_progress_updater(job: Any) -> Callable[[int, int, str], None]:
         job.processed = processed
         job.total = max(total, 1)
         job.stage = stage
-        if settings.LLM_PROVIDER == "copilot_http" and total > 0 and processed < total:
+        if settings.LLM_PROVIDER in {"copilot_http", "copilot_cli"} and total > 0 and processed < total:
             if settings.COPILOT_ENABLE_MINI_ENRICH:
                 calls = f"1-2 Copilot calls; mini skips contexts below {settings.COPILOT_MINI_MIN_CONTEXT_CHARS} chars"
                 passes = 2
             else:
                 calls = "1 Copilot call"
                 passes = 1
-            timeout_s = int(settings.COPILOT_TIMEOUT_S * passes)
+            per_call_timeout = (
+                settings.COPILOT_CLI_TIMEOUT_S
+                if settings.LLM_PROVIDER == "copilot_cli"
+                else settings.COPILOT_TIMEOUT_S
+            )
+            timeout_s = int(per_call_timeout * passes)
             message = f"{message} ({calls}; up to {timeout_s}s per uncached signature)"
         job.message = message
         job.save()

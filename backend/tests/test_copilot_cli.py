@@ -304,3 +304,116 @@ def test_cli_module_is_available_without_spawning(cli_configured, monkeypatch):
     monkeypatch.setattr(settings, "LLM_PROVIDER", "offline_stub")
     assert cli.is_available() is False
 
+
+# ---------------------------------------------------------------------------
+# Commit 3: Shared diagnosis, cache, progress, and summarizer wiring
+# ---------------------------------------------------------------------------
+
+def test_copilot_client_dispatches_to_cli_and_records_metrics(cli_configured, monkeypatch):
+    from app import copilot_cli_client as cli
+    from app import copilot_client as cc
+    from app import llm_client
+
+    monkeypatch.setattr(settings, "COPILOT_MINI_MODEL", "auto")
+    monkeypatch.setattr(settings, "COPILOT_REASONING_MODEL", "claude-sonnet-5")
+    monkeypatch.setattr(settings, "COPILOT_ENABLE_MINI_ENRICH", True)
+    monkeypatch.setattr(settings, "COPILOT_MINI_MIN_CONTEXT_CHARS", 10)
+
+    calls: list[str] = []
+
+    def fake_cli_complete(system_prompt, user_prompt, model):
+        calls.append(model)
+        if model == "auto":
+            return cc.CopilotCompletion(
+                '{"summary":"rail drop","category":"power","observed_signals":["VDD=0V"],"hints":["check VR"],"confidence":"high"}',
+                input_tokens=120,
+                output_tokens=30,
+            )
+        return cc.CopilotCompletion(
+            '{"root_cause":"Power rail collapsed","suggested_solution":"Inspect VR module","confidence":0.85}',
+            input_tokens=450,
+            output_tokens=60,
+        )
+
+    monkeypatch.setattr(cli, "complete", fake_cli_complete)
+
+    assert cc.is_available() is True
+    assert cc.is_cli_available() is True
+    assert cc.is_http_available() is False
+
+    result = llm_client.analyze_with_metrics("E_PWR", "Voltage rail 0V", "VDD dropped to 0.00V on step 4")
+    assert calls == ["auto", "claude-sonnet-5"]
+    assert result.source == "llm"
+    assert result.root_cause == "Power rail collapsed"
+    assert result.suggested_solution == "Inspect VR module"
+    assert result.confidence == 0.85
+    assert result.metrics.provider == "copilot_cli"
+    assert result.metrics.mini.input_tokens == 120
+    assert result.metrics.mini.output_tokens == 30
+    assert result.metrics.mini.token_counts_estimated is False
+    assert result.metrics.reasoning.input_tokens == 450
+    assert result.metrics.reasoning.output_tokens == 60
+    assert result.metrics.reasoning.token_counts_estimated is False
+
+
+def test_analysis_cache_key_is_shared_between_http_and_cli(monkeypatch):
+    from app import analysis_cache
+
+    monkeypatch.setattr(settings, "COPILOT_MINI_MODEL", "auto")
+    monkeypatch.setattr(settings, "COPILOT_REASONING_MODEL", "claude-sonnet-5")
+    monkeypatch.setattr(settings, "COPILOT_ENABLE_MINI_ENRICH", True)
+    key_args = dict(
+        error_code="E1",
+        error_message="msg",
+        context="ctx",
+        context_source="debug_excerpt",
+        signature="sig",
+    )
+
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "copilot_http")
+    http_key = analysis_cache.make_key(**key_args)
+
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "copilot_cli")
+    cli_key = analysis_cache.make_key(**key_args)
+
+    assert cli_key == http_key
+    assert analysis_cache._cache_provider() == "copilot_sdk"
+
+
+def test_orchestrator_progress_uses_cli_timeout_hint(cli_configured, monkeypatch):
+    from app import orchestrator
+
+    class DummyJob:
+        cancel_requested = False
+        processed = 0
+        total = 1
+        stage = ""
+        message = ""
+
+        def save(self):
+            pass
+
+    monkeypatch.setattr(settings, "COPILOT_ENABLE_MINI_ENRICH", False)
+    monkeypatch.setattr(settings, "COPILOT_CLI_TIMEOUT_S", 75.0)
+    job = DummyJob()
+    updater = orchestrator._analysis_progress_updater(job)
+    updater(0, 3, "Analyzing failures")
+    assert "1 Copilot call" in job.message
+    assert "up to 75s per uncached signature" in job.message
+
+
+def test_knowledge_summarizer_uses_copilot_cli_when_configured(cli_configured, monkeypatch):
+    from app import copilot_cli_client as cli
+    from app import copilot_client as cc
+    from app.knowledge import summarizer
+
+    monkeypatch.setattr(settings, "PRODUCT_KNOWLEDGE_SUMMARY_MODEL", "auto")
+    monkeypatch.setattr(
+        cli,
+        "complete",
+        lambda sys_p, usr_p, model: cc.CopilotCompletion(f'{{"summary":"via {model}"}}'),
+    )
+    assert summarizer.is_llm_backend_available() is True
+    assert summarizer._default_chat("sys", "usr") == '{"summary":"via auto"}'
+
+

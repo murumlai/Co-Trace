@@ -185,14 +185,17 @@ def _visible_entry(entry: dict[str, Any], *, actor_is_admin: bool) -> dict[str, 
     return visible
 
 
+_COPILOT_PROVIDERS = frozenset({"copilot_http", "copilot_cli"})
+
+
 def _cache_provider() -> str:
     provider = normalize_llm_provider(settings.LLM_PROVIDER)
-    return _COPILOT_CACHE_PROVIDER if provider == "copilot_http" else provider
+    return _COPILOT_CACHE_PROVIDER if provider in _COPILOT_PROVIDERS else provider
 
 
 def _model_identity() -> dict[str, Any]:
     provider = normalize_llm_provider(settings.LLM_PROVIDER)
-    if provider == "copilot_http":
+    if provider in _COPILOT_PROVIDERS:
         return {
             "mini_model": settings.COPILOT_MINI_MODEL,
             "reasoning_model": settings.COPILOT_REASONING_MODEL,

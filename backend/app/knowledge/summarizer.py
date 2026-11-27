@@ -157,15 +157,16 @@ def _user_prompt(section: ExtractedSection) -> str:
 
 
 def _default_chat(system_prompt: str, user_prompt: str) -> str:
-    """Production chat backend: GPT 5.4-mini via enterprise Copilot over HTTPS."""
+    """Production chat backend: enterprise Copilot over HTTPS or local Copilot CLI."""
     from .. import copilot_client  # noqa: PLC0415 - avoid import cost at module load
 
     if not copilot_client.is_available():
         raise ProductKnowledgeError(
-            "Product-knowledge summarization requires an LLM backend, but the "
-            "enterprise Copilot HTTP provider is not configured. Set "
+            "Product-knowledge summarization requires an LLM backend, but no "
+            "enterprise Copilot provider is configured. Set "
             "LLM_PROVIDER=copilot_http with COPILOT_GITHUB_TOKEN, COPILOT_AUTH_MODE, "
-            "the mode-specific URL, and COPILOT_ALLOWED_HOSTS, or set "
+            "the mode-specific URL, and COPILOT_ALLOWED_HOSTS, or use local "
+            "LLM_PROVIDER=copilot_cli with an authenticated Copilot CLI, or set "
             "PRODUCT_KNOWLEDGE_ENABLED=0."
         )
     return copilot_client.complete(

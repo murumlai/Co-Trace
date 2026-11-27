@@ -585,16 +585,19 @@ def _get_transport() -> CopilotHttpClient:
 
 
 def close() -> None:
-    """Close pooled connections and drop cached tokens (FastAPI shutdown)."""
+    """Close pooled connections and drop cached transports/tokens (FastAPI shutdown)."""
     global _http_client, _transport
     with _transport_lock:
         if _http_client is not None:
             _http_client.close()
         _http_client = None
         _transport = None
+    from . import copilot_cli_client  # noqa: PLC0415
+
+    copilot_cli_client.close()
 
 
-def is_available() -> bool:
+def is_http_available() -> bool:
     """True when the Copilot HTTPS provider is selected and its settings validate. No network I/O."""
     if settings.LLM_PROVIDER != "copilot_http":
         return False
@@ -605,9 +608,27 @@ def is_available() -> bool:
     return True
 
 
+def is_cli_available() -> bool:
+    """True when the local Copilot CLI provider is selected and validates. Never spawns a process."""
+    if settings.LLM_PROVIDER != "copilot_cli":
+        return False
+    from . import copilot_cli_client  # noqa: PLC0415
+
+    return copilot_cli_client.is_available()
+
+
+def is_available() -> bool:
+    """True when any configured Copilot backend (HTTPS or local CLI) is ready. No I/O."""
+    return is_http_available() or is_cli_available()
+
+
 def complete(system_prompt: str, user_prompt: str, model: str) -> CopilotCompletion:
-    """Run one non-streaming chat completion against the approved enterprise endpoint."""
-    if not is_available():
+    """Run one non-streaming completion via the configured enterprise Copilot backend."""
+    if settings.LLM_PROVIDER == "copilot_cli":
+        from . import copilot_cli_client  # noqa: PLC0415
+
+        return copilot_cli_client.complete(system_prompt, user_prompt, model)
+    if not is_http_available():
         raise CopilotConfigError("Copilot HTTP provider is not configured")
     return _get_transport().complete(system_prompt, user_prompt, model)
 
@@ -822,16 +843,17 @@ def analyze_with_metrics(
     carries curated, trusted product summaries surfaced separately from the
     untrusted log excerpt in the reasoning prompt.
     """
+    provider_name = "copilot_cli" if settings.LLM_PROVIDER == "copilot_cli" else "copilot_http"
     if not is_available():
         from . import llm_client
 
-        log.warning("Copilot HTTP provider is not configured; using the offline stub.")
+        log.warning("Copilot provider (%s) is not configured; using the offline stub.", provider_name)
         root, solution, _ = llm_client._offline_stub(error_code, error_message)
         return LlmAnalysisResult(
             root_cause=root,
             suggested_solution=f"{solution}{_copilot_error_suffix(CopilotConfigError('provider is not configured'))}",
             source="stub",
-            metrics=LlmUsageMetrics(provider="copilot_http"),
+            metrics=LlmUsageMetrics(provider=provider_name),
         )
 
     context = snippet or error_message or ""
@@ -839,7 +861,7 @@ def analyze_with_metrics(
     mini_context_min = max(0, settings.COPILOT_MINI_MIN_CONTEXT_CHARS)
     run_mini = bool(settings.COPILOT_ENABLE_MINI_ENRICH and len(stripped_context) >= mini_context_min)
     use_compact_reasoning = bool(not run_mini and stripped_context and len(stripped_context) < mini_context_min)
-    metrics = LlmUsageMetrics(provider="copilot_http")
+    metrics = LlmUsageMetrics(provider=provider_name)
     active_role: LlmModelRole | None = None
     active_input_chars = 0
 

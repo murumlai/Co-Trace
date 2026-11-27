@@ -1,8 +1,9 @@
 """LLM dispatch for failed-unit diagnosis.
 
-Routes to the enterprise GitHub Copilot HTTPS provider (``copilot_http``) or the
-deterministic local offline stub (``offline_stub``). The public GitHub Models
-path has been removed; enterprise Copilot is the only sanctioned AI backend.
+Routes to the enterprise GitHub Copilot HTTPS provider (``copilot_http``),
+the local GitHub Copilot CLI gateway (``copilot_cli``), or the deterministic
+local offline stub (``offline_stub``). The public GitHub Models path has been
+removed; enterprise Copilot is the only sanctioned AI backend.
 """
 from __future__ import annotations
 
@@ -40,10 +41,11 @@ def analyze_with_metrics(
     """Return (root_cause, suggested_solution, source).
 
     Dispatches to the configured provider (``settings.LLM_PROVIDER``):
-    ``copilot_http`` uses enterprise GitHub Copilot over HTTPS and ``offline_stub``
-    forces the deterministic local heuristic. ``knowledge_context`` (optional)
-    carries curated, trusted product summaries presented separately from the
-    untrusted log excerpt.
+    ``copilot_http`` uses enterprise GitHub Copilot over HTTPS, ``copilot_cli``
+    uses the locally installed GitHub Copilot CLI as a non-agentic gateway, and
+    ``offline_stub`` forces the deterministic local heuristic.
+    ``knowledge_context`` (optional) carries curated, trusted product summaries
+    presented separately from the untrusted log excerpt.
     """
     if settings.LLM_PROVIDER == "offline_stub":
         root, solution, source = _offline_stub(error_code, error_message)
@@ -79,6 +81,20 @@ class OfflineStubProvider:
 
 class CopilotHttpProvider:
     """Enterprise GitHub Copilot HTTPS provider."""
+
+    def analyze(
+        self,
+        error_code: str | None,
+        error_message: str | None,
+        snippet: str,
+    ) -> tuple[str, str, str]:
+        from . import copilot_client  # noqa: PLC0415
+
+        return copilot_client.analyze(error_code, error_message, snippet)
+
+
+class CopilotCliProvider:
+    """Local GitHub Copilot CLI gateway provider (developer/local-only)."""
 
     def analyze(
         self,
