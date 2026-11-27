@@ -86,7 +86,8 @@ graph TB
 
         subgraph LLM["LLM Providers"]
             LlmClient["llm_client.py<br/>provider dispatch + offline stub"]
-            CopilotClient["copilot_client.py<br/>enterprise Copilot HTTPS via httpx (2-tier)"]
+            CopilotClient["copilot_client.py<br/>2-tier prompt/parsing + HTTPS via httpx"]
+            CopilotCliClient["copilot_cli_client.py<br/>local locked-down Copilot CLI gateway"]
         end
 
         subgraph KnowledgeSub["knowledge/ subsystem"]
@@ -637,7 +638,7 @@ erDiagram
 | Layered diagnosis precedence | reviewed playbook → in-job signature cache → disk `analysis_cache.py` → LLM |
 | Signature deduplication | in-job reuse by normalized failure signature; disk-cache reuse additionally depends on context and model identity |
 | Grounded LLM prompting | curated knowledge pack + reviewed playbooks + approved acronym glossary injected as trusted context |
-| Explicit provider selection | `LLM_PROVIDER=copilot_http` (HTTPS host allowlist enforced; `copilot_sdk` is a deprecated alias) or `offline_stub`; no public GitHub Models path, SDK, or CLI subprocess |
+| Explicit provider selection | `LLM_PROVIDER=copilot_http` (HTTPS host allowlist enforced; `copilot_sdk` is a deprecated alias), `copilot_cli` (local locked-down non-agentic CLI gateway for single-user loopback runs), or `offline_stub`; no public GitHub Models path or SDK |
 | Pure computation layers | `aggregator.py`, `comparison.py`, `record_views.py` operate on `UnitRecord` lists without I/O |
 | Shared workspace boundary | job, feedback, action, and comparison routes retain the owner filter using the same shared principal for guests and Admin; legacy private jobs remain outside that scope; cache deletes and knowledge/playbook mutations require Admin |
 | Optimistic concurrency | investigation actions require `expected_version`; stale writes return conflict |
@@ -666,7 +667,7 @@ erDiagram
 - **job_registry.py / analysis_cache.py / upload_storage.py** — durable job state and listing, diagnosis cache, and upload handling.
 - **feedback_store.py / investigation_action_store.py** — atomic JSON stores for engineer feedback and versioned investigation actions, expiring with job TTL.
 - **knowledge/** — ingestion (parse → summarize → store), lexical retrieval, admin playbook store, and acronym glossary.
-- **copilot_client.py / llm_client.py** — enterprise Copilot adapter with two-tier model policy, and provider dispatch with deterministic offline stub.
+- **copilot_client.py / copilot_cli_client.py / llm_client.py** — enterprise Copilot two-tier prompt/parsing pipeline with HTTPS (`copilot_http`) and local locked-down CLI (`copilot_cli`) transports, plus provider dispatch with deterministic offline stub.
 
 ## Data and Job Lifecycle
 

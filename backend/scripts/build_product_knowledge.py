@@ -8,8 +8,9 @@ and writes the three generated artifacts:
 * ``product_knowledge_index.json``
 * ``product_knowledge_sections.jsonl``
 
-Summarization requires the enterprise Copilot HTTP provider (``LLM_PROVIDER=copilot_http``
-with ``COPILOT_GITHUB_TOKEN`` and transport settings); the build fails
+Summarization requires an enterprise Copilot provider (``LLM_PROVIDER=copilot_http``
+with ``COPILOT_GITHUB_TOKEN`` and transport settings, or local
+``LLM_PROVIDER=copilot_cli`` with an authenticated Copilot CLI); the build fails
 fast if none is available.
 
 Usage (from the repo root, with the backend venv active)::
