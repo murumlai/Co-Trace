@@ -8,9 +8,24 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 
 import uvicorn
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _non_loopback_cli_warning(host: str, provider: str | None) -> str | None:
+    if (provider or "").strip().lower() != "copilot_cli":
+        return None
+    if (host or "").strip().lower() in _LOOPBACK_HOSTS:
+        return None
+    return (
+        f"WARNING: LLM_PROVIDER=copilot_cli is intended for local loopback use only "
+        f"(got --host {host!r}). It uses this machine's interactive Copilot CLI sign-in; "
+        f"use LLM_PROVIDER=copilot_http for shared/IIS deployments."
+    )
 
 
 def main() -> int:
@@ -25,6 +40,10 @@ def main() -> int:
         os.environ["COTRACE_DEBUG"] = "1"
     else:
         os.environ.setdefault("COTRACE_DEBUG", "0")
+
+    warning = _non_loopback_cli_warning(args.host, os.getenv("LLM_PROVIDER"))
+    if warning:
+        print(warning, file=sys.stderr)
 
     backend_dir = Path(__file__).resolve().parent
     uvicorn.run(

@@ -417,3 +417,42 @@ def test_knowledge_summarizer_uses_copilot_cli_when_configured(cli_configured, m
     assert summarizer._default_chat("sys", "usr") == '{"summary":"via auto"}'
 
 
+# ---------------------------------------------------------------------------
+# Commit 4: Health endpoint and local-only startup warning
+# ---------------------------------------------------------------------------
+
+def test_health_endpoint_reports_copilot_cli_readiness(cli_configured):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    client = TestClient(app)
+    resp = client.get("/api/health")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["llm_provider"] == "copilot_cli"
+    assert body["llm_auth"] == {
+        "copilot_http_configured": False,
+        "copilot_cli_configured": True,
+        "copilot_token_configured": False,
+    }
+
+
+def test_run_backend_warns_only_for_non_loopback_copilot_cli():
+    import importlib.util
+    from pathlib import Path
+
+    script_path = Path(__file__).resolve().parents[1] / "run_backend.py"
+    spec = importlib.util.spec_from_file_location("cotrace_run_backend_test", script_path)
+    mod = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(mod)
+
+    assert mod._non_loopback_cli_warning("127.0.0.1", "copilot_cli") is None
+    assert mod._non_loopback_cli_warning("localhost", "copilot_cli") is None
+    assert mod._non_loopback_cli_warning("0.0.0.0", "copilot_http") is None
+    warning = mod._non_loopback_cli_warning("0.0.0.0", "copilot_cli")
+    assert warning is not None and "loopback" in warning
+
+
+
