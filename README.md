@@ -71,10 +71,10 @@ $env:COPILOT_API_BASE_URL = "https://copilot-api.intel-foundry.ghe.com"         
 $env:COPILOT_ALLOWED_HOSTS = "copilot-api.intel-foundry.ghe.com"               # default; comma-separated exact hosts
 
 # Alternative 1 — Local developer laptop gateway via installed GitHub Copilot CLI (no PAT needed;
-# run `copilot login --host https://intel-foundry.ghe.com` once beforehand; loopback-only):
+# run `copilot login --host https://intel-foundry.ghe.com` once beforehand; loopback-only).
+# Defaults to Copilot Fusion standard tier (`fusion`, `--auto-tier balance`) for the mini pass
+# and `claude-sonnet-5.5` for reasoning:
 # $env:LLM_PROVIDER = "copilot_cli"
-# $env:COPILOT_MINI_MODEL = "auto"                  # or another CLI-entitled model
-# $env:COPILOT_REASONING_MODEL = "claude-sonnet-5"
 
 # Alternative 2 — Without Copilot access, use the deterministic local heuristic:
 # $env:LLM_PROVIDER = "offline_stub"
@@ -155,10 +155,13 @@ Most-used environment variables:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `LLM_PROVIDER` | `copilot_http` | `copilot_http` for enterprise Copilot over HTTPS (server/IIS), `copilot_cli` for the local locked-down Copilot CLI gateway (developer laptop only), or `offline_stub` for the deterministic local heuristic. `copilot_sdk` is a deprecated alias for `copilot_http`. Other values are rejected at startup. |
-| `COPILOT_MINI_MODEL` | `gpt-5.4-mini` | Copilot mini/enrichment model (under `copilot_cli`, set `auto` or another CLI-entitled model if `gpt-5.4-mini` is unavailable). |
-| `COPILOT_REASONING_MODEL` | `claude-sonnet-5` | Copilot final root-cause model. |
+| `COPILOT_MINI_MODEL` | `gpt-5.4-mini` | Copilot HTTPS mini/enrichment model (`copilot_http`). |
+| `COPILOT_REASONING_MODEL` | `claude-sonnet-5.5` | Copilot HTTPS final root-cause model (`copilot_http`). |
 | `COPILOT_MINI_MIN_CONTEXT_CHARS` | `500` | Shorter failure contexts skip the mini pass and go straight to reasoning. |
 | `COPILOT_CLI_PATH` | `copilot` | Executable name or full path for `LLM_PROVIDER=copilot_cli`. |
+| `COPILOT_CLI_MINI_MODEL` | `fusion` | Copilot CLI mini/enrichment model (`fusion` = Copilot Fusion). |
+| `COPILOT_CLI_AUTO_TIER` | `balance` | Copilot Fusion routing tier for `fusion`/`auto` (`balance` = standard tier; `standard` accepted as alias; or `intelligence`). |
+| `COPILOT_CLI_REASONING_MODEL` | `claude-sonnet-5.5` | Copilot CLI final root-cause model (`claude-sonnet-5.5` = Claude Sonnet 5.5). |
 | `COPILOT_CLI_TIMEOUT_S` | `90` | Per-call subprocess deadline in seconds for `LLM_PROVIDER=copilot_cli`. |
 | `COPILOT_CLI_MAX_CONCURRENCY` | `1` | Max simultaneous `copilot` CLI child processes. |
 | `COPILOT_CLI_CLEANUP_SESSION` | `1` | Deletes the per-call ephemeral CLI session folder under `~/.copilot/session-state/` after each completion. |

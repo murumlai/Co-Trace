@@ -41,6 +41,13 @@ _DEPRECATED_PROVIDER_ALIASES = {"copilot_sdk": "copilot_http"}
 COPILOT_AUTH_MODES = frozenset({"pat_bearer", "exchange"})
 _COPILOT_TLS_TRUST_OPTIONS = frozenset({"system", "certifi"})
 _COPILOT_CLI_REASONING_EFFORTS = frozenset({"", "none", "minimal", "low", "medium", "high", "xhigh", "max"})
+_COPILOT_CLI_AUTO_TIERS = frozenset({"", "balance", "intelligence"})
+_COPILOT_CLI_AUTO_TIER_ALIASES = {"standard": "balance"}
+
+
+def normalize_cli_auto_tier(value: str | None) -> str:
+    tier = (value or "").strip().lower()
+    return _COPILOT_CLI_AUTO_TIER_ALIASES.get(tier, tier)
 
 
 def normalize_llm_provider(value: str | None) -> str:
@@ -93,7 +100,7 @@ class Settings:
     # bounded redacted excerpt; a larger "reasoning" model produces the final
     # root cause and suggested solution.
     COPILOT_MINI_MODEL: str = os.getenv("COPILOT_MINI_MODEL", "gpt-5.4-mini")
-    COPILOT_REASONING_MODEL: str = os.getenv("COPILOT_REASONING_MODEL", "claude-sonnet-5")
+    COPILOT_REASONING_MODEL: str = os.getenv("COPILOT_REASONING_MODEL", "claude-sonnet-5.5")
     COPILOT_GITHUB_TOKEN: str = os.getenv("COPILOT_GITHUB_TOKEN", "")
     # "pat_bearer" sends the PAT to the inference API; "exchange" trades it for a
     # short-lived Copilot token first. Chosen by the Phase 0 enterprise probe.
@@ -124,6 +131,11 @@ class Settings:
     COPILOT_MINI_MIN_CONTEXT_CHARS: int = int(os.getenv("COPILOT_MINI_MIN_CONTEXT_CHARS", "500"))
     # --- LLM (local GitHub Copilot CLI gateway; developer/local-only mode) ---
     COPILOT_CLI_PATH: str = os.getenv("COPILOT_CLI_PATH", "copilot").strip()
+    COPILOT_CLI_MINI_MODEL: str = os.getenv("COPILOT_CLI_MINI_MODEL", "fusion").strip()
+    COPILOT_CLI_REASONING_MODEL: str = os.getenv("COPILOT_CLI_REASONING_MODEL", "claude-sonnet-5.5").strip()
+    # Copilot Fusion routing tier: "balance" (standard tier) or "intelligence".
+    # "standard" is accepted as an alias for "balance".
+    COPILOT_CLI_AUTO_TIER: str = normalize_cli_auto_tier(os.getenv("COPILOT_CLI_AUTO_TIER", "balance"))
     COPILOT_CLI_TIMEOUT_S: float = float(os.getenv("COPILOT_CLI_TIMEOUT_S", "90"))
     COPILOT_CLI_MAX_CONCURRENCY: int = int(os.getenv("COPILOT_CLI_MAX_CONCURRENCY", "1"))
     COPILOT_CLI_CLEANUP_SESSION: bool = _env_flag("COPILOT_CLI_CLEANUP_SESSION", True)
@@ -306,6 +318,16 @@ class Settings:
             raise RuntimeError("COPILOT_CLI_MAX_CONCURRENCY must be at least 1.")
         if self.COPILOT_MAX_RESPONSE_BYTES <= 0:
             raise RuntimeError("COPILOT_MAX_RESPONSE_BYTES must be greater than 0.")
+        if not (self.COPILOT_CLI_MINI_MODEL or "").strip() or self.COPILOT_CLI_MINI_MODEL.strip().startswith("-"):
+            raise RuntimeError("COPILOT_CLI_MINI_MODEL must be a valid model name.")
+        if not (self.COPILOT_CLI_REASONING_MODEL or "").strip() or self.COPILOT_CLI_REASONING_MODEL.strip().startswith("-"):
+            raise RuntimeError("COPILOT_CLI_REASONING_MODEL must be a valid model name.")
+        normalized_tier = normalize_cli_auto_tier(self.COPILOT_CLI_AUTO_TIER)
+        if normalized_tier not in _COPILOT_CLI_AUTO_TIERS:
+            raise RuntimeError(
+                "COPILOT_CLI_AUTO_TIER must be empty or one of 'balance' (standard) or 'intelligence'."
+            )
+        self.COPILOT_CLI_AUTO_TIER = normalized_tier
         if (self.COPILOT_CLI_REASONING_EFFORT or "").strip().lower() not in _COPILOT_CLI_REASONING_EFFORTS:
             raise RuntimeError(
                 "COPILOT_CLI_REASONING_EFFORT must be empty or one of "

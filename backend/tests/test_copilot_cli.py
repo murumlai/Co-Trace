@@ -23,6 +23,9 @@ def cli_configured(monkeypatch, fake_cli_executable):
     monkeypatch.setattr(settings, "LLM_PROVIDER", "copilot_cli")
     monkeypatch.setattr(settings, "COPILOT_GH_HOST", COPILOT_ENTERPRISE_HOST)
     monkeypatch.setattr(settings, "COPILOT_CLI_PATH", fake_cli_executable)
+    monkeypatch.setattr(settings, "COPILOT_CLI_MINI_MODEL", "fusion")
+    monkeypatch.setattr(settings, "COPILOT_CLI_REASONING_MODEL", "claude-sonnet-5.5")
+    monkeypatch.setattr(settings, "COPILOT_CLI_AUTO_TIER", "balance")
     monkeypatch.setattr(settings, "COPILOT_CLI_TIMEOUT_S", 90.0)
     monkeypatch.setattr(settings, "COPILOT_CLI_MAX_CONCURRENCY", 1)
     monkeypatch.setattr(settings, "COPILOT_CLI_CLEANUP_SESSION", True)
@@ -80,6 +83,14 @@ def test_copilot_cli_validates_numeric_and_effort_bounds(cli_configured, monkeyp
 
     monkeypatch.setattr(settings, "COPILOT_CLI_REASONING_EFFORT", "medium")
     cli_configured.validate_enterprise_only()
+
+    monkeypatch.setattr(settings, "COPILOT_CLI_AUTO_TIER", "standard")
+    cli_configured.validate_enterprise_only()
+    assert settings.COPILOT_CLI_AUTO_TIER == "balance"
+
+    monkeypatch.setattr(settings, "COPILOT_CLI_AUTO_TIER", "efficiency")
+    with pytest.raises(RuntimeError, match="COPILOT_CLI_AUTO_TIER"):
+        cli_configured.validate_enterprise_only()
 
 
 def test_copilot_cli_validates_proxy_and_ca_bundle(cli_configured, monkeypatch, tmp_path):
@@ -346,8 +357,8 @@ def test_copilot_client_dispatches_to_cli_and_records_metrics(cli_configured, mo
     from app import copilot_client as cc
     from app import llm_client
 
-    monkeypatch.setattr(settings, "COPILOT_MINI_MODEL", "auto")
-    monkeypatch.setattr(settings, "COPILOT_REASONING_MODEL", "claude-sonnet-5")
+    monkeypatch.setattr(settings, "COPILOT_CLI_MINI_MODEL", "fusion")
+    monkeypatch.setattr(settings, "COPILOT_CLI_REASONING_MODEL", "claude-sonnet-5.5")
     monkeypatch.setattr(settings, "COPILOT_ENABLE_MINI_ENRICH", True)
     monkeypatch.setattr(settings, "COPILOT_MINI_MIN_CONTEXT_CHARS", 10)
 
@@ -355,7 +366,7 @@ def test_copilot_client_dispatches_to_cli_and_records_metrics(cli_configured, mo
 
     def fake_cli_complete(system_prompt, user_prompt, model):
         calls.append(model)
-        if model == "auto":
+        if model == "fusion":
             return cc.CopilotCompletion(
                 '{"summary":"rail drop","category":"power","observed_signals":["VDD=0V"],"hints":["check VR"],"confidence":"high"}',
                 input_tokens=120,
@@ -374,12 +385,14 @@ def test_copilot_client_dispatches_to_cli_and_records_metrics(cli_configured, mo
     assert cc.is_http_available() is False
 
     result = llm_client.analyze_with_metrics("E_PWR", "Voltage rail 0V", "VDD dropped to 0.00V on step 4")
-    assert calls == ["auto", "claude-sonnet-5"]
+    assert calls == ["fusion", "claude-sonnet-5.5"]
     assert result.source == "llm"
     assert result.root_cause == "Power rail collapsed"
     assert result.suggested_solution == "Inspect VR module"
     assert result.confidence == 0.85
     assert result.metrics.provider == "copilot_cli"
+    assert result.metrics.mini.model == "fusion"
+    assert result.metrics.reasoning.model == "claude-sonnet-5.5"
     assert result.metrics.mini.input_tokens == 120
     assert result.metrics.mini.output_tokens == 30
     assert result.metrics.mini.token_counts_estimated is False
@@ -388,11 +401,38 @@ def test_copilot_client_dispatches_to_cli_and_records_metrics(cli_configured, mo
     assert result.metrics.reasoning.token_counts_estimated is False
 
 
+def test_cli_transport_applies_auto_tier_only_for_fusion_and_extracts_jsonl_error(fake_cli_executable):
+    from app import copilot_cli_client as cli
+    from app.copilot_client import CopilotConfigError
+
+    transport = cli.CopilotCliTransport(
+        executable=fake_cli_executable,
+        auto_tier="standard",
+    )
+    fusion_cmd = transport.build_command("fusion", "sid-1", "usage.json")
+    assert fusion_cmd[fusion_cmd.index("--auto-tier") + 1] == "balance"
+
+    sonnet_cmd = transport.build_command("claude-sonnet-5.5", "sid-2", "usage.json")
+    assert "--auto-tier" not in sonnet_cmd
+
+    err_jsonl = (
+        b'{"type":"session.error","data":{"message":"Execution failed: Model \\"bad-model\\" is not available."}}\n'
+    )
+    failing = cli.CopilotCliTransport(
+        executable=fake_cli_executable,
+        runner=lambda *_a: cli.CliProcessResult(1, err_jsonl, b""),
+    )
+    with pytest.raises(CopilotConfigError, match="bad-model"):
+        failing.complete("s", "u", "bad-model")
+
+
 def test_analysis_cache_key_is_shared_between_http_and_cli(monkeypatch):
     from app import analysis_cache
 
-    monkeypatch.setattr(settings, "COPILOT_MINI_MODEL", "auto")
-    monkeypatch.setattr(settings, "COPILOT_REASONING_MODEL", "claude-sonnet-5")
+    monkeypatch.setattr(settings, "COPILOT_MINI_MODEL", "fusion")
+    monkeypatch.setattr(settings, "COPILOT_REASONING_MODEL", "claude-sonnet-5.5")
+    monkeypatch.setattr(settings, "COPILOT_CLI_MINI_MODEL", "fusion")
+    monkeypatch.setattr(settings, "COPILOT_CLI_REASONING_MODEL", "claude-sonnet-5.5")
     monkeypatch.setattr(settings, "COPILOT_ENABLE_MINI_ENRICH", True)
     key_args = dict(
         error_code="E1",

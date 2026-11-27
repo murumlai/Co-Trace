@@ -195,7 +195,13 @@ def _cache_provider() -> str:
 
 def _model_identity() -> dict[str, Any]:
     provider = normalize_llm_provider(settings.LLM_PROVIDER)
-    if provider in _COPILOT_PROVIDERS:
+    if provider == "copilot_cli":
+        return {
+            "mini_model": settings.COPILOT_CLI_MINI_MODEL,
+            "reasoning_model": settings.COPILOT_CLI_REASONING_MODEL,
+            "mini_enrich": settings.COPILOT_ENABLE_MINI_ENRICH,
+        }
+    if provider == "copilot_http":
         return {
             "mini_model": settings.COPILOT_MINI_MODEL,
             "reasoning_model": settings.COPILOT_REASONING_MODEL,

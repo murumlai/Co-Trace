@@ -22,7 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from .config import resolve_copilot_cli_executable, settings
+from .config import normalize_cli_auto_tier, resolve_copilot_cli_executable, settings
 from .copilot_client import (
     CopilotAuthError,
     CopilotCompletion,
@@ -142,6 +142,27 @@ def _classify_cli_error(returncode: int, stderr_text: str) -> Exception:
     return CopilotTransientError(f"Copilot CLI execution failed{suffix}")
 
 
+_AUTO_TIER_MODELS = frozenset({"auto", "fusion"})
+
+
+def _extract_jsonl_error(stdout_text: str) -> str:
+    """Return the last ``session.error`` message from JSONL stdout, if any."""
+    last_error = ""
+    for raw_line in (stdout_text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "session.error":
+            data = event.get("data")
+            if isinstance(data, dict) and isinstance(data.get("message"), str):
+                last_error = data["message"]
+    return last_error
+
+
 def _parse_jsonl_stdout(stdout_text: str) -> tuple[str, int | None, int | None]:
     """Extract unwrapped assistant text (and optional usage) from ``--output-format json`` JSONL."""
     messages: list[str] = []
@@ -245,6 +266,7 @@ class CopilotCliTransport:
         max_response_bytes: int = 1024 * 1024,
         max_concurrency: int = 1,
         cleanup_session: bool = True,
+        auto_tier: str = "balance",
         reasoning_effort: str = "",
         proxy: str = "",
         ca_bundle: str = "",
@@ -254,6 +276,7 @@ class CopilotCliTransport:
         self._timeout_s = timeout_s
         self._max_response_bytes = max_response_bytes
         self._cleanup_session = cleanup_session
+        self._auto_tier = normalize_cli_auto_tier(auto_tier)
         self._reasoning_effort = (reasoning_effort or "").strip().lower()
         self._proxy = (proxy or "").strip()
         self._ca_bundle = (ca_bundle or "").strip()
@@ -295,6 +318,8 @@ class CopilotCliTransport:
             "--usage-output-file",
             usage_file,
         ]
+        if self._auto_tier and clean_model.lower() in _AUTO_TIER_MODELS:
+            cmd.extend(["--auto-tier", self._auto_tier])
         if self._reasoning_effort:
             cmd.extend(["--reasoning-effort", self._reasoning_effort])
         return cmd
@@ -334,7 +359,8 @@ class CopilotCliTransport:
                     stdout_text = result.stdout.decode("utf-8", errors="replace").strip()
                     stderr_text = result.stderr.decode("utf-8", errors="replace").strip()
                     if result.returncode != 0:
-                        raise _classify_cli_error(result.returncode, stderr_text)
+                        error_text = stderr_text or _extract_jsonl_error(stdout_text)
+                        raise _classify_cli_error(result.returncode, error_text)
                     content_text, event_in, event_out = _parse_jsonl_stdout(stdout_text)
                     if not content_text:
                         raise CopilotResponseError("Copilot CLI returned empty output")
@@ -366,6 +392,7 @@ def build_transport_from_settings(runner: ProcessRunner | None = None) -> Copilo
         max_response_bytes=settings.COPILOT_MAX_RESPONSE_BYTES,
         max_concurrency=settings.COPILOT_CLI_MAX_CONCURRENCY,
         cleanup_session=settings.COPILOT_CLI_CLEANUP_SESSION,
+        auto_tier=settings.COPILOT_CLI_AUTO_TIER,
         reasoning_effort=settings.COPILOT_CLI_REASONING_EFFORT,
         proxy=settings.COPILOT_PROXY,
         ca_bundle=settings.COPILOT_CA_BUNDLE,

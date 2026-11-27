@@ -622,6 +622,20 @@ def is_available() -> bool:
     return is_http_available() or is_cli_available()
 
 
+def active_mini_model() -> str:
+    """Return the active mini/enrichment model for the configured Copilot transport."""
+    if settings.LLM_PROVIDER == "copilot_cli":
+        return settings.COPILOT_CLI_MINI_MODEL
+    return settings.COPILOT_MINI_MODEL
+
+
+def active_reasoning_model() -> str:
+    """Return the active reasoning model for the configured Copilot transport."""
+    if settings.LLM_PROVIDER == "copilot_cli":
+        return settings.COPILOT_CLI_REASONING_MODEL
+    return settings.COPILOT_REASONING_MODEL
+
+
 def complete(system_prompt: str, user_prompt: str, model: str) -> CopilotCompletion:
     """Run one non-streaming completion via the configured enterprise Copilot backend."""
     if settings.LLM_PROVIDER == "copilot_cli":
@@ -858,6 +872,8 @@ def analyze_with_metrics(
 
     context = snippet or error_message or ""
     stripped_context = context.strip()
+    mini_model = active_mini_model()
+    reasoning_model = active_reasoning_model()
     mini_context_min = max(0, settings.COPILOT_MINI_MIN_CONTEXT_CHARS)
     run_mini = bool(settings.COPILOT_ENABLE_MINI_ENRICH and len(stripped_context) >= mini_context_min)
     use_compact_reasoning = bool(not run_mini and stripped_context and len(stripped_context) < mini_context_min)
@@ -868,8 +884,8 @@ def analyze_with_metrics(
     try:
         log.info(
             "Copilot analysis started: mini=%s, reasoning=%s, mini pass=%s, context=%s chars, mini threshold=%s chars.",
-            settings.COPILOT_MINI_MODEL,
-            settings.COPILOT_REASONING_MODEL,
+            mini_model,
+            reasoning_model,
             run_mini,
             len(context),
             mini_context_min,
@@ -882,7 +898,7 @@ def analyze_with_metrics(
             )
 
         if run_mini:
-            log.info("Copilot mini model call started (%s).", settings.COPILOT_MINI_MODEL)
+            log.info("Copilot mini model call started (%s).", mini_model)
             active_role = "mini"
             mini_prompt = _build_mini_prompt(context)
             active_input_chars = len(_SUMMARIZE_SYSTEM_PROMPT) + len(mini_prompt)
@@ -890,12 +906,12 @@ def analyze_with_metrics(
                 completion = complete(
                     _SUMMARIZE_SYSTEM_PROMPT,
                     mini_prompt,
-                    settings.COPILOT_MINI_MODEL,
+                    mini_model,
                 )
                 summary = completion.text.strip()
                 metrics.add_model_call(
                     "mini",
-                    model=settings.COPILOT_MINI_MODEL,
+                    model=mini_model,
                     input_chars=active_input_chars,
                     output_chars=len(summary),
                     credit_tokens_per_credit=settings.LLM_TOKEN_CREDIT_SIZE,
@@ -911,12 +927,12 @@ def analyze_with_metrics(
             except Exception as exc:
                 metrics.add_model_call(
                     "mini",
-                    model=settings.COPILOT_MINI_MODEL,
+                    model=mini_model,
                     input_chars=active_input_chars,
                     output_chars=0,
                     credit_tokens_per_credit=settings.LLM_TOKEN_CREDIT_SIZE,
                 )
-                metrics.add_model_error("mini", model=settings.COPILOT_MINI_MODEL)
+                metrics.add_model_error("mini", model=mini_model)
                 if isinstance(exc, (CopilotAuthError, CopilotConfigError)):
                     active_role = None
                     log.warning("Copilot mini model call failed because authentication/configuration is unavailable.", exc_info=True)
@@ -928,7 +944,7 @@ def analyze_with_metrics(
 
         log.debug(
             "Copilot reasoning pass started (%s, %s context chars, compact prompt=%s).",
-            settings.COPILOT_REASONING_MODEL,
+            reasoning_model,
             len(context),
             use_compact_reasoning,
         )
@@ -946,12 +962,12 @@ def analyze_with_metrics(
         completion = complete(
             system_prompt,
             diagnose_prompt,
-            settings.COPILOT_REASONING_MODEL,
+            reasoning_model,
         )
         content = completion.text
         metrics.add_model_call(
             "reasoning",
-            model=settings.COPILOT_REASONING_MODEL,
+            model=reasoning_model,
             input_chars=active_input_chars,
             output_chars=len(content),
             credit_tokens_per_credit=settings.LLM_TOKEN_CREDIT_SIZE,
@@ -968,11 +984,7 @@ def analyze_with_metrics(
 
         if active_role is not None:
             role_metrics = metrics.mini if active_role == "mini" else metrics.reasoning
-            active_model = (
-                settings.COPILOT_MINI_MODEL
-                if active_role == "mini"
-                else settings.COPILOT_REASONING_MODEL
-            )
+            active_model = mini_model if active_role == "mini" else reasoning_model
             if role_metrics.calls == 0:
                 metrics.add_model_call(
                     active_role,
