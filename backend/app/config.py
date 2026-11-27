@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import shutil
 from collections.abc import Iterable
 from urllib.parse import urlsplit
 
@@ -39,11 +40,31 @@ _PUBLIC_COPILOT_HOSTS = frozenset({"", "github.com", "api.github.com", "www.gith
 _DEPRECATED_PROVIDER_ALIASES = {"copilot_sdk": "copilot_http"}
 COPILOT_AUTH_MODES = frozenset({"pat_bearer", "exchange"})
 _COPILOT_TLS_TRUST_OPTIONS = frozenset({"system", "certifi"})
+_COPILOT_CLI_REASONING_EFFORTS = frozenset({"", "none", "minimal", "low", "medium", "high", "xhigh", "max"})
 
 
 def normalize_llm_provider(value: str | None) -> str:
     provider = (value or "").strip().lower()
     return _DEPRECATED_PROVIDER_ALIASES.get(provider, provider)
+
+
+def resolve_copilot_cli_executable(cli_path: str) -> str:
+    """Resolve ``cli_path`` to an existing executable file or raise ``ValueError``."""
+    raw = (cli_path or "").strip()
+    if not raw:
+        raise ValueError("COPILOT_CLI_PATH must not be empty.")
+    expanded = os.path.expanduser(raw)
+    if os.path.sep in expanded or (os.path.altsep and os.path.altsep in expanded) or os.path.splitdrive(expanded)[0]:
+        candidate = os.path.abspath(expanded)
+        if not os.path.isfile(candidate):
+            raise ValueError(f"COPILOT_CLI_PATH does not point to an existing file: {raw!r}.")
+        if os.name != "nt" and not os.access(candidate, os.X_OK):
+            raise ValueError(f"COPILOT_CLI_PATH is not executable: {raw!r}.")
+        return candidate
+    resolved = shutil.which(expanded)
+    if not resolved:
+        raise ValueError(f"Copilot CLI executable {raw!r} was not found on PATH.")
+    return os.path.abspath(resolved)
 
 
 def validate_copilot_url(url: str, allowed_hosts: Iterable[str], label: str) -> str:
@@ -61,7 +82,8 @@ def validate_copilot_url(url: str, allowed_hosts: Iterable[str], label: str) -> 
 
 class Settings:
     # --- LLM provider selection (enterprise Copilot only) ---
-    # One of: "copilot_http" (enterprise GitHub Copilot over HTTPS) | "offline_stub"
+    # One of: "copilot_http" (enterprise GitHub Copilot over HTTPS) |
+    # "copilot_cli" (local GitHub Copilot CLI gateway) | "offline_stub"
     # (local deterministic heuristic). "copilot_sdk" is a deprecated alias for
     # "copilot_http". Other values are rejected by validate_enterprise_only().
     LLM_PROVIDER: str = normalize_llm_provider(os.getenv("LLM_PROVIDER", "copilot_http"))
@@ -100,6 +122,12 @@ class Settings:
     # Run the mini enrichment/summarization pass before the reasoning call.
     COPILOT_ENABLE_MINI_ENRICH: bool = _env_flag("COPILOT_ENABLE_MINI_ENRICH", True)
     COPILOT_MINI_MIN_CONTEXT_CHARS: int = int(os.getenv("COPILOT_MINI_MIN_CONTEXT_CHARS", "500"))
+    # --- LLM (local GitHub Copilot CLI gateway; developer/local-only mode) ---
+    COPILOT_CLI_PATH: str = os.getenv("COPILOT_CLI_PATH", "copilot").strip()
+    COPILOT_CLI_TIMEOUT_S: float = float(os.getenv("COPILOT_CLI_TIMEOUT_S", "90"))
+    COPILOT_CLI_MAX_CONCURRENCY: int = int(os.getenv("COPILOT_CLI_MAX_CONCURRENCY", "1"))
+    COPILOT_CLI_CLEANUP_SESSION: bool = _env_flag("COPILOT_CLI_CLEANUP_SESSION", True)
+    COPILOT_CLI_REASONING_EFFORT: str = os.getenv("COPILOT_CLI_REASONING_EFFORT", "").strip().lower()
     # Cost display uses token-credit estimates unless a provider returns exact
     # usage. Adjust this if your internal credit accounting uses a different unit.
     LLM_TOKEN_CREDIT_SIZE: int = int(os.getenv("LLM_TOKEN_CREDIT_SIZE", "1000"))
@@ -249,14 +277,47 @@ class Settings:
         if requested in _DEPRECATED_PROVIDER_ALIASES or env_requested in _DEPRECATED_PROVIDER_ALIASES:
             log.warning("LLM_PROVIDER=copilot_sdk is deprecated; using canonical 'copilot_http'.")
         provider = normalize_llm_provider(requested)
-        if provider not in ("copilot_http", "offline_stub"):
+        if provider not in ("copilot_http", "copilot_cli", "offline_stub"):
             raise RuntimeError(
                 f"LLM_PROVIDER={self.LLM_PROVIDER!r} is not permitted. Only "
-                "'copilot_http' (enterprise Copilot) or 'offline_stub' are allowed."
+                "'copilot_http' (enterprise Copilot), 'copilot_cli' (local Copilot CLI), "
+                "or 'offline_stub' are allowed."
             )
         self.LLM_PROVIDER = provider
         if provider == "copilot_http":
             self.validate_copilot_transport()
+        elif provider == "copilot_cli":
+            self.validate_copilot_cli()
+
+    def validate_copilot_cli(self) -> None:
+        """Raise ``RuntimeError`` unless the local Copilot CLI gateway settings are valid."""
+        if (self.COPILOT_GH_HOST or "").strip().lower() in _PUBLIC_COPILOT_HOSTS:
+            raise RuntimeError(
+                f"COPILOT_GH_HOST={self.COPILOT_GH_HOST!r} targets a public GitHub host. "
+                f"Enterprise Copilot host is required (e.g. {COPILOT_ENTERPRISE_HOST})."
+            )
+        try:
+            resolve_copilot_cli_executable(self.COPILOT_CLI_PATH)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from None
+        if self.COPILOT_CLI_TIMEOUT_S <= 0:
+            raise RuntimeError("COPILOT_CLI_TIMEOUT_S must be greater than 0.")
+        if self.COPILOT_CLI_MAX_CONCURRENCY < 1:
+            raise RuntimeError("COPILOT_CLI_MAX_CONCURRENCY must be at least 1.")
+        if self.COPILOT_MAX_RESPONSE_BYTES <= 0:
+            raise RuntimeError("COPILOT_MAX_RESPONSE_BYTES must be greater than 0.")
+        if (self.COPILOT_CLI_REASONING_EFFORT or "").strip().lower() not in _COPILOT_CLI_REASONING_EFFORTS:
+            raise RuntimeError(
+                "COPILOT_CLI_REASONING_EFFORT must be empty or one of "
+                "'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'."
+            )
+        if self.COPILOT_PROXY:
+            proxy = urlsplit(self.COPILOT_PROXY)
+            if proxy.scheme not in ("http", "https") or not proxy.hostname:
+                raise RuntimeError("COPILOT_PROXY must be an http:// or https:// proxy URL.")
+        bundle = self.COPILOT_CA_BUNDLE
+        if bundle and not (os.path.isfile(bundle) and os.access(bundle, os.R_OK)):
+            raise RuntimeError("COPILOT_CA_BUNDLE does not point to a readable file.")
 
     def validate_copilot_transport(self) -> None:
         """Raise ``RuntimeError`` unless the Copilot HTTPS settings are complete and safe."""
